@@ -1,0 +1,99 @@
+# Taylor impact of an Aluminum bar
+
+variable        l0 equal 3.91/11
+variable        rho equal 2.700e-6
+variable        h equal 3.01*${l0}
+variable        E equal 70.0 # Young's modulus
+variable        sigy equal 0.7 # yield stress
+variable        nu equal 0.3 # Poisson ratio
+variable        hg equal 25.0*${sigy}/${E} # for TLSPH; for UTLSPH use 0.5
+# ----
+variable        c0 equal sqrt(${E}/${rho})
+variable        dt equal 0.5*0.125*${l0}/${c0}
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal 30.0 #${l0} # Verlet list range
+variable        vel equal 1.0e-2*${c0}
+variable        dmax equal 0.1
+
+units		si
+dimension       2
+boundary        s fs p
+atom_style      tlsph
+atom_modify	map array
+neighbor        ${skin} bin
+comm_modify     vel yes
+newton          off
+
+neigh_modify    once yes
+
+region          box block -0.01 5.01 -0.01 20.01 -0.1 0.1 units box
+
+variable x1 equal 5.0-${l0}
+variable y1 equal 20.0-${l0}
+region          bar block 0 ${x1} 0 ${y1} -0.1 0.1 units box
+
+create_box      1 box
+lattice         sq ${l0}
+create_atoms    1 region bar
+region          bot block EDGE EDGE 0 0.01 EDGE EDGE units box
+group           bot region bot
+
+set             group all mol 1
+velocity        all set 0.0 -300.0 0.0 sum no units box
+set             group all diameter ${h}
+variable        vol_one equal ${l0}^2
+set             group all volume ${vol_one}
+variable        mass_one equal ${vol_one}*${rho}
+set             group all mass ${mass_one}
+#set             group all contact_radius ${l0}
+
+pair_style      tlsph
+#                   mat. model EOS    c0    E    nu    hg    visc sigy
+pair_coeff      * * linearplastic     linear ${c0} ${E} ${nu} ${hg} 0.0 ${sigy}
+
+compute         F all tlsph/defgrad
+compute         E all tlsph/strain
+compute         P all tlsph/eff_plastic_strain
+compute         S all tlsph/stress
+compute         nn all tlsph/num_neighs
+compute         contact_radius all tlsph/contact_radius
+
+
+thermo          100
+thermo_style    custom step ke
+ 
+dump            dump_id all custom 100 dump.LAMMPS id type x y z &
+                c_E[1] c_E[2] c_E[3] c_E[4] &
+                c_S[1] c_S[2] c_S[3] c_S[4] &
+                 c_F[5] fx fy vx vy c_P c_nn
+dump_modify     dump_id first yes
+
+#
+# time integration
+timestep        ${dt}
+variable        nrun equal ${dmax}/(${vel}*dt)
+print           "running for ${nrun} timesteps"
+##
+##
+#fix             momentum_fix all momentum 100 linear 1 0 0
+velocity        bot set 0.0 0.0 0.0 sum no units box
+fix              11 bot setforce NULL 0 0
+fix              1 all tlsph/integrate -1
+#
+#fix             bot_wall all wall/reflect ylo EDGE
+#
+##
+run             4000
+
+dump            dump_id2 all custom 1 last.dump id type x y z &
+                c_E[1] c_E[2] c_E[3] c_E[4] &
+                c_S[1] c_S[2] c_S[3] c_S[4] &
+                 c_F[5] fx fy vx vy c_P c_nn
+dump_modify     dump_id2 first yes
+run 0
+
+###
+##fix             lclamp_fix lclamp move linear 0 NULL NULL units box
+##fix             rclamp_fix rclamp move linear 0 NULL NULL units box
+##run             ${nrun}
+###

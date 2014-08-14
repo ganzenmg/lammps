@@ -1,0 +1,74 @@
+# peridynamic rubber rings colliding with each other
+
+variable        l0 equal 0.05
+variable        rho equal 1
+variable        h equal 3.01*${l0}
+variable        E equal 1.0 # Young's modulus
+variable        nu equal 0.3 # Poisson ratio
+variable        hg equal 25.0
+# ----
+variable        c0 equal sqrt(${E}/${rho})
+variable        dt equal 0.5*0.125*${l0}/${c0}
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal ${l0} # Verlet list range
+
+units		si
+dimension       2
+boundary        s s p
+atom_style      tlsph
+neighbor        ${skin} bin
+neigh_modify    once yes
+comm_modify     vel yes
+newton          off
+
+read_data       in.data
+set             group all mol 1
+velocity        all set 0.0 0.0 0.0 sum no units box
+set             group all diameter ${h}
+
+pair_style      tlsph
+#                   strength         eos    c0    E    nu    hg    visc sigy
+pair_coeff      1 1 linear_defgrad   none   ${c0} ${E} ${nu} ${hg} 0.0 1000000
+#pair_coeff      1 1 linear           linear ${c0} ${E} ${nu} ${hg} 0.0 1000000
+
+compute         S all tlsph/stress
+compute         E all tlsph/strain
+compute         F all tlsph/defgrad
+compute         eint all tlsph/e
+compute         contact_radius all tlsph/contact_radius
+compute         toteint all reduce sum c_eint
+variable        et equal ke+c_toteint
+compute         nn all tlsph/num_neighs
+
+
+
+dump            dump_id all custom 100 dump.LAMMPS id type x y z diameter fx fy &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] c_nn &
+                c_F[1] c_F[2] c_F[5] c_F[10] c_contact_radius
+dump_modify     dump_id first yes
+
+# initial run
+run             2
+
+# deform box and run a few time steps
+#change_box      all x scale 2.0 y scale 0.75 remap units box
+change_box      all x scale 1.05 y scale 1.05 remap units box
+run             2
+#
+#variable           time equal dt*elapsed
+#variable           ke equal ke
+#variable           te equal etotal
+#fix                fd_curve all print 5 "${time} ${ke} ${te}" file time_ke.dat screen no
+#
+## time integration
+timestep        ${dt}
+fix             1 all tlsph/integrate -1.0 xsph
+##fix             dtfix all tlsph/dt/reset 1 0.9
+#
+#
+thermo          50
+thermo_style    custom step ke pe c_toteint v_et #f_dtfix f_dtfix[1]
+
+run             4000
+#
+
