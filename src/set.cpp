@@ -43,7 +43,7 @@ enum{ATOM_SELECT,MOL_SELECT,TYPE_SELECT,GROUP_SELECT,REGION_SELECT};
 enum{TYPE,TYPE_FRACTION,MOLECULE,X,Y,Z,CHARGE,MASS,SHAPE,LENGTH,TRI,
      DIPOLE,DIPOLE_RANDOM,QUAT,QUAT_RANDOM,THETA,ANGMOM,
      DIAMETER,DENSITY,VOLUME,IMAGE,BOND,ANGLE,DIHEDRAL,IMPROPER,
-     MESO_E,MESO_CV,MESO_RHO,INAME,DNAME};
+     MESO_E,MESO_CV,MESO_RHO,INAME,DNAME,CONTACT_RADIUS};
 
 #define BIG INT_MAX
 
@@ -406,6 +406,18 @@ void Set::command(int narg, char **arg)
       set(DNAME);
       iarg += 2;
 
+    } else if (strcmp(arg[iarg], "contact_radius") == 0) {
+      if (iarg + 2 > narg)
+        error->all(FLERR, "Illegal set command");
+    	if (strstr(arg[iarg + 1], "v_") == arg[iarg + 1])
+    		varparse(arg[iarg + 1], 1);
+    			else
+    				dvalue = force->numeric(FLERR, arg[iarg + 1]);
+    			if (!atom->contact_radius_flag)
+    				error->all(FLERR, "Cannot set contact_radius for this atom style");
+    			set(CONTACT_RADIUS);
+    			iarg += 2;
+
     } else error->all(FLERR,"Illegal set command");
 
     // statistics
@@ -699,6 +711,10 @@ void Set::set(int keyword)
 
     else if (keyword == DNAME) {
       atom->dvector[index_custom][i] = dvalue;
+    }
+
+    else if (keyword == CONTACT_RADIUS) {
+      atom->contact_radius[i] = dvalue;
     }
 
     count++;
