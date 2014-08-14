@@ -45,8 +45,8 @@ public:
     void read_restart_settings(FILE *) {
     }
     virtual double memory_usage();
-    int pack_comm(int, int *, double *, int, int *);
-    void unpack_comm(int, int, double *);
+    int pack_forward_comm(int, int *, double *, int, int *);
+    void unpack_forward_comm(int, int, double *);
     void kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
     Matrix3d pseudo_inverse_SVD(Matrix3d);
     void ComputePressure();

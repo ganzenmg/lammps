@@ -976,7 +976,7 @@ double PairSphFluid::memory_usage() {
 
 /* ---------------------------------------------------------------------- */
 
-int PairSphFluid::pack_comm(int n, int *list, double *buf, int pbc_flag,
+int PairSphFluid::pack_forward_comm(int n, int *list, double *buf, int pbc_flag,
 		int *pbc) {
 	double *rho = atom->rho;
 	int i, j, m;
@@ -1003,12 +1003,12 @@ int PairSphFluid::pack_comm(int n, int *list, double *buf, int pbc_flag,
 		buf[m++] = artStress[j](0, 2);
 		buf[m++] = artStress[j](1, 2);
 	}
-	return 15;
+	return m;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void PairSphFluid::unpack_comm(int n, int first, double *buf) {
+void PairSphFluid::unpack_forward_comm(int n, int first, double *buf) {
 	double *rho = atom->rho;
 	int i, m, last;
 
