@@ -395,7 +395,7 @@ int FixPeriNeighGCG::unpack_border(int n, int first, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-int FixPeriNeighGCG::pack_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
+int FixPeriNeighGCG::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	int i, j, m;
 
 	m = 0;
@@ -403,12 +403,12 @@ int FixPeriNeighGCG::pack_comm(int n, int *list, double *buf, int pbc_flag, int 
 		j = list[i];
 		buf[m++] = vinter[j];
 	}
-	return 1;
+	return m;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixPeriNeighGCG::unpack_comm(int n, int first, double *buf) {
+void FixPeriNeighGCG::unpack_forward_comm(int n, int first, double *buf) {
 	int i, m, last;
 
 	m = 0;

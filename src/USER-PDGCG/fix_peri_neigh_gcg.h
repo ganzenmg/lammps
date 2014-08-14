@@ -48,8 +48,8 @@ public:
 	void unpack_restart(int, int);
 	int size_restart(int);
 	int maxsize_restart();
-	int pack_comm(int, int *, double *, int, int *);
-	void unpack_comm(int, int, double *);
+	int pack_forward_comm(int, int *, double *, int, int *);
+	void unpack_forward_comm(int, int, double *);
 	int pack_border(int, int *, double *);
 	int unpack_border(int, int, double *);
 
