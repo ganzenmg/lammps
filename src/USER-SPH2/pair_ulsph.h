@@ -13,12 +13,12 @@
 
 #ifdef PAIR_CLASS
 
-PairStyle(sph/fluid,PairSphFluid)
+PairStyle(sph/fluid,PairULSPH)
 
 #else
 
-#ifndef LMP_SPH_H
-#define LMP_SPH_H
+#ifndef LMP_ULSPH_H
+#define LMP_ULSPH_H
 
 #include "pair.h"
 #include <Eigen/Eigen>
@@ -28,10 +28,10 @@ PairStyle(sph/fluid,PairSphFluid)
 using namespace Eigen;
 namespace LAMMPS_NS {
 
-class PairSphFluid: public Pair {
+class PairULSPH: public Pair {
 public:
-    PairSphFluid(class LAMMPS *);
-    virtual ~PairSphFluid();
+    PairULSPH(class LAMMPS *);
+    virtual ~PairULSPH();
     virtual void compute(int, int);
     void settings(int, char **);
     void coeff(int, char **);

@@ -13,28 +13,28 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(tlsph/stress,ComputeTlsphStress)
+ComputeStyle(sph2/tlsph_defgrad,ComputeSph2TLSPHDefgrad)
 
 #else
 
-#ifndef LMP_COMPUTE_TLSPH_STRESS_H
-#define LMP_COMPUTE_TLSPH_STRESS_H
+#ifndef LMP_COMPUTE_SPH2_TLSPH_DEFGRAD_H
+#define LMP_COMPUTE_SPH2_TLSPH_DEFGRAD_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeTlsphStress : public Compute {
+class ComputeSph2TLSPHDefgrad : public Compute {
  public:
-  ComputeTlsphStress(class LAMMPS *, int, char **);
-  ~ComputeTlsphStress();
+  ComputeSph2TLSPHDefgrad(class LAMMPS *, int, char **);
+  ~ComputeSph2TLSPHDefgrad();
   void init();
   void compute_peratom();
   double memory_usage();
 
  private:
   int nmax;
-  double **stresstensorVector;
+  double **defgradVector;
 };
 
 }

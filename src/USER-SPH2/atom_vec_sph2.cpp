@@ -14,7 +14,7 @@
 #include "math.h"
 #include "stdlib.h"
 #include "string.h"
-#include "atom_vec_tlsph.h"
+#include "atom_vec_sph2.h"
 #include "atom.h"
 #include "comm.h"
 #include "domain.h"
@@ -33,7 +33,7 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-AtomVecTlsph::AtomVecTlsph(LAMMPS *lmp) :
+AtomVecSph2::AtomVecSph2(LAMMPS *lmp) :
 		AtomVec(lmp) {
 	molecular = 0;
 
@@ -62,11 +62,13 @@ AtomVecTlsph::AtomVecTlsph(LAMMPS *lmp) :
 	atom->damage_flag = 1;
 
 	forceclearflag = 1;
+
+	atom->sph2_flag = 1;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void AtomVecTlsph::init() {
+void AtomVecSph2::init() {
 	AtomVec::init();
 
 	// do nothing here
@@ -78,7 +80,7 @@ void AtomVecTlsph::init() {
  n > 0 allocates arrays to size n
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::grow(int n) {
+void AtomVecSph2::grow(int n) {
 	if (n == 0)
 		grow_nmax();
 	else
@@ -125,7 +127,7 @@ void AtomVecTlsph::grow(int n) {
  reset local array ptrs
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::grow_reset() {
+void AtomVecSph2::grow_reset() {
 	tag = atom->tag;
 	type = atom->type;
 	mask = atom->mask;
@@ -154,7 +156,7 @@ void AtomVecTlsph::grow_reset() {
  copy atom I info to atom J
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::copy(int i, int j, int delflag) {
+void AtomVecSph2::copy(int i, int j, int delflag) {
 	tag[j] = tag[i];
 	type[j] = type[i];
 	mask[j] = mask[i];
@@ -198,7 +200,7 @@ void AtomVecTlsph::copy(int i, int j, int delflag) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_comm(int n, int *list, double *buf, int pbc_flag,
+int AtomVecSph2::pack_comm(int n, int *list, double *buf, int pbc_flag,
 		int *pbc) {
 	error->one(FLERR,
 			"atom vec tlsph can only be used with ghost velocities turned on");
@@ -207,7 +209,7 @@ int AtomVecTlsph::pack_comm(int n, int *list, double *buf, int pbc_flag,
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_comm_vel(int n, int *list, double *buf, int pbc_flag,
+int AtomVecSph2::pack_comm_vel(int n, int *list, double *buf, int pbc_flag,
 		int *pbc) {
 	//no need to pack stress or defgrad information here, as these quantities are not required for ghost atoms.
 	// Inside pair_style tlsph, these quantities are computed and communicated to ghosts.
@@ -303,7 +305,7 @@ int AtomVecTlsph::pack_comm_vel(int n, int *list, double *buf, int pbc_flag,
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_comm_hybrid(int n, int *list, double *buf) {
+int AtomVecSph2::pack_comm_hybrid(int n, int *list, double *buf) {
 	int i, j, m;
 
 	m = 0;
@@ -322,14 +324,14 @@ int AtomVecTlsph::pack_comm_hybrid(int n, int *list, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-void AtomVecTlsph::unpack_comm(int n, int first, double *buf) {
+void AtomVecSph2::unpack_comm(int n, int first, double *buf) {
 	error->one(FLERR,
 			"atom vec tlsph can only be used with ghost velocities turned on");
 }
 
 /* ---------------------------------------------------------------------- */
 
-void AtomVecTlsph::unpack_comm_vel(int n, int first, double *buf) {
+void AtomVecSph2::unpack_comm_vel(int n, int first, double *buf) {
 	int i, m, last;
 
 	m = 0;
@@ -354,7 +356,7 @@ void AtomVecTlsph::unpack_comm_vel(int n, int first, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::unpack_comm_hybrid(int n, int first, double *buf) {
+int AtomVecSph2::unpack_comm_hybrid(int n, int first, double *buf) {
 	int i, m, last;
 
 	m = 0;
@@ -373,7 +375,7 @@ int AtomVecTlsph::unpack_comm_hybrid(int n, int first, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_reverse(int n, int first, double *buf) {
+int AtomVecSph2::pack_reverse(int n, int first, double *buf) {
 	int i, m, last;
 
 	printf("in pack_reverse\n");
@@ -392,7 +394,7 @@ int AtomVecTlsph::pack_reverse(int n, int first, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_reverse_hybrid(int n, int first, double *buf) {
+int AtomVecSph2::pack_reverse_hybrid(int n, int first, double *buf) {
 	int i, m, last;
 
 	m = 0;
@@ -406,7 +408,7 @@ int AtomVecTlsph::pack_reverse_hybrid(int n, int first, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-void AtomVecTlsph::unpack_reverse(int n, int *list, double *buf) {
+void AtomVecSph2::unpack_reverse(int n, int *list, double *buf) {
 	int i, j, m;
 
 	m = 0;
@@ -422,7 +424,7 @@ void AtomVecTlsph::unpack_reverse(int n, int *list, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::unpack_reverse_hybrid(int n, int *list, double *buf) {
+int AtomVecSph2::unpack_reverse_hybrid(int n, int *list, double *buf) {
 	int i, j, m;
 
 	m = 0;
@@ -436,7 +438,7 @@ int AtomVecTlsph::unpack_reverse_hybrid(int n, int *list, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_border(int n, int *list, double *buf, int pbc_flag,
+int AtomVecSph2::pack_border(int n, int *list, double *buf, int pbc_flag,
 		int *pbc) {
 	error->one(FLERR,
 			"atom vec tlsph can only be used with ghost velocities turned on");
@@ -445,12 +447,12 @@ int AtomVecTlsph::pack_border(int n, int *list, double *buf, int pbc_flag,
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_border_vel(int n, int *list, double *buf, int pbc_flag,
+int AtomVecSph2::pack_border_vel(int n, int *list, double *buf, int pbc_flag,
 		int *pbc) {
 	int i, j, m;
 	double dx, dy, dz, dvx, dvy, dvz;
 
-	//printf("AtomVecTlsph::pack_border_vel\n");
+	//printf("AtomVecSph2::pack_border_vel\n");
 
 	m = 0;
 	if (pbc_flag == 0) {
@@ -598,7 +600,7 @@ int AtomVecTlsph::pack_border_vel(int n, int *list, double *buf, int pbc_flag,
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_border_hybrid(int n, int *list, double *buf) {
+int AtomVecSph2::pack_border_hybrid(int n, int *list, double *buf) {
 	int i, j, m;
 
 	m = 0;
@@ -631,14 +633,14 @@ int AtomVecTlsph::pack_border_hybrid(int n, int *list, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-void AtomVecTlsph::unpack_border(int n, int first, double *buf) {
+void AtomVecSph2::unpack_border(int n, int first, double *buf) {
 	error->one(FLERR,
 			"atom vec tlsph can only be used with ghost velocities turned on");
 }
 
 /* ---------------------------------------------------------------------- */
 
-void AtomVecTlsph::unpack_border_vel(int n, int first, double *buf) {
+void AtomVecSph2::unpack_border_vel(int n, int first, double *buf) {
 	int i, m, last;
 
 	m = 0;
@@ -689,7 +691,7 @@ void AtomVecTlsph::unpack_border_vel(int n, int first, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::unpack_border_hybrid(int n, int first, double *buf) {
+int AtomVecSph2::unpack_border_hybrid(int n, int first, double *buf) {
 	int i, m, last;
 
 	m = 0;
@@ -723,10 +725,10 @@ int AtomVecTlsph::unpack_border_hybrid(int n, int first, double *buf) {
  xyz must be 1st 3 values, so comm::exchange() can test on them
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_exchange(int i, double *buf) {
+int AtomVecSph2::pack_exchange(int i, double *buf) {
 	int m = 1;
 
-	//printf("in AtomVecTlsph::pack_exchange tag %d\n", tag[i]);
+	//printf("in AtomVecSph2::pack_exchange tag %d\n", tag[i]);
 
 	buf[m++] = x[i][0];
 	buf[m++] = x[i][1];
@@ -775,7 +777,7 @@ int AtomVecTlsph::pack_exchange(int i, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecTlsph::unpack_exchange(double *buf) {
+int AtomVecSph2::unpack_exchange(double *buf) {
 	int nlocal = atom->nlocal;
 	if (nlocal == nmax)
 		grow(0);
@@ -833,7 +835,7 @@ int AtomVecTlsph::unpack_exchange(double *buf) {
  include extra data stored by fixes
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::size_restart() {
+int AtomVecSph2::size_restart() {
 	int i;
 
 	int nlocal = atom->nlocal;
@@ -853,7 +855,7 @@ int AtomVecTlsph::size_restart() {
  molecular types may be negative, but write as positive
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_restart(int i, double *buf) {
+int AtomVecSph2::pack_restart(int i, double *buf) {
 	int m = 1; // 1
 
 	buf[m++] = x[i][0];
@@ -905,7 +907,7 @@ int AtomVecTlsph::pack_restart(int i, double *buf) {
  unpack data for one atom from restart file including extra quantities
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::unpack_restart(double *buf) {
+int AtomVecSph2::unpack_restart(double *buf) {
 	int nlocal = atom->nlocal;
 	if (nlocal == nmax) {
 		grow(0);
@@ -968,7 +970,7 @@ int AtomVecTlsph::unpack_restart(double *buf) {
  set other values to defaults
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::create_atom(int itype, double *coord) {
+void AtomVecSph2::create_atom(int itype, double *coord) {
 	int nlocal = atom->nlocal;
 	if (nlocal == nmax)
 		grow(0);
@@ -1021,7 +1023,7 @@ void AtomVecTlsph::create_atom(int itype, double *coord) {
  initialize other atom quantities
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::data_atom(double *coord, imageint imagetmp, char **values) {
+void AtomVecSph2::data_atom(double *coord, imageint imagetmp, char **values) {
 	int nlocal = atom->nlocal;
 	if (nlocal == nmax)
 		grow(0);
@@ -1098,7 +1100,7 @@ void AtomVecTlsph::data_atom(double *coord, imageint imagetmp, char **values) {
  initialize other atom quantities for this sub-style
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::data_atom_hybrid(int nlocal, char **values) {
+int AtomVecSph2::data_atom_hybrid(int nlocal, char **values) {
 	error->one(FLERR,
 			"hybrid atom style functionality not yet implemented for atom style tlsph");
 	return -1;
@@ -1108,7 +1110,7 @@ int AtomVecTlsph::data_atom_hybrid(int nlocal, char **values) {
  unpack one line from Velocities section of data file
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::data_vel(int m, char **values) {
+void AtomVecSph2::data_vel(int m, char **values) {
 	v[m][0] = atof(values[0]);
 	v[m][1] = atof(values[1]);
 	v[m][2] = atof(values[2]);
@@ -1121,7 +1123,7 @@ void AtomVecTlsph::data_vel(int m, char **values) {
  unpack hybrid quantities from one line in Velocities section of data file
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::data_vel_hybrid(int m, char **values) {
+int AtomVecSph2::data_vel_hybrid(int m, char **values) {
 	error->one(FLERR,
 			"hybrid atom style functionality not yet implemented for atom style tlsph");
 	return 0;
@@ -1131,7 +1133,7 @@ int AtomVecTlsph::data_vel_hybrid(int m, char **values) {
  pack atom info for data file including 3 image flags
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::pack_data(double **buf) {
+void AtomVecSph2::pack_data(double **buf) {
 	int nlocal = atom->nlocal;
 	for (int i = 0; i < nlocal; i++) {
 		buf[i][0] = ubuf(tag[i]).d;
@@ -1156,7 +1158,7 @@ void AtomVecTlsph::pack_data(double **buf) {
  pack hybrid atom info for data file
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_data_hybrid(int i, double *buf) {
+int AtomVecSph2::pack_data_hybrid(int i, double *buf) {
 	error->one(FLERR,
 			"hybrid atom style functionality not yet implemented for atom style tlsph");
 	return -1;
@@ -1166,7 +1168,7 @@ int AtomVecTlsph::pack_data_hybrid(int i, double *buf) {
  write atom info to data file including 3 image flags
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::write_data(FILE *fp, int n, double **buf) {
+void AtomVecSph2::write_data(FILE *fp, int n, double **buf) {
 	for (int i = 0; i < n; i++)
 		fprintf(fp,
 				TAGINT_FORMAT
@@ -1182,7 +1184,7 @@ void AtomVecTlsph::write_data(FILE *fp, int n, double **buf) {
  write hybrid atom info to data file
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::write_data_hybrid(FILE *fp, double *buf) {
+int AtomVecSph2::write_data_hybrid(FILE *fp, double *buf) {
 	error->one(FLERR,
 			"hybrid atom style functionality not yet implemented for atom style tlsph");
 	return -1;
@@ -1192,7 +1194,7 @@ int AtomVecTlsph::write_data_hybrid(FILE *fp, double *buf) {
  pack velocity info for data file
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::pack_vel(double **buf) {
+void AtomVecSph2::pack_vel(double **buf) {
 	int nlocal = atom->nlocal;
 	for (int i = 0; i < nlocal; i++) {
 		buf[i][0] = ubuf(tag[i]).d;
@@ -1206,7 +1208,7 @@ void AtomVecTlsph::pack_vel(double **buf) {
  pack hybrid velocity info for data file
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::pack_vel_hybrid(int i, double *buf) {
+int AtomVecSph2::pack_vel_hybrid(int i, double *buf) {
 	error->one(FLERR,
 			"hybrid atom style functionality not yet implemented for atom style tlsph");
 	return 0;
@@ -1216,7 +1218,7 @@ int AtomVecTlsph::pack_vel_hybrid(int i, double *buf) {
  write velocity info to data file
  ------------------------------------------------------------------------- */
 
-void AtomVecTlsph::write_vel(FILE *fp, int n, double **buf) {
+void AtomVecSph2::write_vel(FILE *fp, int n, double **buf) {
 	for (int i = 0; i < n; i++)
 		fprintf(fp, TAGINT_FORMAT
 		" %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e\n",
@@ -1228,7 +1230,7 @@ void AtomVecTlsph::write_vel(FILE *fp, int n, double **buf) {
  write hybrid velocity info to data file
  ------------------------------------------------------------------------- */
 
-int AtomVecTlsph::write_vel_hybrid(FILE *fp, double *buf) {
+int AtomVecSph2::write_vel_hybrid(FILE *fp, double *buf) {
 	error->one(FLERR,
 			"hybrid atom style functionality not yet implemented for atom style tlsph");
 	return 3;
@@ -1238,7 +1240,7 @@ int AtomVecTlsph::write_vel_hybrid(FILE *fp, double *buf) {
  return # of bytes of allocated memory
  ------------------------------------------------------------------------- */
 
-bigint AtomVecTlsph::memory_usage() {
+bigint AtomVecSph2::memory_usage() {
 	bigint bytes = 0;
 
 	if (atom->memcheck("tag"))
@@ -1292,7 +1294,7 @@ bigint AtomVecTlsph::memory_usage() {
 
 /* ---------------------------------------------------------------------- */
 
-void AtomVecTlsph::force_clear(int n, size_t nbytes) {
+void AtomVecSph2::force_clear(int n, size_t nbytes) {
 	//printf("clearing force on atom %d", n);
 	memset(&de[n], 0, nbytes);
 	memset(&drho[n], 0, nbytes);

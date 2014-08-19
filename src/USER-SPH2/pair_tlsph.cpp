@@ -51,10 +51,6 @@ using namespace Eigen;
 
 PairTlsph::PairTlsph(LAMMPS *lmp) :
 		Pair(lmp) {
-	for (int i = 0; i < 6; i++)
-		virial[i] = 0.0;
-	no_virial_fdotr_compute = 1;
-
 	maxstrain = NULL;
 	c0_type = NULL;
 	youngsmodulus = NULL;
@@ -197,6 +193,10 @@ void PairTlsph::PreCompute() {
 				continue;
 			}
 
+			if (mol[i] != mol[j]) {
+				continue;
+			}
+
 			x0j << x0[j][0], x0[j][1], x0[j][2];
 			dx0 = x0j - x0i;
 
@@ -266,9 +266,7 @@ void PairTlsph::PreCompute() {
 		if (setflag[itype][itype] == 1) { // we only do the subsequent calculation if we are dealing with an SPH particle
 
 			if ((numNeighsRefConfig[i] < domain->dimension) && (mol[i] > 0)) { // cannot possible invert shape matrix
-				printf(
-						"deleting particle [%d] because number of neighbors=%d is too small\n",
-						tag[i], numNeighsRefConfig[i]);
+				printf("deleting particle [%d] because number of neighbors=%d is too small\n", tag[i], numNeighsRefConfig[i]);
 				mol[i] = -1;
 			}
 
@@ -307,16 +305,12 @@ void PairTlsph::PreCompute() {
 				 */
 
 				if (F[i].determinant() < DETF_MIN) {
-					printf(
-							"deleting particle [%d] because det(F)=%f is smaller than limit=%f\n",
-							tag[i], F[i].determinant(),
-							DETF_MIN);
+					printf("deleting particle [%d] because det(F)=%f is smaller than limit=%f\n", tag[i], F[i].determinant(),
+					DETF_MIN);
 					mol[i] = -1;
 				} else if (F[i].determinant() > DETF_MAX) {
-					printf(
-							"deleting particle [%d] because det(F)=%f is larger than limit=%f\n",
-							tag[i], F[i].determinant(),
-							DETF_MAX);
+					printf("deleting particle [%d] because det(F)=%f is larger than limit=%f\n", tag[i], F[i].determinant(),
+					DETF_MAX);
 					mol[i] = -1;
 				}
 
@@ -330,7 +324,7 @@ void PairTlsph::PreCompute() {
 
 					// symmetric (D) and asymmetric (W) parts of L
 					D[i] = 0.5 * (L + L.transpose());
-					W[i] = 0.5 * (L - L.transpose());// spin tensor:: need this for Jaumann rate
+					W[i] = 0.5 * (L - L.transpose());					// spin tensor:: need this for Jaumann rate
 
 					if (JAUMANN) {
 						d[i] = D[i];
@@ -390,8 +384,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 	double delta, damage_factor;
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
-	Vector3d fi, fj, dx0, dx, dv, f_stress, f_hg, dxp_i, dxp_j, gamma, g,
-			gamma_i, gamma_j;
+	Vector3d fi, fj, dx0, dx, dv, f_stress, f_hg, dxp_i, dxp_j, gamma, g, gamma_i, gamma_j;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
 
@@ -488,6 +481,10 @@ void PairTlsph::compute(int eflag, int vflag) {
 				continue; // Particle j is not a valid SPH particle (anymore). Skip all interactiions with this particle.
 			}
 
+			if (mol[i] != mol[j]) {
+				continue;
+			}
+
 			jtype = type[j];
 
 			// check that distance between i and j (in the reference config) is less than cutoff
@@ -537,7 +534,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 				 * hourglass deviation of particles i and j
 				 */
 
-
 				gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
 
 //				if (gamma.norm() > 1.0e-8) {
@@ -549,14 +545,11 @@ void PairTlsph::compute(int eflag, int vflag) {
 					/* SPH-like formulation */
 					delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
 					hg_mag = -hg_coeff[itype][jtype] * delta / (r0Sq); // hg_mag has dimensions [m^(-1)]
-					hg_mag *= vfrac[i] * vfrac[j] * wf
-							* (youngsmodulus[itype] + youngsmodulus[jtype]); // hg_mag has dimensions [J*m^(-1)] = [N]
+					hg_mag *= vfrac[i] * vfrac[j] * wf * (youngsmodulus[itype] + youngsmodulus[jtype]); // hg_mag has dimensions [J*m^(-1)] = [N]
 
 					/* scale hourglass correction to enable plastic flow */
-					if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j])
-							> 1.0e-2) {
-						hg_mag = hg_mag * yieldStress[itype]
-								/ youngsmodulus[itype];
+					if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j]) > 1.0e-2) {
+						hg_mag = hg_mag * yieldStress[itype] / youngsmodulus[itype];
 					}
 
 					f_hg = (hg_mag / (r + 0.1 * h)) * dx;
@@ -573,10 +566,8 @@ void PairTlsph::compute(int eflag, int vflag) {
 					mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h); // units: s^(-1)
 					c_ij = c0_type[itype][jtype];
 					rho_ij = 0.5 * (rmass[i] / vfrac[i] + rmass[j] / vfrac[j]);
-					visc_magnitude = (-alpha[itype][jtype] * c_ij * mu_ij)
-							/ rho_ij; // units:
-					f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx
-							/ r;
+					visc_magnitude = (-alpha[itype][jtype] * c_ij * mu_ij) / rho_ij; // units:
+					f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / r;
 					//printf("mu=%g, c=%g, rho=%g, magnitude=%g\n", mu_ij, c_ij, rho_ij, f_visc.norm());
 				} else {
 					f_visc.setZero();
@@ -585,7 +576,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 				// sum stress, viscous, and hourglass forces, and apply (nonlinear) failure model only to hourglass correction force
 				damage_factor = MAX(damage[i], damage[j]);
 				damage_factor = 1.0 - pow(damage_factor, 3.0);
-				sumForces = f_stress + f_visc +  damage_factor * f_hg;
+				sumForces = f_stress + f_visc + damage_factor * f_hg;
 
 				//sumForces.setZero();
 
@@ -607,8 +598,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 				// tally atomistic stress tensor
 				if (evflag) {
-					ev_tally_xyz(i, j, nlocal, 0, 0.0, 0.0, sumForces(0),
-							sumForces(1), sumForces(2), dx(0), dx(1), dx(2));
+					ev_tally_xyz(i, j, nlocal, 0, 0.0, 0.0, sumForces(0), sumForces(1), sumForces(2), dx(0), dx(1), dx(2));
 				}
 
 				// check if a particle has moved too much w.r.t another particles
@@ -640,8 +630,7 @@ void PairTlsph::compute(int eflag, int vflag) {
  input: initial pressure pInitial, isotropic part of the strain rate d, time-step dt
  output: final pressure pFinal, pressure rate p_rate
  ------------------------------------------------------------------------- */
-void PairTlsph::LinearEOS(double &lambda, double &pInitial__, double &d__,
-		double &dt__, double &pFinal__, double &p_rate__) {
+void PairTlsph::LinearEOS(double &lambda, double &pInitial__, double &d__, double &dt__, double &pFinal__, double &p_rate__) {
 	double pLimit;
 
 	/*
@@ -673,8 +662,7 @@ void PairTlsph::LinearEOS(double &lambda, double &pInitial__, double &d__,
 	pLimit = lambda * (DETF_MIN - 1.0);
 	if (pFinal__ < pLimit) {
 
-		printf("limiting pressure min, pIni=%f, pFin=%f, dt=%f, d_iso=%f\n",
-				pInitial__, pFinal__, dt__, d__);
+		printf("limiting pressure min, pIni=%f, pFin=%f, dt=%f, d_iso=%f\n", pInitial__, pFinal__, dt__, d__);
 
 		pFinal__ = pLimit;
 
@@ -693,8 +681,7 @@ void PairTlsph::LinearEOS(double &lambda, double &pInitial__, double &d__,
  input: initial pressure pInitial, isotropic part of the strain rate d, time-step dt, maxPressure
  output: final pressure pFinal, pressure rate p_rate
  ------------------------------------------------------------------------- */
-void PairTlsph::LinearCutoffEOS(double &lambda, double &maxPressure,
-		double &pInitial, double &d, double &dt, double &pFinal,
+void PairTlsph::LinearCutoffEOS(double &lambda, double &maxPressure, double &pInitial, double &d, double &dt, double &pFinal,
 		double &p_rate) {
 
 	/*
@@ -718,8 +705,7 @@ void PairTlsph::LinearCutoffEOS(double &lambda, double &maxPressure,
  input: dt: time-step
  output:  sigmaFinal_dev, sigmaFinal_dev_rate__: final stress deviator and its rate.
  ------------------------------------------------------------------------- */
-void PairTlsph::LinearStrength(double mu, Matrix3d sigmaInitial_dev,
-		Matrix3d d_dev, double dt, Matrix3d *sigmaFinal_dev__,
+void PairTlsph::LinearStrength(double mu, Matrix3d sigmaInitial_dev, Matrix3d d_dev, double dt, Matrix3d *sigmaFinal_dev__,
 		Matrix3d *sigma_dev_rate__) {
 
 	/*
@@ -744,8 +730,7 @@ void PairTlsph::LinearStrength(double mu, Matrix3d sigmaInitial_dev,
  input: F: deformation gradient
  output:  total stress tensor, deviator + pressure
  ------------------------------------------------------------------------- */
-void PairTlsph::LinearStrengthDefgrad(double lambda, double mu, Matrix3d F,
-		Matrix3d *T) {
+void PairTlsph::LinearStrengthDefgrad(double lambda, double mu, Matrix3d F, Matrix3d *T) {
 	Matrix3d E, PK2, eye, sigma, S, tau;
 
 	eye.setIdentity();
@@ -784,10 +769,8 @@ void PairTlsph::LinearStrengthDefgrad(double lambda, double mu, Matrix3d F,
  input: dt: time-step
  output:  sigmaFinal_dev, sigmaFinal_dev_rate__: final stress deviator and its rate.
  ------------------------------------------------------------------------- */
-void PairTlsph::LinearPlasticStrength(double G, double yieldStress,
-		Matrix3d sigmaInitial_dev, Matrix3d d_dev, double dt,
-		Matrix3d *sigmaFinal_dev__, Matrix3d *sigma_dev_rate__,
-		double *plastic_strain_increment) {
+void PairTlsph::LinearPlasticStrength(double G, double yieldStress, Matrix3d sigmaInitial_dev, Matrix3d d_dev, double dt,
+		Matrix3d *sigmaFinal_dev__, Matrix3d *sigma_dev_rate__, double *plastic_strain_increment) {
 
 	Matrix3d sigmaTrial_dev, dev_rate;
 	double J2;
@@ -856,10 +839,8 @@ void PairTlsph::AssembleStress() {
 	int nlocal = atom->nlocal;
 	double dt = update->dt;
 	double bulkmodulus;
-	Matrix3d sigma_rate, eye, sigmaInitial, sigmaFinal, T, Jaumann_rate,
-			sigma_rate_check;
-	Matrix3d d_dev, sigmaInitial_dev, sigmaFinal_dev, sigma_dev_rate, E,
-			sigma_damaged;
+	Matrix3d sigma_rate, eye, sigmaInitial, sigmaFinal, T, Jaumann_rate, sigma_rate_check;
+	Matrix3d d_dev, sigmaInitial_dev, sigmaFinal_dev, sigma_dev_rate, E, sigma_damaged;
 	Vector3d x0i, xi, xp;
 
 	eye.setIdentity();
@@ -896,21 +877,16 @@ void PairTlsph::AssembleStress() {
 				//printf("eos = %d\n", eos[itype]);
 				switch (eos[itype]) {
 				case LINEAR:
-					lambda = youngsmodulus[itype] * poissonr[itype]
-							/ ((1.0 + poissonr[itype])
-									* (1.0 - 2.0 * poissonr[itype]));
+					lambda = youngsmodulus[itype] * poissonr[itype] / ((1.0 + poissonr[itype]) * (1.0 - 2.0 * poissonr[itype]));
 					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
 					bulkmodulus = lambda + 2.0 * mu / 3.0;
 					LinearEOS(bulkmodulus, pInitial, d_iso, dt, pFinal, p_rate);
 					break;
 				case LINEAR_CUTOFF:
-					lambda = youngsmodulus[itype] * poissonr[itype]
-							/ ((1.0 + poissonr[itype])
-									* (1.0 - 2.0 * poissonr[itype]));
+					lambda = youngsmodulus[itype] * poissonr[itype] / ((1.0 + poissonr[itype]) * (1.0 - 2.0 * poissonr[itype]));
 					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
 					bulkmodulus = lambda + 2.0 * mu / 3.0;
-					LinearCutoffEOS(bulkmodulus, yieldStress[itype], pInitial,
-							d_iso, dt, pFinal, p_rate);
+					LinearCutoffEOS(bulkmodulus, yieldStress[itype], pInitial, d_iso, dt, pFinal, p_rate);
 					break;
 				case NONE:
 					pFinal = 0.0;
@@ -928,26 +904,21 @@ void PairTlsph::AssembleStress() {
 				switch (strengthModel[itype]) {
 				case LINEAR:
 					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
-					LinearStrength(mu, sigmaInitial_dev, d[i], dt,
-							&sigmaFinal_dev, &sigma_dev_rate);
+					LinearStrength(mu, sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
 					break;
 				case LINEAR_DEFGRAD:
-					lambda = youngsmodulus[itype] * poissonr[itype]
-							/ ((1.0 + poissonr[itype])
-									* (1.0 - 2.0 * poissonr[itype]));
+					lambda = youngsmodulus[itype] * poissonr[itype] / ((1.0 + poissonr[itype]) * (1.0 - 2.0 * poissonr[itype]));
 					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
 					LinearStrengthDefgrad(lambda, mu, F[i], &sigmaFinal_dev);
 					eff_plastic_strain[i] = 0.0;
 					p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
-					sigma_dev_rate = sigmaInitial_dev
-							- Deviator(sigmaFinal_dev);
+					sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
 					R[i].setIdentity();
 					break;
 				case LINEAR_PLASTIC:
 					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
-					LinearPlasticStrength(mu, yieldStress[itype],
-							sigmaInitial_dev, d_dev, dt, &sigmaFinal_dev,
-							&sigma_dev_rate, &plastic_strain_increment);
+					LinearPlasticStrength(mu, yieldStress[itype], sigmaInitial_dev, d_dev, dt, &sigmaFinal_dev, &sigma_dev_rate,
+							&plastic_strain_increment);
 					eff_plastic_strain[i] += plastic_strain_increment;
 					break;
 				case NONE:
@@ -978,8 +949,7 @@ void PairTlsph::AssembleStress() {
 				//double max_tensile_stress = es.eigenvalues()[1];
 
 				if (max_tensile_stress > maxstrain[itype]) {
-					damage[i] = damage[i]
-							+ dt * 0.4 * c0_type[itype][itype] / radius[i];
+					damage[i] = damage[i] + dt * 0.4 * c0_type[itype][itype] / radius[i];
 					damage[i] = MIN(damage[i], 1.0);
 					//printf("maximum tensile_stress is %f, current damage is %f\n", max_tensile_stress, damage[i]);
 					//printf("diagonal components of matrix are: %f %f %f %f %f %f\n", E(0,0), E(1,1), E(2,2), E(0,1), E(0,2), E(1,2));
@@ -1031,8 +1001,7 @@ void PairTlsph::AssembleStress() {
 
 					sigma_rate = (1.0 / dt) * (sigmaFinal - sigmaInitial);
 
-					Jaumann_rate = sigma_rate + W[i] * sigmaInitial
-							+ sigmaInitial * W[i].transpose();
+					Jaumann_rate = sigma_rate + W[i] * sigmaInitial + sigmaInitial * W[i].transpose();
 					sigmaFinal = sigmaInitial + dt * Jaumann_rate;
 					T = sigmaFinal;
 				} else {
@@ -1053,8 +1022,7 @@ void PairTlsph::AssembleStress() {
 				 * Convert to PK1. Note that reference configuration used for computing the forces is linked via
 				 * the incremental deformation gradient, not the full deformation gradient.
 				 */
-				PK1[i] = Fincr[i].determinant() * T
-						* Fincr[i].inverse().transpose();
+				PK1[i] = Fincr[i].determinant() * T * Fincr[i].inverse().transpose();
 
 				/*
 				 * correct stress tensor with shape matrix
@@ -1329,24 +1297,24 @@ double PairTlsph::memory_usage() {
 
 void *PairTlsph::extract(const char *str, int &i) {
 //printf("in PairTlsph::extract\n");
-	if (strcmp(str, "F_ptr") == 0) {
+	if (strcmp(str, "sph2/tlsph/F_ptr") == 0) {
 		return (void *) F;
-	} else if (strcmp(str, "Fincr_ptr") == 0) {
+	} else if (strcmp(str, "sph2/tlsph/Fincr_ptr") == 0) {
 		return (void *) Fincr;
-	} else if (strcmp(str, "detF_ptr") == 0) {
+	} else if (strcmp(str, "sph2/tlsph/detF_ptr") == 0) {
 		return (void *) detF;
-	} else if (strcmp(str, "PK1_ptr") == 0) {
+	} else if (strcmp(str, "sph2/tlsph/PK1_ptr") == 0) {
 		return (void *) PK1;
-	} else if (strcmp(str, "smoothVel_ptr") == 0) {
+	} else if (strcmp(str, "sph2/tlsph/smoothVel_ptr") == 0) {
 		return (void *) smoothVel;
-	} else if (strcmp(str, "smoothPos_ptr") == 0) {
-		return (void *) smoothPos;
-	} else if (strcmp(str, "numNeighsRefConfig_ptr") == 0) {
+	} else if (strcmp(str, "sph2/tlsph/numNeighsRefConfig_ptr") == 0) {
 		return (void *) numNeighsRefConfig;
-	} else if (strcmp(str, "CauchyStress_ptr") == 0) {
+	} else if (strcmp(str, "sph2/tlsph/stressTensor_ptr") == 0) {
 		return (void *) CauchyStress;
-	} else if (strcmp(str, "updateFlag_ptr") == 0) {
+	} else if (strcmp(str, "sph2/tlsph/updateFlag_ptr") == 0) {
 		return (void *) &updateFlag;
+	} else if (strcmp(str, "sph2/tlsph/strain_rate_ptr") == 0) {
+		return (void *) D;
 	}
 
 	return NULL;
@@ -1354,9 +1322,7 @@ void *PairTlsph::extract(const char *str, int &i) {
 
 /* ---------------------------------------------------------------------- */
 
-
-int PairTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag,
-		int *pbc) {
+int PairTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	int i, j, m;
 	int *mol = atom->molecule;
 
@@ -1428,8 +1394,7 @@ void PairTlsph::unpack_forward_comm(int n, int first, double *buf) {
 	}
 }
 
-void PairTlsph::kernel_and_derivative(const double h, const double r,
-		double &wf, double &wfd) {
+void PairTlsph::kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
 
 	/*
 	 * Spiky kernel
@@ -1537,9 +1502,7 @@ double PairTlsph::TestMatricesEqual(Matrix3d A, Matrix3d B, double eps) {
 	diff = A - B;
 	double norm = diff.norm();
 	if (norm > eps) {
-		printf(
-				"Matrices A and B are not equal! The L2-norm difference is: %g\n",
-				norm);
+		printf("Matrices A and B are not equal! The L2-norm difference is: %g\n", norm);
 		cout << "Here is matrix A:" << endl << A << endl;
 		cout << "Here is matrix B:" << endl << B << endl;
 	}

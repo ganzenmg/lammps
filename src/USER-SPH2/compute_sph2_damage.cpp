@@ -12,7 +12,7 @@
 ------------------------------------------------------------------------- */
 
 #include "string.h"
-#include "compute_tlsph_e_atom.h"
+#include "compute_sph2_damage.h"
 #include "atom.h"
 #include "update.h"
 #include "modify.h"
@@ -25,63 +25,63 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTlsphEAtom::ComputeTlsphEAtom(LAMMPS *lmp, int narg, char **arg) :
+ComputeSph2Damage::ComputeSph2Damage(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
-  if (narg != 3) error->all(FLERR,"Number of arguments for compute tlsph/e command != 3");
-  if (atom->e_flag != 1) error->all(FLERR,"compute tlsph/ command requires tlsph atom_style");
+  if (narg != 3) error->all(FLERR,"Illegal compute sph2/damage command");
+  if (atom->rho_flag != 1) error->all(FLERR,"compute sph2/damage command requires atom_style with damage (e.g. sph2)");
 
   peratom_flag = 1;
   size_peratom_cols = 0;
 
   nmax = 0;
-  evector = NULL;
+  damage_vector = NULL;
 }
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTlsphEAtom::~ComputeTlsphEAtom()
+ComputeSph2Damage::~ComputeSph2Damage()
 {
-  memory->sfree(evector);
+  memory->sfree(damage_vector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTlsphEAtom::init()
+void ComputeSph2Damage::init()
 {
 
   int count = 0;
   for (int i = 0; i < modify->ncompute; i++)
-    if (strcmp(modify->compute[i]->style,"evector/atom") == 0) count++;
+    if (strcmp(modify->compute[i]->style,"sph2/damage") == 0) count++;
   if (count > 1 && comm->me == 0)
-    error->warning(FLERR,"More than one compute evector/atom");
+    error->warning(FLERR,"More than one compute sph2/damage");
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTlsphEAtom::compute_peratom()
+void ComputeSph2Damage::compute_peratom()
 {
   invoked_peratom = update->ntimestep;
 
-  // grow evector array if necessary
+  // grow rhoVector array if necessary
 
   if (atom->nlocal > nmax) {
-    memory->sfree(evector);
+    memory->sfree(damage_vector);
     nmax = atom->nmax;
-    evector = (double *) memory->smalloc(nmax*sizeof(double),"evector/atom:evector");
-    vector_atom = evector;
+    damage_vector = (double *) memory->smalloc(nmax*sizeof(double),"atom:damage_vector");
+    vector_atom = damage_vector;
   }
 
-  double *e = atom->e;
+  double *damage = atom->damage;
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
 
     for (int i = 0; i < nlocal; i++) {
       if (mask[i] & groupbit) {
-              evector[i] = e[i];
+              damage_vector[i] = damage[i];
       }
       else {
-              evector[i] = 0.0;
+              damage_vector[i] = 0.0;
       }
     }
 }
@@ -90,7 +90,7 @@ void ComputeTlsphEAtom::compute_peratom()
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
 
-double ComputeTlsphEAtom::memory_usage()
+double ComputeSph2Damage::memory_usage()
 {
   double bytes = nmax * sizeof(double);
   return bytes;

@@ -5,7 +5,7 @@
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
-   certain rights in this software.  This software is distributed under 
+   certain rights in this software.  This software is distributed under
    the GNU General Public License.
 
    See the README file in the top-level LAMMPS directory.
@@ -13,28 +13,28 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(tlsph/strain,ComputeStrainTensor)
+ComputeStyle(sph2/plastic_strain,ComputeSph2PlasticStrain)
 
 #else
 
-#ifndef LMP_COMPUTE_STRAINTENSOR_H
-#define LMP_COMPUTE_STRAINTENSOR_H
+#ifndef LMP_COMPUTE_SPH2_PLASTIC_STRAIN_H
+#define LMP_COMPUTE_SPH2_PLASTIC_STRAIN_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeStrainTensor : public Compute {
+class ComputeSph2PlasticStrain : public Compute {
  public:
-  ComputeStrainTensor(class LAMMPS *, int, char **);
-  ~ComputeStrainTensor();
+  ComputeSph2PlasticStrain(class LAMMPS *, int, char **);
+  ~ComputeSph2PlasticStrain();
   void init();
   void compute_peratom();
   double memory_usage();
 
  private:
   int nmax;
-  double **straintensorVector;
+  double *plastic_strain_vector;
 };
 
 }

@@ -12,7 +12,7 @@
  ------------------------------------------------------------------------- */
 
 #include "string.h"
-#include "compute_tlsph_damage.h"
+#include "compute_sph2_tlsph_num_neighs.h"
 #include "atom.h"
 #include "update.h"
 #include "modify.h"
@@ -20,61 +20,67 @@
 #include "force.h"
 #include "memory.h"
 #include "error.h"
+#include "pair.h"
 
 using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTlsphDamage::ComputeTlsphDamage(LAMMPS *lmp, int narg, char **arg) :
+ComputeSph2TLSPHNumNeighs::ComputeSph2TLSPHNumNeighs(LAMMPS *lmp, int narg, char **arg) :
         Compute(lmp, narg, arg) {
     if (narg != 3)
-        error->all(FLERR, "Illegal compute tlsph/eff_plastic_strain command");
+        error->all(FLERR, "Illegal compute sph2/tlsph_num_neighs command");
 
     peratom_flag = 1;
     size_peratom_cols = 0;
 
     nmax = 0;
-    damage_output = NULL;
+    numNeighsRefConfigOutput = NULL;
 }
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTlsphDamage::~ComputeTlsphDamage() {
-    memory->destroy(damage_output);
+ComputeSph2TLSPHNumNeighs::~ComputeSph2TLSPHNumNeighs() {
+    memory->destroy(numNeighsRefConfigOutput);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTlsphDamage::init() {
+void ComputeSph2TLSPHNumNeighs::init() {
     int count = 0;
     for (int i = 0; i < modify->ncompute; i++)
-        if (strcmp(modify->compute[i]->style, "tlsph/damage") == 0)
+        if (strcmp(modify->compute[i]->style, "sph2/tlsph_num_neighs") == 0)
             count++;
     if (count > 1 && comm->me == 0)
-        error->warning(FLERR, "More than one compute tlsph/damage");
+        error->warning(FLERR, "More than one compute sph2/tlsph_num_neighs");
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTlsphDamage::compute_peratom() {
+void ComputeSph2TLSPHNumNeighs::compute_peratom() {
     invoked_peratom = update->ntimestep;
 
     if (atom->nlocal > nmax) {
-        memory->destroy(damage_output);
+        memory->destroy(numNeighsRefConfigOutput);
         nmax = atom->nmax;
-        memory->create(damage_output, nmax, "tlsph/damage_output");
-        vector_atom = damage_output;
+        memory->create(numNeighsRefConfigOutput, nmax, "tlsph/num_neighs:numNeighsRefConfigOutput");
+        vector_atom = numNeighsRefConfigOutput;
     }
 
-    double *damage = atom->damage;
     int *mask = atom->mask;
     int nlocal = atom->nlocal;
 
+    int itmp = 0;
+    int *numNeighsRefConfig = (int *) force->pair->extract("sph2/tlsph/numNeighsRefConfig_ptr", itmp);
+    if (numNeighsRefConfig == NULL) {
+        error->all(FLERR, "compute sph2/tlsph_num_neighs failed to access numNeighsRefConfig array");
+    }
+
     for (int i = 0; i < nlocal; i++) {
         if (mask[i] & groupbit) {
-            damage_output[i] = damage[i];
+            numNeighsRefConfigOutput[i] = numNeighsRefConfig[i];
         } else {
-            damage_output[i] = 0.0;
+            numNeighsRefConfigOutput[i] = 0.0;
         }
     }
 }
@@ -83,7 +89,7 @@ void ComputeTlsphDamage::compute_peratom() {
  memory usage of local atom-based array
  ------------------------------------------------------------------------- */
 
-double ComputeTlsphDamage::memory_usage() {
+double ComputeSph2TLSPHNumNeighs::memory_usage() {
     double bytes = nmax * sizeof(double);
     return bytes;
 }

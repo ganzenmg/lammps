@@ -5,7 +5,7 @@
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
-   certain rights in this software.  This software is distributed under 
+   certain rights in this software.  This software is distributed under
    the GNU General Public License.
 
    See the README file in the top-level LAMMPS directory.
@@ -13,31 +13,28 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(sph/fluid/stress,ComputeSpheFluidStress)
+ComputeStyle(sph2/damage,ComputeSph2Damage)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH_FLUID_STRESS_H
-#define LMP_COMPUTE_SPH_FLUID_STRESS_H
+#ifndef LMP_COMPUTE_SPH2_DAMAGE_H
+#define LMP_COMPUTE_SPH2_DAMAGE_H
 
 #include "compute.h"
-#include <Eigen/Eigen>
-using namespace Eigen;
 
 namespace LAMMPS_NS {
 
-class ComputeSpheFluidStress : public Compute {
+class ComputeSph2Damage : public Compute {
  public:
-  ComputeSpheFluidStress(class LAMMPS *, int, char **);
-  ~ComputeSpheFluidStress();
+  ComputeSph2Damage(class LAMMPS *, int, char **);
+  ~ComputeSph2Damage();
   void init();
   void compute_peratom();
   double memory_usage();
-  Matrix3d Deviator(Matrix3d);
 
  private:
   int nmax;
-  double **stresstensorVector;
+  double *damage_vector;
 };
 
 }

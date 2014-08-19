@@ -12,7 +12,7 @@
 ------------------------------------------------------------------------- */
 
 #include "string.h"
-#include "compute_sph_fluid_rho.h"
+#include "compute_sph2_contact_radius.h"
 #include "atom.h"
 #include "update.h"
 #include "modify.h"
@@ -25,67 +25,63 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSphFluidRho::ComputeSphFluidRho(LAMMPS *lmp, int narg, char **arg) :
+ComputeSph2ContactRadius::ComputeSph2ContactRadius(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
-  if (narg != 3) error->all(FLERR,"Illegal compute meso_rho/atom command");
-  if (atom->rho_flag != 1) error->all(FLERR,"compute meso_rho/atom command requires atom_style with density (e.g. meso)");
+  if (narg != 3) error->all(FLERR,"Illegal compute sph2/contact_radius command");
+  if (atom->rho_flag != 1) error->all(FLERR,"compute sph2/contact_radius command requires atom_style with contact_radius (e.g. sph2)");
 
   peratom_flag = 1;
   size_peratom_cols = 0;
 
   nmax = 0;
-  rhoVector = NULL;
+  contact_radius_vector = NULL;
 }
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSphFluidRho::~ComputeSphFluidRho()
+ComputeSph2ContactRadius::~ComputeSph2ContactRadius()
 {
-  memory->sfree(rhoVector);
+  memory->sfree(contact_radius_vector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSphFluidRho::init()
+void ComputeSph2ContactRadius::init()
 {
 
   int count = 0;
   for (int i = 0; i < modify->ncompute; i++)
-    if (strcmp(modify->compute[i]->style,"rhoVector/atom") == 0) count++;
+    if (strcmp(modify->compute[i]->style,"sph2/contact_radius") == 0) count++;
   if (count > 1 && comm->me == 0)
-    error->warning(FLERR,"More than one compute rhoVector/atom");
+    error->warning(FLERR,"More than one compute sph2/contact_radius");
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSphFluidRho::compute_peratom()
+void ComputeSph2ContactRadius::compute_peratom()
 {
   invoked_peratom = update->ntimestep;
 
   // grow rhoVector array if necessary
 
   if (atom->nlocal > nmax) {
-    memory->sfree(rhoVector);
+    memory->sfree(contact_radius_vector);
     nmax = atom->nmax;
-    rhoVector = (double *) memory->smalloc(nmax*sizeof(double),"atom:rhoVector");
-    vector_atom = rhoVector;
+    contact_radius_vector = (double *) memory->smalloc(nmax*sizeof(double),"atom:contact_radius_vector");
+    vector_atom = contact_radius_vector;
   }
 
-  // compute kinetic energy for each atom in group
-
-  double *rho = atom->rho;
+  double *contact_radius = atom->contact_radius;
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
 
     for (int i = 0; i < nlocal; i++) {
       if (mask[i] & groupbit) {
-              rhoVector[i] = rho[i];
-
-              //printf("rho = %g, m=%g, v=%g\n", rho[i], rmass[i], vfrac[i]);
+              contact_radius_vector[i] = contact_radius[i];
       }
       else {
-              rhoVector[i] = rho[i];
+              contact_radius_vector[i] = 0.0;
       }
     }
 }
@@ -94,7 +90,7 @@ void ComputeSphFluidRho::compute_peratom()
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
 
-double ComputeSphFluidRho::memory_usage()
+double ComputeSph2ContactRadius::memory_usage()
 {
   double bytes = nmax * sizeof(double);
   return bytes;

@@ -157,6 +157,7 @@ Atom::Atom(LAMMPS *lmp) : Pointers(lmp)
   contact_radius_flag = eff_plastic_strain_flag = tlsph_fold_flag = damage_flag = 0;
   tlsph_stress_flag = 0;
   x0_flag = 0;
+  sph2_flag = 0;
 
   // Peridynamic scale factor
 

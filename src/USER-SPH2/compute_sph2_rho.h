@@ -13,45 +13,31 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(tlsph/eff_plastic_strain,ComputeTlsphEffPlasticStrain)
+ComputeStyle(sph2/rho,ComputeSph2Rho)
 
 #else
 
-#ifndef LMP_COMPUTE_EFF_PLASTIC_STRAIN_ATOM_H
-#define LMP_COMPUTE_EFF_PLASTIC_STRAIN_ATOM_H
+#ifndef LMP_COMPUTE_SPH2_RHO_H
+#define LMP_COMPUTE_SPH2_RHO_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeTlsphEffPlasticStrain : public Compute {
+class ComputeSph2Rho : public Compute {
  public:
-  ComputeTlsphEffPlasticStrain(class LAMMPS *, int, char **);
-  ~ComputeTlsphEffPlasticStrain();
+  ComputeSph2Rho(class LAMMPS *, int, char **);
+  ~ComputeSph2Rho();
   void init();
   void compute_peratom();
   double memory_usage();
 
  private:
   int nmax;
-  double *epl;
+  double *rhoVector;
 };
 
 }
 
 #endif
 #endif
-
-/* ERROR/WARNING messages:
-
-E: Illegal ... command
-
-Self-explanatory.  Check the input script syntax and compare to the
-documentation for the command.  You can use -echo screen as a
-command-line option when running LAMMPS to see the offending line.
-
-W: More than one compute ke/atom
-
-It is not efficient to use compute ke/atom more than once.
-
-*/

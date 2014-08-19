@@ -12,7 +12,7 @@
  ------------------------------------------------------------------------- */
 
 #include "string.h"
-#include "compute_tlsph_defgrad.h"
+#include "compute_sph2_tlsph_defgrad.h"
 #include "atom.h"
 #include "update.h"
 #include "modify.h"
@@ -32,10 +32,10 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTlsphDefgrad::ComputeTlsphDefgrad(LAMMPS *lmp, int narg, char **arg) :
+ComputeSph2TLSPHDefgrad::ComputeSph2TLSPHDefgrad(LAMMPS *lmp, int narg, char **arg) :
         Compute(lmp, narg, arg) {
     if (narg != 3)
-        error->all(FLERR, "Illegal compute TLSPH/defgrad command");
+        error->all(FLERR, "Illegal compute sph2/tlsph_defgrad command");
 
     peratom_flag = 1;
     size_peratom_cols = 10;
@@ -46,25 +46,25 @@ ComputeTlsphDefgrad::ComputeTlsphDefgrad(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTlsphDefgrad::~ComputeTlsphDefgrad() {
+ComputeSph2TLSPHDefgrad::~ComputeSph2TLSPHDefgrad() {
     memory->sfree(defgradVector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTlsphDefgrad::init() {
+void ComputeSph2TLSPHDefgrad::init() {
 
     int count = 0;
     for (int i = 0; i < modify->ncompute; i++)
-        if (strcmp(modify->compute[i]->style, "defgrad/atom") == 0)
+        if (strcmp(modify->compute[i]->style, "sph2/tlsph_defgrad") == 0)
             count++;
     if (count > 1 && comm->me == 0)
-        error->warning(FLERR, "More than one compute defgrad/atom");
+        error->warning(FLERR, "More than one compute sph2/tlsph_defgrad");
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTlsphDefgrad::compute_peratom() {
+void ComputeSph2TLSPHDefgrad::compute_peratom() {
     invoked_peratom = update->ntimestep;
 
     // grow vector array if necessary
@@ -78,14 +78,14 @@ void ComputeTlsphDefgrad::compute_peratom() {
 
     // copy data to output array
     int itmp = 0;
-    double *detF = (double *) force->pair->extract("detF_ptr", itmp);
+    double *detF = (double *) force->pair->extract("sph2/tlsph/detF_ptr", itmp);
     if (detF == NULL) {
-        error->all(FLERR, "compute TLSPH/defgrad failed to access detF array");
+        error->all(FLERR, "compute sph2/tlsph_defgrad failed to access detF array");
     }
 
-    Matrix3d *F = (Matrix3d *) force->pair->extract("F_ptr", itmp);
+    Matrix3d *F = (Matrix3d *) force->pair->extract("sph2/tlsph/F_ptr", itmp);
     if (F == NULL) {
-        error->all(FLERR, "compute defgrad/atom failed to access F array");
+        error->all(FLERR, "compute sph2/tlsph_defgrad failed to access F array");
     }
 
     int *mask = atom->mask;
@@ -115,7 +115,7 @@ void ComputeTlsphDefgrad::compute_peratom() {
  memory usage of local atom-based array
  ------------------------------------------------------------------------- */
 
-double ComputeTlsphDefgrad::memory_usage() {
+double ComputeSph2TLSPHDefgrad::memory_usage() {
     double bytes = size_peratom_cols * nmax * sizeof(double);
     return bytes;
 }

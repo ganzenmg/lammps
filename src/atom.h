@@ -131,6 +131,7 @@ class Atom : protected Pointers {
   int contact_radius_flag, eff_plastic_strain_flag, tlsph_fold_flag, damage_flag;
   int tlsph_stress_flag;
   int x0_flag;
+  int sph2_flag;
 
   // Peridynamics scale factor, used by dump cfg
 

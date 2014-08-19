@@ -13,21 +13,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(sph/contact_radius,ComputeTlsphContactRadius)
+ComputeStyle(sph2/contact_radius,ComputeSph2ContactRadius)
 
 #else
 
-#ifndef LMP_COMPUTE_TLSPH_CONTACT_RADIUS_H
-#define LMP_COMPUTE_TLSPH_CONTACT_RADIUS_H
+#ifndef LMP_COMPUTE_SPH2_CONTACT_RADIUS_H
+#define LMP_COMPUTE_SPH2_CONTACT_RADIUS_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeTlsphContactRadius : public Compute {
+class ComputeSph2ContactRadius : public Compute {
  public:
-  ComputeTlsphContactRadius(class LAMMPS *, int, char **);
-  ~ComputeTlsphContactRadius();
+  ComputeSph2ContactRadius(class LAMMPS *, int, char **);
+  ~ComputeSph2ContactRadius();
   void init();
   void compute_peratom();
   double memory_usage();

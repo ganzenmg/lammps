@@ -12,7 +12,7 @@
  ------------------------------------------------------------------------- */
 
 #include "string.h"
-#include "compute_tlsph_stress.h"
+#include "compute_sph2_ulsph_strain_rate.h"
 #include "atom.h"
 #include "update.h"
 #include "modify.h"
@@ -27,67 +27,68 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTlsphStress::ComputeTlsphStress(LAMMPS *lmp, int narg, char **arg) :
+ComputeSph2ULSPHStrainRate::ComputeSph2ULSPHStrainRate(LAMMPS *lmp, int narg, char **arg) :
 		Compute(lmp, narg, arg) {
 	if (narg != 3)
-		error->all(FLERR, "Illegal compute tlsph/stress command");
+		error->all(FLERR, "Illegal compute sph2/ulsph_strain_rate command");
 
 	peratom_flag = 1;
 	size_peratom_cols = 6;
 
 	nmax = 0;
-	stresstensorVector = NULL;
+	strain_rate_array = NULL;
 }
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTlsphStress::~ComputeTlsphStress() {
-	memory->sfree(stresstensorVector);
+ComputeSph2ULSPHStrainRate::~ComputeSph2ULSPHStrainRate() {
+	memory->sfree(strain_rate_array);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTlsphStress::init() {
+void ComputeSph2ULSPHStrainRate::init() {
 
 	int count = 0;
 	for (int i = 0; i < modify->ncompute; i++)
-		if (strcmp(modify->compute[i]->style, "tlsph/stress") == 0)
+		if (strcmp(modify->compute[i]->style, "sph2/ulsph_strain_rate") == 0)
 			count++;
 	if (count > 1 && comm->me == 0)
-		error->warning(FLERR, "More than one compute tlsph/stress");
+		error->warning(FLERR, "More than one compute sph2/ulsph_strain_rate");
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTlsphStress::compute_peratom() {
+void ComputeSph2ULSPHStrainRate::compute_peratom() {
 	invoked_peratom = update->ntimestep;
+	int *mol = atom->molecule;
 
 	// grow vector array if necessary
 
 	if (atom->nlocal > nmax) {
-		memory->destroy(stresstensorVector);
+		memory->destroy(strain_rate_array);
 		nmax = atom->nmax;
-		memory->create(stresstensorVector, nmax, size_peratom_cols, "stresstensorVector");
-		array_atom = stresstensorVector;
+		memory->create(strain_rate_array, nmax, size_peratom_cols, "stresstensorVector");
+		array_atom = strain_rate_array;
 	}
 
-	// copy data to output array
 	int itmp = 0;
-
-	Matrix3d *T = (Matrix3d *) force->pair->extract("CauchyStress_ptr", itmp);
-	if (T == NULL) {
-		error->all(FLERR, "compute tlsph/stress failed to access Cauchy Stress array");
+	Matrix3d *L = (Matrix3d *) force->pair->extract("sph2/ulsph/velocityGradient_ptr", itmp);
+	if (L == NULL) {
+		error->all(FLERR,
+				"compute sph2/ulsph_strain_rate could not access any velocity gradients. Are the matching pair styles present?");
 	}
-
 	int nlocal = atom->nlocal;
+	Matrix3d D;
 
 	for (int i = 0; i < nlocal; i++) {
-		stresstensorVector[i][0] = T[i](0, 0); // xx
-		stresstensorVector[i][1] = T[i](1, 1); // yy
-		stresstensorVector[i][2] = T[i](2, 2); // zz
-		stresstensorVector[i][3] = T[i](0, 1); // xy
-		stresstensorVector[i][4] = T[i](0, 2); // xz
-		stresstensorVector[i][5] = T[i](1, 2); // yz
+		D = 0.5 * (L[i] + L[i].transpose());
+		strain_rate_array[i][0] = D(0, 0); // xx
+		strain_rate_array[i][1] = D(1, 1); // yy
+		strain_rate_array[i][2] = D(2, 2); // zz
+		strain_rate_array[i][3] = D(0, 1); // xy
+		strain_rate_array[i][4] = D(0, 2); // xz
+		strain_rate_array[i][5] = D(1, 2); // yz
 	}
 }
 
@@ -95,7 +96,17 @@ void ComputeTlsphStress::compute_peratom() {
  memory usage of local atom-based array
  ------------------------------------------------------------------------- */
 
-double ComputeTlsphStress::memory_usage() {
+double ComputeSph2ULSPHStrainRate::memory_usage() {
 	double bytes = size_peratom_cols * nmax * sizeof(double);
 	return bytes;
+}
+
+/*
+ * deviator of a tensor
+ */
+Matrix3d ComputeSph2ULSPHStrainRate::Deviator(Matrix3d M) {
+	Matrix3d eye;
+	eye.setIdentity();
+	eye *= M.trace() / 3.0;
+	return M - eye;
 }

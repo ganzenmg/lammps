@@ -5,7 +5,7 @@
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
-   certain rights in this software.  This software is distributed under 
+   certain rights in this software.  This software is distributed under
    the GNU General Public License.
 
    See the README file in the top-level LAMMPS directory.
@@ -13,28 +13,28 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(tlsph/defgrad,ComputeTlsphDefgrad)
+ComputeStyle(sph2/internal_energy,ComputeSph2InternalEnergy)
 
 #else
 
-#ifndef LMP_COMPUTE_TLSPH_DEFGRAD_H
-#define LMP_COMPUTE_TLSPH_DEFGRAD_H
+#ifndef LMP_COMPUTE_SPH2_INTERNAL_ENERGY_H
+#define LMP_COMPUTE_SPH2_INTERNAL_ENERGY_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeTlsphDefgrad : public Compute {
+class ComputeSph2InternalEnergy : public Compute {
  public:
-  ComputeTlsphDefgrad(class LAMMPS *, int, char **);
-  ~ComputeTlsphDefgrad();
+  ComputeSph2InternalEnergy(class LAMMPS *, int, char **);
+  ~ComputeSph2InternalEnergy();
   void init();
   void compute_peratom();
   double memory_usage();
 
  private:
   int nmax;
-  double **defgradVector;
+  double *internal_energy_vector;
 };
 
 }

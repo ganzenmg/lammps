@@ -19,7 +19,7 @@
 #include "float.h"
 #include "stdlib.h"
 #include "string.h"
-#include "pair_sph.h"
+#include "pair_ulsph.h"
 #include "atom.h"
 #include "domain.h"
 #include "force.h"
@@ -46,7 +46,7 @@ using namespace Eigen;
 #define DENSITY_SUMMATION true
 /* ---------------------------------------------------------------------- */
 
-PairSphFluid::PairSphFluid(LAMMPS *lmp) :
+PairULSPH::PairULSPH(LAMMPS *lmp) :
 		Pair(lmp) {
 
 	C1 = NULL;
@@ -71,7 +71,7 @@ PairSphFluid::PairSphFluid(LAMMPS *lmp) :
 
 /* ---------------------------------------------------------------------- */
 
-PairSphFluid::~PairSphFluid() {
+PairULSPH::~PairULSPH() {
 	if (allocated) {
 		//printf("... deallocating\n");
 		memory->destroy(C1);
@@ -104,7 +104,7 @@ PairSphFluid::~PairSphFluid() {
  *
  ---------------------------------------------------------------------- */
 
-void PairSphFluid::PreCompute() {
+void PairULSPH::PreCompute() {
 	double *vfrac = atom->vfrac;
 	double *radius = atom->radius;
 	double **x = atom->x;
@@ -259,7 +259,7 @@ void PairSphFluid::PreCompute() {
 
 /* ---------------------------------------------------------------------- */
 
-void PairSphFluid::compute(int eflag, int vflag) {
+void PairULSPH::compute(int eflag, int vflag) {
 	double **x = atom->x;
 	double **v = atom->vest;
 	double **vint = atom->v; // Velocity-Verlet algorithm velocities
@@ -321,8 +321,8 @@ void PairSphFluid::compute(int eflag, int vflag) {
 		smoothVel[i].setZero();
 	}
 
-	PairSphFluid::PreCompute();
-	PairSphFluid::ComputePressure();
+	PairULSPH::PreCompute();
+	PairULSPH::ComputePressure();
 
 	/*
 	 * QUANTITIES ABOVE HAVE ONLY BEEN CALCULATED FOR NLOCAL PARTICLES.
@@ -396,15 +396,13 @@ void PairSphFluid::compute(int eflag, int vflag) {
 				 * force -- like for solids with stress tensor
 				 */
 
-				f_stress = vfrac[i] * vfrac[j]
-						* (stressTensor[i] + stressTensor[j]) * g;
+				f_stress = vfrac[i] * vfrac[j] * (stressTensor[i] + stressTensor[j]) * g;
 
 				rcut2 = 1.5 * (contact_radius[i] + contact_radius[j]);
 				if (r < rcut2) {
 					wf2 = (rcut2 - r) / rcut2;
 					wf2 = wf2;
-					f_stress += wf2 * vfrac[i] * vfrac[j]
-							* (artStress[i] + artStress[j]) * g;
+					f_stress += wf2 * vfrac[i] * vfrac[j] * (artStress[i] + artStress[j]) * g;
 				}
 
 				/*
@@ -419,8 +417,7 @@ void PairSphFluid::compute(int eflag, int vflag) {
 					c_ij = 0.5 * (c0[i] + c0[j]);
 					rho_ij = 0.5 * (rho[i] + rho[j]);
 
-					visc_magnitude = (-Q1[itype][jtype] * c_ij * mu_ij
-							+ Q2[itype][jtype] * mu_ij * mu_ij) / rho_ij;
+					visc_magnitude = (-Q1[itype][jtype] * c_ij * mu_ij + Q2[itype][jtype] * mu_ij * mu_ij) / rho_ij;
 					f_visc = rmass[i] * rmass[j] * visc_magnitude * g;
 
 					//printf("mu=%g, c=%g, rho=%g, magnitude=%g\n", mu_ij, c_ij, rho_ij, f_visc.norm());
@@ -456,10 +453,7 @@ void PairSphFluid::compute(int eflag, int vflag) {
 
 				// tally atomistic stress tensor
 				if (evflag) {
-					ev_tally_xyz(i, j, nlocal, 0,
-					                        0.0, 0.0,
-					                        sumForces(0), sumForces(1), sumForces(2),
-					                        dx(0), dx(1), dx(2));
+					ev_tally_xyz(i, j, nlocal, 0, 0.0, 0.0, sumForces(0), sumForces(1), sumForces(2), dx(0), dx(1), dx(2));
 				}
 			}
 
@@ -496,8 +490,7 @@ void PairSphFluid::compute(int eflag, int vflag) {
  output: final pressure pFinal, pressure rate p_rate
  ------------------------------------------------------------------------- */
 //PerfectGasEOS(lambda, rho[i], vfrac[i], e[i], &pFinal);
-void PairSphFluid::PerfectGasEOS(double gamma, double vol, double mass,
-		double energy, double *pFinal__, double *c0) {
+void PairULSPH::PerfectGasEOS(double gamma, double vol, double mass, double energy, double *pFinal__, double *c0) {
 
 	/*
 	 * perfect gas EOS is p = (gamma - 1) rho e
@@ -524,9 +517,8 @@ void PairSphFluid::PerfectGasEOS(double gamma, double vol, double mass,
  output:(1) pressure
  (2) current speed of sound
  ------------------------------------------------------------------------- */
-void PairSphFluid::TaitEOS(const double exponent, const double c0_reference,
-		const double rho_reference, const double rho_current, double &pressure,
-		double &sound_speed) {
+void PairULSPH::TaitEOS(const double exponent, const double c0_reference, const double rho_reference, const double rho_current,
+		double &pressure, double &sound_speed) {
 
 	double B = rho_reference * c0_reference * c0_reference / exponent;
 	pressure = B * (pow(rho_current / rho_reference, exponent) - 1.0);
@@ -536,7 +528,7 @@ void PairSphFluid::TaitEOS(const double exponent, const double c0_reference,
 /* ----------------------------------------------------------------------
  compute pressure
  ------------------------------------------------------------------------- */
-void PairSphFluid::ComputePressure() {
+void PairULSPH::ComputePressure() {
 	double *radius = atom->radius;
 	double *rho = atom->rho;
 	double *vfrac = atom->vfrac;
@@ -548,8 +540,7 @@ void PairSphFluid::ComputePressure() {
 	double pFinal;
 	int i, itype;
 	int nlocal = atom->nlocal;
-	Matrix3d D, W, elaStress, elaStressDot, viscStress, V, sigma_diag,
-			artStressDiag;
+	Matrix3d D, W, elaStress, elaStressDot, viscStress, V, sigma_diag, artStressDiag;
 	double mu_e, mu_s, eta, lambda1, lambda2, kinvisc, epsilon;
 	double lambda, mu;
 	Matrix3d Jaumann_rate, eye;
@@ -584,13 +575,11 @@ void PairSphFluid::ComputePressure() {
 			//printf("eos = %d\n", eos[itype]);
 			switch (eos[itype][itype]) {
 			case PERFECT_GAS:
-				PerfectGasEOS(C1[itype][itype], vfrac[i], rmass[i], e[i],
-						&pFinal, &c0[i]);
+				PerfectGasEOS(C1[itype][itype], vfrac[i], rmass[i], e[i], &pFinal, &c0[i]);
 				break;
 			case TAIT:
 				//      Tait exponent,    c0_reference,     rho_reference
-				TaitEOS(C1[itype][itype], C2[itype][itype], C3[itype][itype],
-						rho[i], pFinal, c0[i]);
+				TaitEOS(C1[itype][itype], C2[itype][itype], C3[itype][itype], rho[i], pFinal, c0[i]);
 
 				stressTensor[i].setZero();
 				stressTensor[i](0, 0) = pFinal;
@@ -627,19 +616,15 @@ void PairSphFluid::ComputePressure() {
 
 				break;
 			case LINEAR_ELASTIC:
-				lambda = C1[itype][itype] * C2[itype][itype]
-						/ ((1.0 + C2[itype][itype])
-								* (1.0 - 2.0 * C2[itype][itype]));
+				lambda = C1[itype][itype] * C2[itype][itype] / ((1.0 + C2[itype][itype]) * (1.0 - 2.0 * C2[itype][itype]));
 				mu = C1[itype][itype] / (2.0 * (1.0 + C2[itype][itype]));
 
 				D = 0.5 * (L[i] + L[i].transpose());
 				W = 0.5 * (L[i] - L[i].transpose());
 
-				elaStressDot = (lambda + 2.0 * mu / 3.0) * D.trace() * eye
-						+ 2.0 * mu * Deviator(D);
+				elaStressDot = (lambda + 2.0 * mu / 3.0) * D.trace() * eye + 2.0 * mu * Deviator(D);
 
-				Jaumann_rate = elaStressDot + W * elaStress
-						+ elaStress * W.transpose();
+				Jaumann_rate = elaStressDot + W * elaStress + elaStress * W.transpose();
 				elaStress += dt * Jaumann_rate;
 				stressTensor[i] = elaStress;
 
@@ -703,7 +688,7 @@ void PairSphFluid::ComputePressure() {
  allocate all arrays
  ------------------------------------------------------------------------- */
 
-void PairSphFluid::allocate() {
+void PairULSPH::allocate() {
 
 	//printf("in allocate\n");
 
@@ -737,7 +722,7 @@ void PairSphFluid::allocate() {
  global settings
  ------------------------------------------------------------------------- */
 
-void PairSphFluid::settings(int narg, char **arg) {
+void PairULSPH::settings(int narg, char **arg) {
 	if (narg != 0)
 		error->all(FLERR, "Illegal pair_style command");
 }
@@ -746,7 +731,7 @@ void PairSphFluid::settings(int narg, char **arg) {
  set coeffs for one or more type pairs
  ------------------------------------------------------------------------- */
 
-void PairSphFluid::coeff(int narg, char **arg) {
+void PairULSPH::coeff(int narg, char **arg) {
 	//printf("in coeff\n");
 
 	double C1_one, C2_one, C3_one, C4_one, q1_one, q2_one;
@@ -792,8 +777,7 @@ void PairSphFluid::coeff(int narg, char **arg) {
 		break;
 	case LINEAR_ELASTIC:
 		if (narg != 7)
-			error->all(FLERR,
-					"Incorrect number of args for linear elastic material model");
+			error->all(FLERR, "Incorrect number of args for linear elastic material model");
 		C1_one = atof(arg[3]); // Young's modulus
 		C2_one = atof(arg[4]); // Poisson ratio
 		q1_one = atof(arg[5]); // linear term in artificial viscosiy
@@ -837,7 +821,7 @@ void PairSphFluid::coeff(int narg, char **arg) {
  init for one type pair i,j and corresponding j,i
  ------------------------------------------------------------------------- */
 
-double PairSphFluid::init_one(int i, int j) {
+double PairULSPH::init_one(int i, int j) {
 
 	if (!allocated)
 		allocate();
@@ -867,7 +851,7 @@ double PairSphFluid::init_one(int i, int j) {
  init specific to this pair style
  ------------------------------------------------------------------------- */
 
-void PairSphFluid::init_style() {
+void PairULSPH::init_style() {
 	int i;
 
 	//printf(" in init style\n");
@@ -902,7 +886,7 @@ void PairSphFluid::init_style() {
  optional granular history list
  ------------------------------------------------------------------------- */
 
-void PairSphFluid::init_list(int id, NeighList *ptr) {
+void PairULSPH::init_list(int id, NeighList *ptr) {
 	if (id == 0)
 		list = ptr;
 }
@@ -911,7 +895,7 @@ void PairSphFluid::init_list(int id, NeighList *ptr) {
  proc 0 writes to restart file
  ------------------------------------------------------------------------- */
 
-void PairSphFluid::write_restart(FILE *fp) {
+void PairULSPH::write_restart(FILE *fp) {
 	int i, j;
 	for (i = 1; i <= atom->ntypes; i++) {
 		fwrite(&C1[i], sizeof(double), 1, fp);
@@ -930,7 +914,7 @@ void PairSphFluid::write_restart(FILE *fp) {
  proc 0 reads from restart file, bcasts
  ------------------------------------------------------------------------- */
 
-void PairSphFluid::read_restart(FILE *fp) {
+void PairULSPH::read_restart(FILE *fp) {
 	allocate();
 
 	int i, j;
@@ -966,7 +950,7 @@ void PairSphFluid::read_restart(FILE *fp) {
  memory usage of local atom-based arrays
  ------------------------------------------------------------------------- */
 
-double PairSphFluid::memory_usage() {
+double PairULSPH::memory_usage() {
 
 	//printf("in memory usage\n");
 
@@ -976,8 +960,7 @@ double PairSphFluid::memory_usage() {
 
 /* ---------------------------------------------------------------------- */
 
-int PairSphFluid::pack_forward_comm(int n, int *list, double *buf, int pbc_flag,
-		int *pbc) {
+int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	double *rho = atom->rho;
 	int i, j, m;
 
@@ -1008,7 +991,7 @@ int PairSphFluid::pack_forward_comm(int n, int *list, double *buf, int pbc_flag,
 
 /* ---------------------------------------------------------------------- */
 
-void PairSphFluid::unpack_forward_comm(int n, int first, double *buf) {
+void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
 	double *rho = atom->rho;
 	int i, m, last;
 
@@ -1045,8 +1028,7 @@ void PairSphFluid::unpack_forward_comm(int n, int first, double *buf) {
  * compute a normalized smoothing kernel and its derivative
  */
 
-void PairSphFluid::kernel_and_derivative(const double h, const double r,
-		double &wf, double &wfd) {
+void PairULSPH::kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
 
 	/*
 	 * Spiky kernel
@@ -1073,7 +1055,7 @@ void PairSphFluid::kernel_and_derivative(const double h, const double r,
  * Pseudo-inverse via SVD
  */
 
-Matrix3d PairSphFluid::pseudo_inverse_SVD(Matrix3d M) {
+Matrix3d PairULSPH::pseudo_inverse_SVD(Matrix3d M) {
 
 	JacobiSVD<Matrix3d> svd(M, ComputeFullU | ComputeFullV);
 
@@ -1104,16 +1086,15 @@ Matrix3d PairSphFluid::pseudo_inverse_SVD(Matrix3d M) {
  * EXTRACT
  */
 
-void *PairSphFluid::extract(const char *str, int &i) {
+void *PairULSPH::extract(const char *str, int &i) {
 	//printf("in extract\n");
-	if (strcmp(str, "sphFluid_smoothVel_ptr") == 0) {
+	if (strcmp(str, "sph2/ulsph/smoothVel_ptr") == 0) {
 		return (void *) smoothVel;
-	} else if (strcmp(str, "fluid_hMin_ptr") == 0) {
-		//printf("min h exported is %f\n", hMin);
+	} else if (strcmp(str, "sph2/ulsph/hMin_ptr") == 0) {
 		return (void *) &hMin;
-	} else if (strcmp(str, "fluid_stressTensor_ptr") == 0) {
+	} else if (strcmp(str, "sph2/ulsph/stressTensor_ptr") == 0) {
 		return (void *) stressTensor;
-	} else if (strcmp(str, "fluid_velocityGradient_ptr") == 0) {
+	} else if (strcmp(str, "sph2/ulsph/velocityGradient_ptr") == 0) {
 		return (void *) L;
 	}
 
@@ -1123,7 +1104,7 @@ void *PairSphFluid::extract(const char *str, int &i) {
 /*
  * deviator of a tensor
  */
-Matrix3d PairSphFluid::Deviator(Matrix3d M) {
+Matrix3d PairULSPH::Deviator(Matrix3d M) {
 	Matrix3d eye;
 	eye.setIdentity();
 	eye *= M.trace() / 3.0;

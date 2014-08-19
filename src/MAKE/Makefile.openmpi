@@ -8,7 +8,7 @@ SHELL = /bin/sh
 
 CC =		mpic++
 CCFLAGS =	-O2 \
-		-funroll-loops -fstrict-aliasing -Wall -W -Wno-uninitialized -Wno-unused
+		-funroll-loops -fstrict-aliasing -Wall -W -Wno-uninitialized -Wno-unused -Wno-unused-result
 SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
