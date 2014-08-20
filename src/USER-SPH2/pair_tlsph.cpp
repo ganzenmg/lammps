@@ -74,7 +74,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 
 	comm_forward = 20; // this pair style communicates 12 doubles to ghost atoms : K tensor + PK1 tensor + F tensor + shepardWeight
 
-	init_x0_box();
+	//init_x0_box();
 }
 
 /* ---------------------------------------------------------------------- */

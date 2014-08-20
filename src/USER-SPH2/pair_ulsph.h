@@ -73,6 +73,7 @@ protected:
     void allocate();
 
     int nmax; // max number of atoms on this proc
+    int *numNeighs;
     Matrix3d *K, *artStress;
     double *shepardWeight, *c0;
     Vector3d *smoothVel;

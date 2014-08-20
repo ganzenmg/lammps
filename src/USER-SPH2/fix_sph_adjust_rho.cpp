@@ -38,26 +38,26 @@ using namespace FixConst;
 /* ---------------------------------------------------------------------- */
 
 FixSphFluidAdjustRho::FixSphFluidAdjustRho(LAMMPS *lmp, int narg, char **arg) :
-        Fix(lmp, narg, arg) {
+		Fix(lmp, narg, arg) {
 
-    if ((atom->e_flag != 1) || (atom->rho_flag != 1))
-        error->all(FLERR, "fix sph_fluid command requires atom_style with both energy and density");
+	if ((atom->e_flag != 1) || (atom->rho_flag != 1))
+		error->all(FLERR, "fix sph_fluid command requires atom_style with both energy and density");
 
-    if (narg != 5)
-        error->all(FLERR, "Illegal number of arguments for fix sph_adjust_rho command");
+	if (narg != 5)
+		error->all(FLERR, "Illegal number of arguments for fix sph_adjust_rho command");
 
-    rho_target = atof(arg[3]);
-    NN_target = atof(arg[4]);
+	rho_target = atof(arg[3]);
+	NN_target = atof(arg[4]);
 
-    time_integrate = 1;
+	time_integrate = 1;
 }
 
 /* ---------------------------------------------------------------------- */
 
 int FixSphFluidAdjustRho::setmask() {
-    int mask = 0;
-    mask |= FINAL_INTEGRATE;
-    return mask;
+	int mask = 0;
+	mask |= FINAL_INTEGRATE;
+	return mask;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -69,24 +69,46 @@ void FixSphFluidAdjustRho::init() {
 
 void FixSphFluidAdjustRho::final_integrate() {
 
-    // update v, rho, and e of atoms in group
+	// update v, rho, and e of atoms in group
 
-    double *rho = atom->rho;
-    int *mask = atom->mask;
-    int nlocal = atom->nlocal;
-    if (igroup == atom->firstgroup)
-        nlocal = atom->nfirst;
-    double scale;
-    double *rmass = atom->rmass;
-    double *vfrac = atom->vfrac;
+	double *rho = atom->rho;
+	int *mask = atom->mask;
+	int nlocal = atom->nlocal;
+	if (igroup == atom->firstgroup)
+		nlocal = atom->nfirst;
+	double scale;
+	double *rmass = atom->rmass;
+	double *vfrac = atom->vfrac;
+	double *radius = atom->radius;
 
-    for (int i = 0; i < nlocal; i++) {
-        if (mask[i] & groupbit) {
+	int itmp = 0;
+	int *numNeighs = (int *) force->pair->extract("sph2/ulsph/numNeighs_ptr", itmp);
+	if (numNeighs == NULL) {
+		error->all(FLERR, "compute sph2/ulsph_num_neighs failed to access numNeighs array");
+	}
 
-            scale = rho[i] / rho_target;
-            rmass[i] /= sqrt(scale);
+	for (int i = 0; i < nlocal; i++) {
+		if (mask[i] & groupbit) {
 
-        }
-    }
+			scale = rho[i] / rho_target;
+			rmass[i] /= sqrt(scale);
+
+			//printf("old radius: %f ", radius[i]);
+			if (NN_target > 0) {
+				scale = (double) numNeighs[i] / (double) NN_target;
+				if (scale > 1.0) {
+					if (scale > 1.1)
+						scale = 1.1;
+					radius[i] /= scale;
+				} else {
+					if (scale < 0.9)
+						scale = 0.9;
+					radius[i] /= scale;
+				}
+			}
+			//printf(" new radius: %f\n", radius[i]);
+
+		}
+	}
 }
 

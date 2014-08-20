@@ -65,6 +65,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	delete_flag = NULL;
 	shepardWeight = NULL;
 	smoothVel = NULL;
+	numNeighs = NULL;
 
 	comm_forward = 15; // this pair style communicates 9 doubles to ghost atoms
 }
@@ -95,6 +96,7 @@ PairULSPH::~PairULSPH() {
 		delete[] stressTensor;
 		delete[] L;
 		delete[] artStress;
+		delete[] numNeighs;
 	}
 }
 
@@ -132,6 +134,7 @@ void PairULSPH::PreCompute() {
 		delete_flag[i] = 0.0;
 		smoothVel[i].setZero();
 		L[i].setZero();
+		numNeighs[i] = 0;
 
 		if (DENSITY_SUMMATION) {
 			if (setflag[itype][itype] == 1) {
@@ -204,6 +207,7 @@ void PairULSPH::PreCompute() {
 
 				shepardWeight[i] += vfrac[j] * wf;
 				smoothVel[i] += vfrac[j] * wf * dvint;
+				numNeighs[i] += 1;
 
 				if (j < nlocal) {
 					if (COMPUTE_CORRECTED_DERIVATIVES) {
@@ -220,6 +224,7 @@ void PairULSPH::PreCompute() {
 
 					shepardWeight[j] += vfrac[i] * wf;
 					smoothVel[j] -= vfrac[i] * wf * dvint;
+					numNeighs[j] += 1;
 				}
 			} // end if check distance
 		} // end loop over j
@@ -313,6 +318,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 		L = new Matrix3d[nmax];
 		delete[] artStress;
 		artStress = new Matrix3d[nmax];
+		delete[] numNeighs;
+		numNeighs = new int[nmax];
 	}
 
 	// zero accumulators
@@ -402,7 +409,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				if (r < rcut2) {
 					wf2 = (rcut2 - r) / rcut2;
 					wf2 = wf2;
-					f_stress += wf2 * vfrac[i] * vfrac[j] * (artStress[i] + artStress[j]) * g;
+					f_stress += vfrac[i] * vfrac[j] * (artStress[i] + artStress[j]) * g;
 				}
 
 				/*
@@ -587,7 +594,7 @@ void PairULSPH::ComputePressure() {
 				stressTensor[i](2, 2) = pFinal;
 
 				D = 0.5 * (L[i] + L[i].transpose());
-//				W = 0.5 * (L[i] - L[i].transpose());
+				W = 0.5 * (L[i] - L[i].transpose());
 //
 //				lambda1 = 0.02e3;
 //				lambda2 = 0.02e3;
@@ -622,7 +629,8 @@ void PairULSPH::ComputePressure() {
 				D = 0.5 * (L[i] + L[i].transpose());
 				W = 0.5 * (L[i] - L[i].transpose());
 
-				elaStressDot = (lambda + 2.0 * mu / 3.0) * D.trace() * eye + 2.0 * mu * Deviator(D);
+				// elaStressDot = (lambda + 2.0 * mu / 3.0) * D.trace() * eye + 2.0 * mu * Deviator(D);
+				elaStressDot = 2.0 * mu * Deviator(D);
 
 				Jaumann_rate = elaStressDot + W * elaStress + elaStress * W.transpose();
 				elaStress += dt * Jaumann_rate;
@@ -639,24 +647,24 @@ void PairULSPH::ComputePressure() {
 
 			// artificial stress
 			artStress[i].setZero();
-//			epsilon = 0.5;
-//
-//			es.compute(stressTensor[i]);
-//			V = es.eigenvectors();
-//
-//			// diagonalize stress matrix
-//			sigma_diag = V.inverse() * stressTensor[i] * V;
-//
-//			flag = 0;
-//
-//			artStressDiag.setZero();
-//			for (int dim = 0; dim < 3; dim++) {
-//				if (sigma_diag(dim, dim) > 0.0) {
-//					artStressDiag(dim, dim) = -10*epsilon * sigma_diag(dim, dim);
-//				}
-//			}
-//			// undiagonalize artificial stress matrix
-//			artStress[i] = V * artStressDiag * V.inverse();
+			epsilon = 0.01;
+
+			es.compute(stressTensor[i]);
+			V = es.eigenvectors();
+
+			// diagonalize stress matrix
+			sigma_diag = V.inverse() * stressTensor[i] * V;
+
+			flag = 0;
+
+			artStressDiag.setZero();
+			for (int dim = 0; dim < 3; dim++) {
+				if (sigma_diag(dim, dim) > 0.0) {
+					artStressDiag(dim, dim) = -epsilon * sigma_diag(dim, dim);
+				}
+			}
+			// undiagonalize artificial stress matrix
+			artStress[i] = V * artStressDiag * V.inverse();
 
 			pressure[i] = pFinal;
 
@@ -1096,6 +1104,8 @@ void *PairULSPH::extract(const char *str, int &i) {
 		return (void *) stressTensor;
 	} else if (strcmp(str, "sph2/ulsph/velocityGradient_ptr") == 0) {
 		return (void *) L;
+	} else if (strcmp(str, "sph2/ulsph/numNeighs_ptr") == 0) {
+		return (void *) numNeighs;
 	}
 
 	return NULL;
