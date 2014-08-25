@@ -33,7 +33,7 @@ using namespace FixConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixTlsphIntegrate::FixTlsphIntegrate(LAMMPS *lmp, int narg, char **arg) :
+FixSph2IntegrateTlsph::FixSph2IntegrateTlsph(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
 	if (narg < 4) {
 		printf("narg=%d\n", narg);
@@ -56,7 +56,7 @@ FixTlsphIntegrate::FixTlsphIntegrate(LAMMPS *lmp, int narg, char **arg) :
 			updateReferenceConfigurationFlag = true;
 			if (comm->me == 0) {
 				error->message(FLERR,
-						"*** fix tlsph/integrate will update the reference configuration every with every neighborlist build ***");
+						"*** fix tlsph/integrate will update the reference configuration ***");
 			}
 		}
 
@@ -79,7 +79,7 @@ FixTlsphIntegrate::FixTlsphIntegrate(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-int FixTlsphIntegrate::setmask() {
+int FixSph2IntegrateTlsph::setmask() {
 	int mask = 0;
 	mask |= INITIAL_INTEGRATE;
 	mask |= FINAL_INTEGRATE;
@@ -88,7 +88,7 @@ int FixTlsphIntegrate::setmask() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixTlsphIntegrate::init() {
+void FixSph2IntegrateTlsph::init() {
 	dtv = update->dt;
 	dtf = 0.5 * update->dt * force->ftm2v;
 	vlimitsq = vlimit * vlimit;
@@ -113,7 +113,7 @@ void FixTlsphIntegrate::init() {
 /* ----------------------------------------------------------------------
  ------------------------------------------------------------------------- */
 
-void FixTlsphIntegrate::initial_integrate(int vflag) {
+void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 	double dtfm, vsq, scale;
 
 	// update v and x of atoms in group
@@ -137,11 +137,11 @@ void FixTlsphIntegrate::initial_integrate(int vflag) {
 //			if (comm->me == 0) {
 //				printf("updating ref config at step: %ld\n", update->ntimestep);
 //			}
-//			FixTlsphIntegrate::updateReferenceConfiguration();
+//			FixSph2IntegrateTlsph::updateReferenceConfiguration();
 //		}
 //	}
 	if (updateReferenceConfigurationFlag) {
-		int *updateFlag_ptr = (int *) force->pair->extract("updateFlag_ptr",
+		int *updateFlag_ptr = (int *) force->pair->extract("sph2/tlsph/updateFlag_ptr",
 				itmp);
 		if (updateFlag_ptr == NULL) {
 			error->one(FLERR,
@@ -160,12 +160,12 @@ void FixTlsphIntegrate::initial_integrate(int vflag) {
 							update->ntimestep);
 				}
 
-				FixTlsphIntegrate::updateReferenceConfiguration();
+				FixSph2IntegrateTlsph::updateReferenceConfiguration();
 			}
 		}
 	}
 
-	Vector3d *smoothVel = (Vector3d *) force->pair->extract("smoothVel_ptr",
+	Vector3d *smoothVel = (Vector3d *) force->pair->extract("sph2/tlsph/smoothVel_ptr",
 			itmp);
 
 	if (xsphFlag) {
@@ -213,7 +213,7 @@ void FixTlsphIntegrate::initial_integrate(int vflag) {
 
 /* ---------------------------------------------------------------------- */
 
-void FixTlsphIntegrate::final_integrate() {
+void FixSph2IntegrateTlsph::final_integrate() {
 	double dtfm, vsq, scale;
 
 // update v of atoms in group
@@ -255,7 +255,7 @@ void FixTlsphIntegrate::final_integrate() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixTlsphIntegrate::reset_dt() {
+void FixSph2IntegrateTlsph::reset_dt() {
 	dtv = update->dt;
 	dtf = 0.5 * update->dt * force->ftm2v;
 	vlimitsq = vlimit * vlimit;
@@ -263,7 +263,7 @@ void FixTlsphIntegrate::reset_dt() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixTlsphIntegrate::updateReferenceConfiguration() {
+void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 	double **defgrad0 = atom->tlsph_fold;
 	double *radius = atom->radius;
 	double *contact_radius = atom->contact_radius;
@@ -283,23 +283,23 @@ void FixTlsphIntegrate::updateReferenceConfiguration() {
 	// access current deformation gradient
 	// copy data to output array
 	itmp = 0;
-	Matrix3d *F = (Matrix3d *) force->pair->extract("F_ptr", itmp);
+	Matrix3d *F = (Matrix3d *) force->pair->extract("sph2/tlsph/F_ptr", itmp);
 	if (F == NULL) {
 		error->all(FLERR,
-				"FixTlsphIntegrate::updateReferenceConfiguration() failed to access F array");
+				"FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access F array");
 	}
 
-	Matrix3d *Fincr = (Matrix3d *) force->pair->extract("Fincr_ptr", itmp);
+	Matrix3d *Fincr = (Matrix3d *) force->pair->extract("sph2/tlsph/Fincr_ptr", itmp);
 	if (Fincr == NULL) {
 		error->all(FLERR,
-				"FixTlsphIntegrate::updateReferenceConfiguration() failed to access Fincr array");
+				"FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access Fincr array");
 	}
 
 	int *numNeighsRefConfig = (int *) force->pair->extract(
-			"numNeighsRefConfig_ptr", itmp);
+			"sph2/tlsph/numNeighsRefConfig_ptr", itmp);
 	if (numNeighsRefConfig == NULL) {
 		error->all(FLERR,
-				"FixTlsphIntegrate::updateReferenceConfiguration() failed to access numNeighsRefConfig array");
+				"FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access numNeighsRefConfig array");
 	}
 
 	nRefConfigUpdates++;
@@ -374,7 +374,7 @@ void FixTlsphIntegrate::updateReferenceConfiguration() {
 
 /* ---------------------------------------------------------------------- */
 
-int FixTlsphIntegrate::pack_comm(int n, int *list, double *buf, int pbc_flag,
+int FixSph2IntegrateTlsph::pack_comm(int n, int *list, double *buf, int pbc_flag,
 		int *pbc) {
 	int i, j, m;
 	double *radius = atom->radius;
@@ -397,7 +397,7 @@ int FixTlsphIntegrate::pack_comm(int n, int *list, double *buf, int pbc_flag,
 
 /* ---------------------------------------------------------------------- */
 
-void FixTlsphIntegrate::unpack_comm(int n, int first, double *buf) {
+void FixSph2IntegrateTlsph::unpack_comm(int n, int first, double *buf) {
 	int i, m, last;
 	double *radius = atom->radius;
 	double *vfrac = atom->vfrac;

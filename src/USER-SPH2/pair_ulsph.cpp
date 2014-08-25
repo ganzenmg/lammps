@@ -399,19 +399,19 @@ void PairULSPH::compute(int eflag, int vflag) {
 //				f_stress = -rmass[i] * rmass[j]
 //						* (pressure[i] / (rho[i] * rho[i])
 //								+ pressure[j] / (rho[j] * rho[j])) * g;
+				f_stress = rmass[i] * rmass[j]
+				          * (stressTensor[i] / (rho[i] * rho[i]) + stressTensor[j] / (rho[j] * rho[j])) * g;
 				/*
 				 * force -- like for solids with stress tensor
 				 */
 
-				f_stress = vfrac[i] * vfrac[j] * (stressTensor[i] + stressTensor[j]) * g;
-
-				rcut2 = 1.5 * (contact_radius[i] + contact_radius[j]);
-				if (r < rcut2) {
-					wf2 = (rcut2 - r) / rcut2;
-					wf2 = wf2;
-					f_stress += vfrac[i] * vfrac[j] * (artStress[i] + artStress[j]) * g;
-				}
-
+				//f_stress = vfrac[i] * vfrac[j] * (stressTensor[i] + stressTensor[j]) * g;
+//				rcut2 = 1.5 * (contact_radius[i] + contact_radius[j]);
+//				if (r < rcut2) {
+//					wf2 = (rcut2 - r) / rcut2;
+//					wf2 = wf2;
+//					f_stress += vfrac[i] * vfrac[j] * (artStress[i] + artStress[j]) * g;
+//				}
 				/*
 				 * artificial viscosity -- alpha is dimensionless
 				 * Monaghan–Balsara form of the artificial viscosity
@@ -851,7 +851,7 @@ double PairULSPH::init_one(int i, int j) {
 	double cutoff = maxrad_dynamic[i] + maxrad_dynamic[j];
 	cutoff = MAX(cutoff, maxrad_frozen[i] + maxrad_dynamic[j]);
 	cutoff = MAX(cutoff, maxrad_dynamic[i] + maxrad_frozen[j]);
-	printf("cutoff for pair sph/fluid = %f\n", cutoff);
+	//printf("cutoff for pair sph/fluid = %f\n", cutoff);
 	return cutoff;
 }
 

@@ -13,7 +13,7 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(tlsph/dt/reset,FixTlsphDtReset)
+FixStyle(sph2/tlsph_dt_reset,FixSph2TlsphDtReset)
 
 #else
 
@@ -24,10 +24,10 @@ FixStyle(tlsph/dt/reset,FixTlsphDtReset)
 
 namespace LAMMPS_NS {
 
-class FixTlsphDtReset : public Fix {
+class FixSph2TlsphDtReset : public Fix {
  public:
-  FixTlsphDtReset(class LAMMPS *, int, char **);
-  ~FixTlsphDtReset() {}
+  FixSph2TlsphDtReset(class LAMMPS *, int, char **);
+  ~FixSph2TlsphDtReset() {}
   int setmask();
   void init();
   void setup(int);

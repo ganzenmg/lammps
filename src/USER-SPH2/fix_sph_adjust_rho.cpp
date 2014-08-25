@@ -92,20 +92,13 @@ void FixSphFluidAdjustRho::final_integrate() {
 
 			scale = rho[i] / rho_target;
 			rmass[i] /= sqrt(scale);
+			//vfrac[i] *= sqrt(scale);
 
 			//printf("old radius: %f ", radius[i]);
-			if (NN_target > 0) {
-				scale = (double) numNeighs[i] / (double) NN_target;
-				if (scale > 1.0) {
-					if (scale > 1.1)
-						scale = 1.1;
-					radius[i] /= scale;
-				} else {
-					if (scale < 0.9)
-						scale = 0.9;
-					radius[i] /= scale;
-				}
-			}
+			//if (NN_target > 0) {
+			//	scale = 12.0 / numNeighs[i];
+			//	radius[i] *= sqrt(scale);
+			//}
 			//printf(" new radius: %f\n", radius[i]);
 
 		}

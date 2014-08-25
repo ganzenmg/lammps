@@ -13,21 +13,21 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(tlsph/integrate,FixTlsphIntegrate)
+FixStyle(sph2/integrate_tlsph,FixSph2IntegrateTlsph)
 
 #else
 
-#ifndef LMP_FIX_TLSPH_INTEGRATE_H
-#define LMP_FIX_TLSPH_INTEGRATE_H
+#ifndef LMP_FIX_SPH2_INTEGRATE_TLSPH_H
+#define LMP_FIX_SPH2_INTEGRATE_TLSPH_H
 
 #include "fix.h"
 
 namespace LAMMPS_NS {
 
-class FixTlsphIntegrate: public Fix {
+class FixSph2IntegrateTlsph: public Fix {
 public:
-    FixTlsphIntegrate(class LAMMPS *, int, char **);
-    virtual ~FixTlsphIntegrate() {
+    FixSph2IntegrateTlsph(class LAMMPS *, int, char **);
+    virtual ~FixSph2IntegrateTlsph() {
     }
     int setmask();
     virtual void init();

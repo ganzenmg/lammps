@@ -51,20 +51,20 @@ using namespace Eigen;
 
 PairTlsph::PairTlsph(LAMMPS *lmp) :
 		Pair(lmp) {
-	maxstrain = NULL;
+	maxstrain = maxstress = NULL;
 	c0_type = NULL;
 	youngsmodulus = NULL;
 	poissonr = NULL;
 	hg_coeff = NULL;
-	alpha = NULL;
+	Q1 = Q2 = NULL;
 	yieldStress = NULL;
 	strengthModel = eos = NULL;
 
 	nmax = 0; // make sure no atom on this proc such that initial memory allocation is correct
 	F = Fdot = Fincr = K = PK1 = NULL;
-	d = R = Edot = FincrInv = W = D = NULL;
+	d = R = FincrInv = W = D = NULL;
 	detF = NULL;
-	smoothVel = smoothPos = NULL;
+	smoothVel = NULL;
 	shearFailureFlag = NULL;
 	numNeighsRefConfig = NULL;
 	shepardWeight = NULL;
@@ -72,9 +72,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 
 	updateFlag = 0;
 
-	comm_forward = 20; // this pair style communicates 12 doubles to ghost atoms : K tensor + PK1 tensor + F tensor + shepardWeight
-
-	//init_x0_box();
+	comm_forward = 20; // this pair style communicates 20 doubles to ghost atoms : PK1 tensor + F tensor + shepardWeight
 }
 
 /* ---------------------------------------------------------------------- */
@@ -86,11 +84,13 @@ PairTlsph::~PairTlsph() {
 		memory->destroy(youngsmodulus);
 		memory->destroy(poissonr);
 		memory->destroy(hg_coeff);
-		memory->destroy(alpha);
+		memory->destroy(Q1);
+		memory->destroy(Q2);
 		memory->destroy(yieldStress);
 		memory->destroy(strengthModel);
 		memory->destroy(eos);
 		memory->destroy(maxstrain);
+		memory->destroy(maxstress);
 
 		delete[] onerad_dynamic;
 		delete[] onerad_frozen;
@@ -106,12 +106,10 @@ PairTlsph::~PairTlsph() {
 		delete[] smoothVel;
 		delete[] d;
 		delete[] R;
-		delete[] Edot;
 		delete[] FincrInv;
 		delete[] W;
 		delete[] D;
 		delete[] shearFailureFlag;
-		delete[] smoothPos;
 		delete[] numNeighsRefConfig;
 		delete[] shepardWeight;
 		delete[] CauchyStress;
@@ -157,7 +155,6 @@ void PairTlsph::PreCompute() {
 		shepardWeight[i] = 0.0;
 		numNeighsRefConfig[i] = 0;
 		smoothVel[i].setZero();
-		smoothPos[i].setZero();
 	}
 
 	// set up neighbor list variables
@@ -169,7 +166,7 @@ void PairTlsph::PreCompute() {
 	for (ii = 0; ii < inum; ii++) {
 		i = ilist[ii];
 
-		if (mol[i] < 0) {
+		if (mol[i] < 0) { // valid SPH particle have mol > 0
 			continue;
 		}
 
@@ -200,8 +197,8 @@ void PairTlsph::PreCompute() {
 			x0j << x0[j][0], x0[j][1], x0[j][2];
 			dx0 = x0j - x0i;
 
-//			if (periodic)
-//				minimum_image(dx0(0), dx0(1), dx0(2));
+			if (periodic)
+				domain->minimum_image(dx0(0), dx0(1), dx0(2));
 
 			r0Sq = dx0.squaredNorm();
 			h = irad + radius[j];
@@ -232,23 +229,19 @@ void PairTlsph::PreCompute() {
 				Ftmp = dx * g.transpose();
 				Fdottmp = dv * g.transpose();
 
-				pairweight = vfrac[j]; // alternatively, use pairweight = (1.0-damage[j]) * vfrac[j]
-
-				K[i] += pairweight * Ktmp;
-				Fincr[i] += pairweight * Ftmp;
-				Fdot[i] += pairweight * Fdottmp;
-				shepardWeight[i] += pairweight * wf;
-				smoothVel[i] += pairweight * wf * dvint;
+				K[i] += vfrac[j] * Ktmp;
+				Fincr[i] += vfrac[j] * Ftmp;
+				Fdot[i] += vfrac[j] * Fdottmp;
+				shepardWeight[i] += vfrac[j] * wf;
+				smoothVel[i] += vfrac[j] * wf * dvint;
 				numNeighsRefConfig[i]++;
 
 				if (j < nlocal) {
-
-					pairweight = vfrac[i];
-					K[j] += pairweight * Ktmp;
-					Fincr[j] += pairweight * Ftmp;
-					Fdot[j] += pairweight * Fdottmp;
-					shepardWeight[j] += pairweight * wf;
-					smoothVel[j] -= pairweight * wf * dvint;
+					K[j] += vfrac[i] * Ktmp;
+					Fincr[j] += vfrac[i] * Ftmp;
+					Fdot[j] += vfrac[i] * Fdottmp;
+					shepardWeight[j] += vfrac[i] * wf;
+					smoothVel[j] -= vfrac[i] * wf * dvint;
 					numNeighsRefConfig[j]++;
 				}
 
@@ -263,7 +256,7 @@ void PairTlsph::PreCompute() {
 	for (i = 0; i < nlocal; i++) {
 
 		itype = type[i];
-		if (setflag[itype][itype] == 1) { // we only do the subsequent calculation if we are dealing with an SPH particle
+		if (setflag[itype][itype] == 1) { // we only do the subsequent calculation if pair style is defined for this particle
 
 			if ((numNeighsRefConfig[i] < domain->dimension) && (mol[i] > 0)) { // cannot possible invert shape matrix
 				printf("deleting particle [%d] because number of neighbors=%d is too small\n", tag[i], numNeighsRefConfig[i]);
@@ -342,8 +335,6 @@ void PairTlsph::PreCompute() {
 						d[i] = R[i].transpose() * D[i] * R[i];
 					}
 
-					Edot[i] = F[i].transpose() * d[i] * F[i];
-
 					// normalize average velocity field aroudn an integration point
 					smoothVel[i] /= shepardWeight[i];
 
@@ -413,8 +404,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 		d = new Matrix3d[nmax]; // memory usage: 9 doubles; total 58 doubles
 		delete[] R;
 		R = new Matrix3d[nmax]; // memory usage: 9 doubles; total 67 doubles
-		delete[] Edot;
-		Edot = new Matrix3d[nmax]; // memory usage: 9 doubles; total 76 doubles
 		delete[] FincrInv;
 		FincrInv = new Matrix3d[nmax]; // memory usage: 9 doubles; total 85 doubles
 		delete[] W;
@@ -423,8 +412,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 		D = new Matrix3d[nmax]; // memory usage: 9 doubles; total 103 doubles
 		delete[] shearFailureFlag;
 		shearFailureFlag = new bool[nmax]; // memory usage: 1 double; total 104 doubles
-		delete[] smoothPos;
-		smoothPos = new Vector3d[nmax]; // memory usage: 3 doubles; total 107 doubles
 		delete[] numNeighsRefConfig;
 		numNeighsRefConfig = new int[nmax]; // memory usage: 1 int; total 108 doubles
 		delete[] shepardWeight;
@@ -453,19 +440,18 @@ void PairTlsph::compute(int eflag, int vflag) {
 	firstneigh = list->firstneigh;
 
 	updateFlag = 0;
+	hMin = 1.0e22;
 
 	for (ii = 0; ii < inum; ii++) {
 		i = ilist[ii];
 
 		if (mol[i] < 0) {
-			continue; // Particle i is not a valid SPH particle (anymore). Skip all interactiions with this particle.
+			continue; // Particle i is not a valid SPH particle (anymore). Skip all interactions with this particle.
 		}
 
 		itype = type[i];
-
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
-		//printf("i = %d, nj=%d\n", i, jnum);
 
 		// initialize Eigen data structures from LAMMPS data structures
 		for (iDim = 0; iDim < 3; iDim++) {
@@ -492,12 +478,14 @@ void PairTlsph::compute(int eflag, int vflag) {
 			dx0(1) = x0[j][1] - x0[i][1];
 			dx0(2) = x0[j][2] - x0[i][2];
 
-//			if (periodic)
-//				minimum_image(dx0(0), dx0(1), dx0(2));
+			if (periodic)
+				domain->minimum_image(dx0(0), dx0(1), dx0(2));
 
 			r0Sq = dx0.squaredNorm();
 			h = radius[i] + radius[j];
 			if (r0Sq < h * h) {
+
+				hMin = MIN(hMin, h);
 
 				r0 = sqrt(r0Sq);
 
@@ -559,26 +547,30 @@ void PairTlsph::compute(int eflag, int vflag) {
 				}
 
 				/*
-				 * artificial viscosity -- original formulation
+				 * maximum (symmetric damage factor)
 				 */
+				damage_factor = MAX(damage[i], damage[j]);
+
+				/*
+				 * artificial viscosity with linear and quadratic terms
+				 * note that artificial viscosity is enhanced if particles are damaged
+				 */
+
 				delVdotDelR = dx.dot(dv);
 				if (delVdotDelR != 0.0) { // we divide by r, so guard against divide by zero
-					mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h); // units: s^(-1)
+					mu_ij = h * delVdotDelR / (r*r + 0.1 * h * h);
 					c_ij = c0_type[itype][jtype];
 					rho_ij = 0.5 * (rmass[i] / vfrac[i] + rmass[j] / vfrac[j]);
-					visc_magnitude = (-alpha[itype][jtype] * c_ij * mu_ij) / rho_ij; // units:
+					visc_magnitude = (-(Q1[itype][jtype]+ damage_factor) * c_ij * mu_ij + (Q2[itype][jtype] + 2.0*damage_factor) * mu_ij * mu_ij) / rho_ij;
 					f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / r;
-					//printf("mu=%g, c=%g, rho=%g, magnitude=%g\n", mu_ij, c_ij, rho_ij, f_visc.norm());
 				} else {
 					f_visc.setZero();
 				}
 
 				// sum stress, viscous, and hourglass forces, and apply (nonlinear) failure model only to hourglass correction force
-				damage_factor = MAX(damage[i], damage[j]);
+
 				damage_factor = 1.0 - pow(damage_factor, 3.0);
 				sumForces = f_stress + f_visc + damage_factor * f_hg;
-
-				//sumForces.setZero();
 
 				// energy rate -- project velocity onto force vector
 				deltaE = 0.5 * sumForces.dot(dv);
@@ -612,13 +604,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 		}
 	}
-
-//	if (updateFlag == 1) {
-//		if (comm->me == 0) {
-//			printf("updating x0 box\n");
-//		}
-//		init_x0_box();
-//	}
 
 	if (vflag_fdotr)
 		virial_fdotr_compute();
@@ -717,11 +702,6 @@ void PairTlsph::LinearStrength(double mu, Matrix3d sigmaInitial_dev, Matrix3d d_
 	 * elastic update to the deviatoric stress
 	 */
 	*sigmaFinal_dev__ = sigmaInitial_dev + dt * *sigma_dev_rate__;
-
-	/*
-	 *
-	 */
-
 }
 
 /* ----------------------------------------------------------------------
@@ -844,6 +824,8 @@ void PairTlsph::AssembleStress() {
 	Vector3d x0i, xi, xp;
 
 	eye.setIdentity();
+	c0Max = 0.0;
+	dtCFL = 1.0e22;
 
 	for (i = 0; i < nlocal; i++) {
 
@@ -854,7 +836,6 @@ void PairTlsph::AssembleStress() {
 				/*
 				 * initial stress state: given by the unrotateted Kirchhoff stress.
 				 */
-
 				sigmaInitial(0, 0) = tlsph_stress[i][0];
 				sigmaInitial(0, 1) = tlsph_stress[i][1];
 				sigmaInitial(0, 2) = tlsph_stress[i][2];
@@ -897,6 +878,8 @@ void PairTlsph::AssembleStress() {
 					break;
 				}
 
+				dtCFL = MIN(dtCFL, radius[i] / c0_type[itype][itype]);
+
 				/*
 				 * material strength
 				 */
@@ -935,60 +918,37 @@ void PairTlsph::AssembleStress() {
 				}
 
 				/*
-				 * gradual failure criterion: particles attain damage
+				 *  assemble total stress from pressure and deviatoric stress
 				 */
 				sigmaFinal = pFinal * eye + sigmaFinal_dev;
-				//EigenSolver<Matrix3d> es(sigmaFinal);
-				SelfAdjointEigenSolver<Matrix3d> es;
-				//es.compute(sigmaFinal);
-				E = 0.5 * (F[i] * F[i].transpose() - eye); // Green-Lagrange strain
-				es.compute(E);
-				//cout << "The eigenvalues of sigmaFinal are:" << endl << es.eigenvalues() << endl;
 
-				double max_tensile_stress = es.eigenvalues().maxCoeff();
-				//double max_tensile_stress = es.eigenvalues()[1];
-
-				if (max_tensile_stress > maxstrain[itype]) {
-					damage[i] = damage[i] + dt * 0.4 * c0_type[itype][itype] / radius[i];
-					damage[i] = MIN(damage[i], 1.0);
-					//printf("maximum tensile_stress is %f, current damage is %f\n", max_tensile_stress, damage[i]);
-					//printf("diagonal components of matrix are: %f %f %f %f %f %f\n", E(0,0), E(1,1), E(2,2), E(0,1), E(0,2), E(1,2));
-				}
-
-				/* apply damage model */
-				if (damage[i] > 0.0) {
-					//printf("\n---------------------------------------------------------\n");
-					Matrix3d V = es.eigenvectors();
-					//cout << "The matrix of eigenvectors, V, is:" << endl << V << endl << endl;
-
-					// diagonalize stress matrix
-					Matrix3d sigma_diag = V.inverse() * sigmaFinal * V;
-					//cout << "Finally, V^(-1) sigma V = " << endl << sigma_diag << endl;
-
-					for (int dim = 0; dim < 3; dim++) {
-						if (sigma_diag(dim, dim) > 0.0) {
-							sigma_diag(dim, dim) *= (1.0 - pow(damage[i], 3.0));
-						}
-					}
-
-					// undiagonalize stress matrix
-					sigma_damaged = V * sigma_diag * V.inverse();
-
-					//TestMatricesEqual(sigmaFinal, sigma_damaged, 1.0e-8);
-
+				/*
+				 *  failure criteria
+				 */
+				if (maxstress[itype] != 0.0) {
+					/*
+					 * maximum stress failure criterion:
+					 */
+					IsotropicMaxStressDamage(sigmaFinal, maxstress[itype], dt, c0_type[itype][itype], radius[i], damage[i],
+							sigma_damaged);
+				} else if (maxstrain[itype] != 0.0) {
+					/*
+					 * maximum strain failure criterion:
+					 */
+					E = 0.5 * (F[i] * F[i].transpose() - eye);
+					IsotropicMaxStrainDamage(E, sigmaFinal, maxstrain[itype], dt, c0_type[itype][itype], radius[i], damage[i],
+							sigma_damaged);
 				} else {
 					sigma_damaged = sigmaFinal;
 				}
-				sigma_damaged = sigmaFinal;
 
 				/*
 				 * store unrotated stress in atom vector
+				 * symmetry is exploited
 				 */
-
 				tlsph_stress[i][0] = sigmaFinal(0, 0);
 				tlsph_stress[i][1] = sigmaFinal(0, 1);
 				tlsph_stress[i][2] = sigmaFinal(0, 2);
-
 				tlsph_stress[i][3] = sigmaFinal(1, 1);
 				tlsph_stress[i][4] = sigmaFinal(1, 2);
 				tlsph_stress[i][5] = sigmaFinal(2, 2);
@@ -1009,9 +969,7 @@ void PairTlsph::AssembleStress() {
 					 * sigma is the unrotated stress.
 					 * need to do forward rotation of the unrotated stress sigma to the current configuration
 					 */
-					// T = R[i] * sigmaFinal * R[i].transpose(); // used undamaged stress
 					T = R[i] * sigma_damaged * R[i].transpose();
-
 				}
 
 				// store rotated, "true" Cauchy stress
@@ -1038,7 +996,6 @@ void PairTlsph::AssembleStress() {
 				tlsph_stress[i][0] = 0.0;
 				tlsph_stress[i][1] = 0.0;
 				tlsph_stress[i][2] = 0.0;
-
 				tlsph_stress[i][3] = 0.0;
 				tlsph_stress[i][4] = 0.0;
 				tlsph_stress[i][5] = 0.0;
@@ -1069,11 +1026,13 @@ void PairTlsph::allocate() {
 	memory->create(youngsmodulus, n + 1, "pair:youngsmodulus");
 	memory->create(poissonr, n + 1, "pair:poissonratio");
 	memory->create(hg_coeff, n + 1, n + 1, "pair:hg_magnitude");
-	memory->create(alpha, n + 1, n + 1, "pair:alpha");
+	memory->create(Q1, n + 1, n + 1, "pair:q1");
+	memory->create(Q2, n + 1, n + 1, "pair:q2");
 	memory->create(yieldStress, n + 1, "pair:yieldstress");
 	memory->create(strengthModel, n + 1, "pair:strengthmodel");
 	memory->create(eos, n + 1, "pair:eosmodel");
 	memory->create(maxstrain, n + 1, "pair:maxstrain");
+	memory->create(maxstress, n + 1, "pair:maxstress");
 
 	memory->create(cutsq, n + 1, n + 1, "pair:cutsq"); // always needs to be allocated, even with granular neighborlist
 
@@ -1097,7 +1056,7 @@ void PairTlsph::settings(int narg, char **arg) {
  ------------------------------------------------------------------------- */
 
 void PairTlsph::coeff(int narg, char **arg) {
-	if (narg != 11)
+	if (narg != 13)
 		error->all(FLERR, "Incorrect args for pair coefficients");
 	if (!allocated)
 		allocate();
@@ -1134,9 +1093,15 @@ void PairTlsph::coeff(int narg, char **arg) {
 	double youngsmodulus_one = atof(arg[5]);
 	double poissonr_one = atof(arg[6]);
 	double hg_one = atof(arg[7]);
-	double alpha_one = atof(arg[8]);
-	double yieldstress_one = atof(arg[9]);
-	double maxstrain_one = atof(arg[10]);
+	double yieldstress_one = atof(arg[8]);
+	double maxstrain_one = atof(arg[9]);
+	double maxstress_one = atof(arg[10]);
+	double q1_one = atof(arg[11]);
+	double q2_one = atof(arg[12]);
+
+	if (maxstrain_one * maxstress_one != 0.0) {
+		error->all(FLERR, "both maximum strain or stress damage models are set. only one damage model is allowed to be active.");
+	}
 
 	int count = 0;
 	for (int i = ilo; i <= ihi; i++) {
@@ -1148,11 +1113,13 @@ void PairTlsph::coeff(int narg, char **arg) {
 		youngsmodulus[i] = youngsmodulus_one;
 		poissonr[i] = poissonr_one;
 		maxstrain[i] = maxstrain_one;
+		maxstress[i] = maxstress_one;
 
 		for (int j = MAX(jlo, i); j <= jhi; j++) {
 			c0_type[i][j] = c0_one;
 			hg_coeff[i][j] = hg_one;
-			alpha[i][j] = alpha_one;
+			Q1[i][j] = q1_one;
+			Q2[i][j] = q2_one;
 			setflag[i][j] = 1;
 			count++;
 		}
@@ -1176,7 +1143,8 @@ double PairTlsph::init_one(int i, int j) {
 
 	c0_type[j][i] = c0_type[i][j];
 	hg_coeff[j][i] = hg_coeff[i][j];
-	alpha[j][i] = alpha[i][j];
+	Q1[j][i] = Q1[i][j];
+	Q2[j][i] = Q2[i][j];
 
 // cutoff = sum of max I,J radii for
 // dynamic/dynamic & dynamic/frozen interactions, but not frozen/frozen
@@ -1242,7 +1210,7 @@ void PairTlsph::write_restart(FILE *fp) {
 		for (j = i; j <= atom->ntypes; j++) {
 			fwrite(&setflag[i][j], sizeof(int), 1, fp);
 			if (setflag[i][j]) {
-				fwrite(&alpha[i][j], sizeof(double), 1, fp);
+				fwrite(&Q1[i][j], sizeof(double), 1, fp);
 			}
 		}
 	}
@@ -1274,9 +1242,9 @@ void PairTlsph::read_restart(FILE *fp) {
 
 			if (setflag[i][j]) {
 				if (me == 0) {
-					fread(&alpha[i][j], sizeof(double), 1, fp);
+					fread(&Q1[i][j], sizeof(double), 1, fp);
 				}
-				MPI_Bcast(&alpha[i][j], 1, MPI_DOUBLE, 0, world);
+				MPI_Bcast(&Q1[i][j], 1, MPI_DOUBLE, 0, world);
 			}
 		}
 	}
@@ -1315,6 +1283,10 @@ void *PairTlsph::extract(const char *str, int &i) {
 		return (void *) &updateFlag;
 	} else if (strcmp(str, "sph2/tlsph/strain_rate_ptr") == 0) {
 		return (void *) D;
+	} else if (strcmp(str, "sph2/tlsph/hMin_ptr") == 0) {
+		return (void *) &hMin;
+	} else if (strcmp(str, "sph2/tlsph/dtCFL_ptr") == 0) {
+		return (void *) &dtCFL;
 	}
 
 	return NULL;
@@ -1510,97 +1482,80 @@ double PairTlsph::TestMatricesEqual(Matrix3d A, Matrix3d B, double eps) {
 }
 
 /* ----------------------------------------------------------------------
- initialize x0 box settings
+ isotropic damage model based on max strain
  ------------------------------------------------------------------------- */
-void PairTlsph::init_x0_box() {
 
-	boxlo[0] = domain->boxlo[0];
-	boxlo[1] = domain->boxlo[1];
-	boxlo[2] = domain->boxlo[2];
-	boxhi[0] = domain->boxhi[0];
-	boxhi[1] = domain->boxhi[1];
-	boxhi[2] = domain->boxhi[2];
+void PairTlsph::IsotropicMaxStressDamage(Matrix3d S, double maxStress, double dt, double soundspeed, double characteristicLength,
+		double &damage, Matrix3d &S_damaged) {
 
-	prd[0] = xprd = boxhi[0] - boxlo[0];
-	prd[1] = yprd = boxhi[1] - boxlo[1];
-	prd[2] = zprd = boxhi[2] - boxlo[2];
+	/*
+	 * compute Eigenvalues of stress matrix
+	 */
+	SelfAdjointEigenSolver<Matrix3d> es;
+	es.compute(S);
 
-	prd_half[0] = xprd_half = 0.5 * xprd;
-	prd_half[1] = yprd_half = 0.5 * yprd;
-	prd_half[2] = zprd_half = 0.5 * zprd;
+	double max_eigenvalue = es.eigenvalues().maxCoeff();
 
-	xy = domain->xy;
-	xz = domain->xz;
-	yz = domain->yz;
+	if (max_eigenvalue > maxStress) {
+		damage = damage + dt * 0.4 * soundspeed / characteristicLength;
+		damage = MIN(damage, 1.0);
+	}
 
+	/* apply damage model */
+	if (damage > 0.0) {
+		Matrix3d V = es.eigenvectors();
+
+// diagonalize stress matrix
+		Matrix3d S_diag = V.inverse() * S * V;
+
+		for (int dim = 0; dim < 3; dim++) {
+			if (S_diag(dim, dim) > 0.0) {
+				S_diag(dim, dim) *= (1.0 - pow(damage, 3.0));
+			}
+		}
+
+		// undiagonalize stress matrix
+		S_damaged = V * S_diag * V.inverse();
+	} else {
+		S_damaged = S;
+	}
 }
 
-/* ----------------------------------------------------------------------
- minimum image convention for x0 coordinates
- use 1/2 of box size as test
- for triclinic, also add/subtract tilt factors in other dims as needed
- ------------------------------------------------------------------------- */
+void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrain, double dt, double soundspeed,
+		double characteristicLength, double &damage, Matrix3d &S_damaged) {
 
-void PairTlsph::minimum_image(double &dx, double &dy, double &dz) {
+	/*
+	 * compute Eigenvalues of stress matrix
+	 */
+	SelfAdjointEigenSolver<Matrix3d> es;
+	es.compute(E); // compute eigenvalue and eigenvectors of strain
 
-	if (domain->triclinic == 0) {
-		if (domain->xperiodic) {
-			if (fabs(dx) > xprd_half) {
-				if (dx < 0.0)
-					dx += xprd;
-				else
-					dx -= xprd;
-			}
-		}
-		if (domain->yperiodic) {
-			if (fabs(dy) > yprd_half) {
-				if (dy < 0.0)
-					dy += yprd;
-				else
-					dy -= yprd;
-			}
-		}
-		if (domain->zperiodic) {
-			if (fabs(dz) > zprd_half) {
-				if (dz < 0.0)
-					dz += zprd;
-				else
-					dz -= zprd;
+	double max_eigenvalue = es.eigenvalues().maxCoeff();
+
+	if (max_eigenvalue > maxStrain) {
+		damage = damage + dt * 0.4 * soundspeed / characteristicLength;
+		//printf("failing strain at %f\n", max_eigenvalue);
+		damage = MIN(damage, 1.0);
+	}
+
+	/* apply damage model to stress matrix */
+	if (damage > 0.0) {
+		es.compute(S);
+		Matrix3d V = es.eigenvectors(); // compute eigenvalue and eigenvectors of stress
+
+		// diagonalize stress matrix
+		Matrix3d S_diag = V.inverse() * S * V;
+
+		// apply damage to diagonalized  matrix if in tension
+		for (int dim = 0; dim < 3; dim++) {
+			if (S_diag(dim, dim) > 0.0) {
+				S_diag(dim, dim) *= (1.0 - pow(damage, 3.0));
 			}
 		}
 
+		// undiagonalize stress matrix
+		S_damaged = V * S_diag * V.inverse();
 	} else {
-		if (domain->zperiodic) {
-			if (fabs(dz) > zprd_half) {
-				if (dz < 0.0) {
-					dz += zprd;
-					dy += yz;
-					dx += xz;
-				} else {
-					dz -= zprd;
-					dy -= yz;
-					dx -= xz;
-				}
-			}
-		}
-		if (domain->yperiodic) {
-			if (fabs(dy) > yprd_half) {
-				if (dy < 0.0) {
-					dy += yprd;
-					dx += xy;
-				} else {
-					dy -= yprd;
-					dx -= xy;
-				}
-			}
-		}
-		if (domain->xperiodic) {
-			if (fabs(dx) > xprd_half) {
-				if (dx < 0.0)
-					dx += xprd;
-				else
-					dx -= xprd;
-			}
-		}
+		S_damaged = S;
 	}
 }

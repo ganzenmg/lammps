@@ -23,7 +23,7 @@ neigh_modify    every 1 delay 0 check no # only build neighbor list if particle 
 comm_modify     vel yes
 newton          off
 
-read_data       h2_adjusted.data
+read_data       h4_adjusted.data
 variable        xmin equal bound(all,xmin)
 variable        xminplus equal ${xmin}+15.0
 variable        xmax equal bound(all,xmax)
@@ -37,17 +37,16 @@ velocity        top set  ${vel} 0 0 sum no units box
 velocity        bot set -${vel} 0 0 sum no units box
 
 pair_style      tlsph
-#                         strength EOS                 c0    E     nu   hg    visc    sigy     max.strain    
-pair_coeff      * * linearplastic            linear ${c0} ${E} ${nu} ${hg}    0.10  ${sigy}    1.00
+#                         strength EOS                 c0    E     nu   hg    sigy     max.strain  max.stress Q1   Q2
+pair_coeff      * * linear                   linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.08        0.0      0.1 0.0
 
-compute         F all tlsph/defgrad
-compute         E all tlsph/strain
-compute         P all tlsph/eff_plastic_strain
-compute         S all tlsph/stress
-compute         d all tlsph/damage
-compute         nn all tlsph/num_neighs
-compute         contact_radius all sph/contact_radius
-compute         eint all sph/e
+compute         E all sph2/tlsph_strain
+compute         P all sph2/plastic_strain
+compute         S all sph2/tlsph_stress
+compute         d all sph2/damage
+compute         nn all sph2/tlsph_num_neighs
+compute         contact_radius all sph2/contact_radius
+compute         eint all sph2/internal_energy
 compute         alleint all reduce sum c_eint
 #compute         sumforce BCL reduce sum fx
 variable        etot equal ke+c_alleint+pe
@@ -59,10 +58,10 @@ balance          1.0 rcb
 # time integration
 timestep        ${dt}
 variable        maxdist equal 0.0025*${h}
-fix             dtfix all dt/reset 5 NULL ${dt} ${maxdist} units box
+fix             dtfix all sph2/tlsph_dt_reset 5 NULL NULL ${maxdist} units box
 fix             force_fix1 top setforce 0 0 0
 fix             force_fix2 bot setforce 0 0 0
-fix             integration_fix all tlsph/integrate 1.5e3 xsph
+fix             integration_fix all sph2/integrate_tlsph 1.5e3 xsph
 
 
 variable        nrun equal round((10.0/${vel})/${dt})
@@ -70,7 +69,6 @@ print "running for ${nrun} steps"
 
 variable        dumpFreq equal round(${nrun}/1000)
 dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
-                c_F[1]  c_F[2] c_F[3] c_F[4] c_F[5] c_F[6] c_F[7] c_F[8] c_F[9] c_F[10] &
                 c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
                 c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
                 fx fy fz vx vy vz c_P c_eint &
@@ -79,7 +77,7 @@ dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
 dump_modify     dump_id first yes
 
 thermo          100
-thermo_style    custom step ke pe v_etot c_alleint dt #f_force_fix1[1]
+thermo_style    custom step ke pe v_etot c_alleint dt f_force_fix1[1]
 #thermo_modify   lost ignore
 
 run             ${nrun}
