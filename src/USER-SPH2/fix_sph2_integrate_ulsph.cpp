@@ -13,7 +13,7 @@
 
 #include "stdio.h"
 #include "string.h"
-#include "fix_sph_fluid.h"
+#include "fix_sph2_integrate_ulsph.h"
 #include "math.h"
 #include "stdlib.h"
 #include "string.h"
@@ -37,7 +37,7 @@ using namespace FixConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixSphFluidIntegrate::FixSphFluidIntegrate(LAMMPS *lmp, int narg, char **arg) :
+FixSph2IntegrateUlsph::FixSph2IntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
         Fix(lmp, narg, arg) {
 
     if ((atom->e_flag != 1) || (atom->rho_flag != 1))
@@ -69,7 +69,7 @@ FixSphFluidIntegrate::FixSphFluidIntegrate(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-int FixSphFluidIntegrate::setmask() {
+int FixSph2IntegrateUlsph::setmask() {
     int mask = 0;
     mask |= INITIAL_INTEGRATE;
     mask |= FINAL_INTEGRATE;
@@ -78,7 +78,7 @@ int FixSphFluidIntegrate::setmask() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSphFluidIntegrate::init() {
+void FixSph2IntegrateUlsph::init() {
     dtv = update->dt;
     dtf = 0.5 * update->dt * force->ftm2v;
     vlimitsq = vlimit * vlimit;
@@ -88,7 +88,7 @@ void FixSphFluidIntegrate::init() {
  allow for both per-type and per-atom mass
  ------------------------------------------------------------------------- */
 
-void FixSphFluidIntegrate::initial_integrate(int vflag) {
+void FixSph2IntegrateUlsph::initial_integrate(int vflag) {
     // update v and x and rho and e of atoms in group
 
     double **x = atom->x;
@@ -163,7 +163,7 @@ void FixSphFluidIntegrate::initial_integrate(int vflag) {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSphFluidIntegrate::final_integrate() {
+void FixSph2IntegrateUlsph::final_integrate() {
 
     // update v, rho, and e of atoms in group
 
@@ -207,7 +207,7 @@ void FixSphFluidIntegrate::final_integrate() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSphFluidIntegrate::reset_dt() {
+void FixSph2IntegrateUlsph::reset_dt() {
     dtv = update->dt;
     dtf = 0.5 * update->dt * force->ftm2v;
 }

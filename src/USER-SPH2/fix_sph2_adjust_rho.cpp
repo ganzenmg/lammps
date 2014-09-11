@@ -13,7 +13,7 @@
 
 #include "stdio.h"
 #include "string.h"
-#include "fix_sph_adjust_rho.h"
+#include "fix_sph2_adjust_rho.h"
 #include "math.h"
 #include "stdlib.h"
 #include "string.h"

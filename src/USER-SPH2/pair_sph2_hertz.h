@@ -13,12 +13,12 @@
 
 #ifdef PAIR_CLASS
 
-PairStyle(tlsph/ipc_hertz,PairHertz)
+PairStyle(sph2/hertz,PairHertz)
 
 #else
 
-#ifndef LMP_TLSPH_HERTZ_H
-#define LMP_TLSPH_HERTZ_H
+#ifndef LMP_SPH2_HERTZ_H
+#define LMP_SPH2_HERTZ_H
 
 #include "pair.h"
 

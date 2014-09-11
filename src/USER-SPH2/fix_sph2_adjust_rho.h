@@ -13,33 +13,30 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(sph_fluid/integrate,FixSphFluidIntegrate)
+FixStyle(sph2/adjust_rho,FixSphFluidAdjustRho)
 
 #else
 
-#ifndef LMP_FIX_SPH_FLUID_H
-#define LMP_FIX_SPH_FLUID_H
+#ifndef LMP_FIX_SPH2_ADJUST_RHO_H
+#define LMP_FIX_SPH2_ADJUST_RHO_H
 
 #include "fix.h"
 
 namespace LAMMPS_NS {
 
-class FixSphFluidIntegrate : public Fix {
+class FixSphFluidAdjustRho : public Fix {
  public:
-  FixSphFluidIntegrate(class LAMMPS *, int, char **);
+  FixSphFluidAdjustRho(class LAMMPS *, int, char **);
   int setmask();
   virtual void init();
-  virtual void initial_integrate(int);
   virtual void final_integrate();
-  void reset_dt();
 
  private:
   class NeighList *list;
  protected:
-  double dtv,dtf, vlimit, vlimitsq;;
-  double *step_respa;
   int mass_require;
-  bool xsphFlag;
+  double rho_target;
+  int NN_target;
 
   class Pair *pair;
 };

@@ -19,7 +19,7 @@
 #include "float.h"
 #include "stdlib.h"
 #include "string.h"
-#include "pair_hertz.h"
+#include "pair_sph2_hertz.h"
 #include "atom.h"
 #include "domain.h"
 #include "force.h"

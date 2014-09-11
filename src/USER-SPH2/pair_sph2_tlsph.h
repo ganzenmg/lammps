@@ -109,6 +109,7 @@ protected:
 	double hMin; // minimum kernel radius for two particles
 	double c0Max;
 	double dtCFL;
+	double dtRelative; // relative velocity of two particles, divided by sound speed
 	int updateFlag;
 
 	enum {

@@ -133,6 +133,10 @@ void FixSph2TlsphDtReset::end_of_step() {
 
 	for (int i = 0; i < nlocal; i++)
 		if (mask[i] & groupbit) {
+
+			xmax = 0.01 * radius[i];
+
+
 			massinv = 1.0 / rmass[i];
 			vsq = v[i][0] * v[i][0] + v[i][1] * v[i][1] + v[i][2] * v[i][2];
 			fsq = f[i][0] * f[i][0] + f[i][1] * f[i][1] + f[i][2] * f[i][2];
@@ -141,7 +145,8 @@ void FixSph2TlsphDtReset::end_of_step() {
 				dtv = xmax / sqrt(vsq);
 			if (fsq > 0.0)
 				dtf = sqrt(2.0 * xmax / (ftm2v * sqrt(fsq) * massinv));
-			dt = MIN(dtv, dtf);
+			//dt = MIN(dtv, dtf);
+			dt = dtf;
 			dtsq = dt * dt;
 			delx = dt * v[i][0] + 0.5 * dtsq * massinv * f[i][0] * ftm2v;
 			dely = dt * v[i][1] + 0.5 * dtsq * massinv * f[i][1] * ftm2v;
@@ -152,7 +157,7 @@ void FixSph2TlsphDtReset::end_of_step() {
 			dtmin = MIN(dtmin, dt);
 
 			/* timestep based on maximum force and kernel radius */
-			dt = 0.125 * sqrt(rmass[i] * radius[i] / sqrt(fsq));
+			dt = 0.0125 * sqrt(rmass[i] * radius[i] / sqrt(fsq));
 			dtmin = MIN(dtmin, dt);
 		}
 
@@ -167,6 +172,24 @@ void FixSph2TlsphDtReset::end_of_step() {
 	}
 
 	dt = 0.125 * *dtCFL; // apply safety factor
+	dtmin = MIN(dtmin, dt);
+
+	/*
+	 * determine stable timestep based on relative velocity
+	 */
+
+	double *dtRelative = (double *) force->pair->extract("sph2/tlsph/dtRelative_ptr", itmp);
+	if (dtRelative == NULL) {
+		error->all(FLERR, "fix tlsph/dt/reset failed to access relativeVelocity");
+	}
+
+	dt = 0.01 * *dtRelative; // apply safety factor
+
+//	if (dt < dtmin) {
+//		printf("limit is due to relative velocity timestep is %f\n", dt);
+//	}
+
+	//
 	dtmin = MIN(dtmin, dt);
 
 	MPI_Allreduce(&dtmin, &dt, 1, MPI_DOUBLE, MPI_MIN, world);

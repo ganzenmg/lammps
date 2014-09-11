@@ -396,17 +396,11 @@ void PairULSPH::compute(int eflag, int vflag) {
 				 * force -- the classical SPH way
 				 */
 
-//				f_stress = -rmass[i] * rmass[j]
-//						* (pressure[i] / (rho[i] * rho[i])
-//								+ pressure[j] / (rho[j] * rho[j])) * g;
 				f_stress = rmass[i] * rmass[j]
 				          * (stressTensor[i] / (rho[i] * rho[i]) + stressTensor[j] / (rho[j] * rho[j])) * g;
-				/*
-				 * force -- like for solids with stress tensor
-				 */
 
-				//f_stress = vfrac[i] * vfrac[j] * (stressTensor[i] + stressTensor[j]) * g;
-//				rcut2 = 1.5 * (contact_radius[i] + contact_radius[j]);
+
+				//				rcut2 = 1.5 * (contact_radius[i] + contact_radius[j]);
 //				if (r < rcut2) {
 //					wf2 = (rcut2 - r) / rcut2;
 //					wf2 = wf2;
@@ -885,7 +879,6 @@ void PairULSPH::init_style() {
 	MPI_DOUBLE, MPI_MAX, world);
 	MPI_Allreduce(&onerad_frozen[1], &maxrad_frozen[1], atom->ntypes,
 	MPI_DOUBLE, MPI_MAX, world);
-	//printf("end of init style\n");
 
 }
 

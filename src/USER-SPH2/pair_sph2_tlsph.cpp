@@ -144,6 +144,7 @@ void PairTlsph::PreCompute() {
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U;
 	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+	double damage_factor;
 
 	// zero accumulators
 	for (i = 0; i < nlocal; i++) {
@@ -221,6 +222,16 @@ void PairTlsph::PreCompute() {
 				// kernel function
 				kernel_and_derivative(h, r0, wf, wfd);
 
+				// apply damage model if in tension
+				if (dx.dot(dv) > 0.0) {
+					damage_factor = sqrt(damage[i] * damage[j]);
+					damage_factor = 1.0 - pow(damage_factor, 3.0);
+				} else {
+					damage_factor = 1.0;
+				}
+				wf *= damage_factor;
+				wfd *= damage_factor;
+
 				// uncorrected kernel gradient
 				g = (wfd / r0) * dx0;
 
@@ -258,7 +269,7 @@ void PairTlsph::PreCompute() {
 		itype = type[i];
 		if (setflag[itype][itype] == 1) { // we only do the subsequent calculation if pair style is defined for this particle
 
-			if ((numNeighsRefConfig[i] < domain->dimension) && (mol[i] > 0)) { // cannot possible invert shape matrix
+			if ((numNeighsRefConfig[i] < domain->dimension) && (mol[i] > 0)) { // cannot possibly invert shape matrix
 				printf("deleting particle [%d] because number of neighbors=%d is too small\n", tag[i], numNeighsRefConfig[i]);
 				mol[i] = -1;
 			}
@@ -441,6 +452,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 	updateFlag = 0;
 	hMin = 1.0e22;
+	dtRelative = 1.0e22;
 
 	for (ii = 0; ii < inum; ii++) {
 		i = ilist[ii];
@@ -524,11 +536,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 				gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
 
-//				if (gamma.norm() > 1.0e-8) {
-//					cout << "Fi = " << endl << Fincr[i] << endl;
-//					cout << "Fj = " << endl << Fincr[j] << endl;
-//				}
-
 				if (r > 0.0) { // we divide by r, so guard against divide by zero
 					/* SPH-like formulation */
 					delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
@@ -557,20 +564,30 @@ void PairTlsph::compute(int eflag, int vflag) {
 				 */
 
 				delVdotDelR = dx.dot(dv);
-				if (delVdotDelR != 0.0) { // we divide by r, so guard against divide by zero
-					mu_ij = h * delVdotDelR / (r*r + 0.1 * h * h);
+				if (delVdotDelR != 0.0) {
+					mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
 					c_ij = c0_type[itype][jtype];
 					rho_ij = 0.5 * (rmass[i] / vfrac[i] + rmass[j] / vfrac[j]);
-					visc_magnitude = (-(Q1[itype][jtype]+ damage_factor) * c_ij * mu_ij + (Q2[itype][jtype] + 2.0*damage_factor) * mu_ij * mu_ij) / rho_ij;
+					visc_magnitude = (-(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij
+							+ (Q2[itype][jtype] + 2.0 * damage_factor) * mu_ij * mu_ij) / rho_ij;
 					f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / r;
+
 				} else {
 					f_visc.setZero();
 				}
 
 				// sum stress, viscous, and hourglass forces, and apply (nonlinear) failure model only to hourglass correction force
 
-				damage_factor = 1.0 - pow(damage_factor, 3.0);
-				sumForces = f_stress + f_visc + damage_factor * f_hg;
+				// apply damage model if in tension
+				if (delVdotDelR > 0.0) {
+					damage_factor = sqrt(damage[i] * damage[j]);
+					damage_factor = 1.0 - pow(damage_factor, 3.0);
+				} else {
+					damage_factor = 1.0;
+				}
+
+
+				sumForces = damage_factor * (f_visc + f_stress + f_hg);
 
 				// energy rate -- project velocity onto force vector
 				deltaE = 0.5 * sumForces.dot(dv);
@@ -600,6 +617,10 @@ void PairTlsph::compute(int eflag, int vflag) {
 						updateFlag = 1;
 					}
 				}
+
+				// update relative velocity
+				dtRelative = MIN(dtRelative, r / (dv.norm() + 0.1 * c0_type[itype][jtype]));
+
 			}
 
 		}
@@ -1287,6 +1308,8 @@ void *PairTlsph::extract(const char *str, int &i) {
 		return (void *) &hMin;
 	} else if (strcmp(str, "sph2/tlsph/dtCFL_ptr") == 0) {
 		return (void *) &dtCFL;
+	} else if (strcmp(str, "sph2/tlsph/dtRelative_ptr") == 0) {
+		return (void *) &dtRelative;
 	}
 
 	return NULL;
@@ -1393,7 +1416,6 @@ void PairTlsph::kernel_and_derivative(const double h, const double r, double &wf
 void PairTlsph::PolDec(Matrix3d &M, Matrix3d *R, Matrix3d *T) {
 
 	JacobiSVD<Matrix3d> svd(M, ComputeFullU | ComputeFullV); // SVD(A) = U S V*
-//Vector3d singularValues = svd.singularValues();
 	Matrix3d S = svd.singularValues().asDiagonal();
 	Matrix3d U = svd.matrixU();
 	Matrix3d V = svd.matrixV();
@@ -1525,7 +1547,7 @@ void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrai
 		double characteristicLength, double &damage, Matrix3d &S_damaged) {
 
 	/*
-	 * compute Eigenvalues of stress matrix
+	 * compute Eigenvalues of strain matrix
 	 */
 	SelfAdjointEigenSolver<Matrix3d> es;
 	es.compute(E); // compute eigenvalue and eigenvectors of strain
@@ -1533,7 +1555,7 @@ void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrai
 	double max_eigenvalue = es.eigenvalues().maxCoeff();
 
 	if (max_eigenvalue > maxStrain) {
-		damage = damage + dt * 0.4 * soundspeed / characteristicLength;
+		damage = damage + dt * 0.04 * soundspeed / characteristicLength;
 		//printf("failing strain at %f\n", max_eigenvalue);
 		damage = MIN(damage, 1.0);
 	}
@@ -1553,7 +1575,7 @@ void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrai
 			}
 		}
 
-		// undiagonalize stress matrix
+		// undiagonalize strain matrix
 		S_damaged = V * S_diag * V.inverse();
 	} else {
 		S_damaged = S;

@@ -14,7 +14,7 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "string.h"
-#include "fix_tlsph_integrate.h"
+#include "fix_sph2_integrate_tlsph.h"
 #include "atom.h"
 #include "force.h"
 #include "update.h"
@@ -132,14 +132,7 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 	/*
 	 * update the reference configuration if needed
 	 */
-//	if (updateReferenceConfigurationFlag) {
-//		if ((neighbor->ago == 0) && update->ntimestep > update->firststep + 1) {
-//			if (comm->me == 0) {
-//				printf("updating ref config at step: %ld\n", update->ntimestep);
-//			}
-//			FixSph2IntegrateTlsph::updateReferenceConfiguration();
-//		}
-//	}
+
 	if (updateReferenceConfigurationFlag) {
 		int *updateFlag_ptr = (int *) force->pair->extract("sph2/tlsph/updateFlag_ptr",
 				itmp);
@@ -342,17 +335,6 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 			// adjust particle volumes
 			J = F[i].determinant();
 			vfrac[i] *= J / J0;
-
-			//if ((J > 2.0) || (J < 0.1)) {
-			//	printf("in update reference config: mol=%d, J is %f\n", mol[i], J);
-			//}
-
-//			double radiusfactor = MAX(Fincr[i](0, 0), Fincr[i](1, 1));
-//			radiusfactor = MAX(radiusfactor, Fincr[i](2, 2));
-//
-//			if (radiusfactor > 1.0) {
-//				radius[i] = radiusfactor * 2.01 * 0.5;
-//			}
 
 			if (numNeighsRefConfig[i] < 20) {
 				radius[i] *= 1.2;
