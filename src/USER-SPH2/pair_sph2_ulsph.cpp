@@ -19,7 +19,7 @@
 #include "float.h"
 #include "stdlib.h"
 #include "string.h"
-#include "pair_ulsph.h"
+#include "pair_sph2_ulsph.h"
 #include "atom.h"
 #include "domain.h"
 #include "force.h"

@@ -19,7 +19,7 @@
 #include "float.h"
 #include "stdlib.h"
 #include "string.h"
-#include "pair_tlsph.h"
+#include "pair_sph2_tlsph.h"
 #include "atom.h"
 #include "domain.h"
 #include "force.h"
@@ -141,10 +141,12 @@ void PairTlsph::PreCompute() {
 	double r0, r0Sq, wf, wfd, h, irad;
 	double pairweight;
 	Vector3d dx0, dx, dv, g;
-	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U;
+	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
 	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
 	double damage_factor;
+
+	eye.setIdentity();
 
 	// zero accumulators
 	for (i = 0; i < nlocal; i++) {
@@ -229,8 +231,8 @@ void PairTlsph::PreCompute() {
 				} else {
 					damage_factor = 1.0;
 				}
-				wf *= damage_factor;
-				wfd *= damage_factor;
+				//wf *= damage_factor;
+				//wfd *= damage_factor;
 
 				// uncorrected kernel gradient
 				g = (wfd / r0) * dx0;
@@ -281,7 +283,7 @@ void PairTlsph::PreCompute() {
 					K[i](2, 2) = 1.0; // make inverse of K well defined even when it is rank-deficient (3d matrix, only 2d information)
 				}
 
-				Fincr[i] = Fincr[i] * K[i];
+				Fincr[i] *= K[i];
 				Fdot[i] = Fdot[i] * K[i];
 
 				/*
@@ -311,10 +313,12 @@ void PairTlsph::PreCompute() {
 				if (F[i].determinant() < DETF_MIN) {
 					printf("deleting particle [%d] because det(F)=%f is smaller than limit=%f\n", tag[i], F[i].determinant(),
 					DETF_MIN);
+					cout << "Here is matrix F:" << endl << F[i] << endl;
 					mol[i] = -1;
 				} else if (F[i].determinant() > DETF_MAX) {
 					printf("deleting particle [%d] because det(F)=%f is larger than limit=%f\n", tag[i], F[i].determinant(),
 					DETF_MAX);
+					cout << "Here is matrix F:" << endl << F[i] << endl;
 					mol[i] = -1;
 				}
 
@@ -565,6 +569,10 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 				delVdotDelR = dx.dot(dv);
 				if (delVdotDelR != 0.0) {
+
+					double hr = h - r; // [m]
+					wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
+
 					mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
 					c_ij = c0_type[itype][jtype];
 					rho_ij = 0.5 * (rmass[i] / vfrac[i] + rmass[j] / vfrac[j]);
@@ -1403,6 +1411,7 @@ void PairTlsph::kernel_and_derivative(const double h, const double r, double &wf
 	} else {
 		double hr = h - r; // [m]
 		wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
+		wfd = -1.0;
 		wf = -0.333333333333e0 * hr * wfd; // [m/m^4] ==> [1/m^3] correct for W in 3D
 	}
 

@@ -257,14 +257,14 @@ void FixPeriNeighGCG::setup(int vflag) {
 					if (rsq <= cutsq) {
 						partner[i][npartner[i]] = tag[j];
 						r0[i][npartner[i]] = sqrt(rsq);
-						r1[i][npartner[i]] = sqrt(rsq);
+						r1[i][npartner[i]] = 0.0;
 						npartner[i]++;
 						vinter[i] += vfrac[j];
 
 						if (j < nlocal) {
 							partner[j][npartner[j]] = tag[i];
 							r0[j][npartner[j]] = sqrt(rsq);
-							r1[j][npartner[j]] = sqrt(rsq);
+							r1[j][npartner[j]] = 0.0;
 							npartner[j]++;
 							vinter[j] += vfrac[i];
 						}

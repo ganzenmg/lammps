@@ -25,7 +25,7 @@
 #include "neighbor.h"
 #include "comm.h"
 #include "modify.h"
-#include "pair_tlsph.h"
+
 
 using namespace Eigen;
 using namespace LAMMPS_NS;

@@ -98,7 +98,7 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 	int nlocal = atom->nlocal;
 	int newton_pair = force->newton_pair;
 	double **r0 = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->r0;
-	double **r1 = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->r1;
+	double **plastic_stretch = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->r1;
 	tagint **partner = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->partner;
 	int *npartner = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->npartner;
 	double *vinter = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->vinter;
@@ -261,14 +261,22 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 				jtype = type[j];
 				delta = radius[i] + radius[j];
 				r = sqrt(rsq);
-				dr = r - r1[i][jj];
+				dr = r - r0[i][jj];
 
 				// avoid roundoff errors
 				if (fabs(dr) < 2.2204e-016)
 					dr = 0.0;
 
 				// bond stretch
-				stretch = dr / r1[i][jj];
+				stretch = dr / r0[i][jj]; // total stretch
+
+				double se;
+				if (stretch > syield[itype][jtype]) {
+					plastic_stretch[i][jj] = syield[itype][jtype] - stretch;
+					se = syield[itype][jtype]; // elastic part of stretch
+				} else {
+					se = stretch;
+				}
 
 				if (domain->dimension == 2) {
 					c = 4.5 * bulkmodulus[itype][jtype] * (1.0 / vinter[i] + 1.0 / vinter[j]);
@@ -281,39 +289,13 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 				//c = 2.865 * bulkmodulus[itype][jtype] / (1.0); // applicable to delta = 2.0 * (1/2)
 
 				// force computation -- note we divide by a factor of r
-				evdwl = 0.5 * c * stretch * stretch * vfrac[i] * vfrac[j];
+				evdwl = 0.5 * c * se * se * vfrac[i] * vfrac[j];
 				//printf("evdwl = %f\n", evdwl);
-				fbond = -c * vfrac[i] * vfrac[j] * stretch / r1[i][jj];
+				fbond = -c * vfrac[i] * vfrac[j] * se / r0[i][jj];
 				if (r > 0.0)
 					fbond = fbond / r;
 				else
 					fbond = 0.0;
-
-				if (fabs(this_r0 - r0[i][jj]) > 1.0e-8) {
-
-					printf("this r0=%f, old r0=%f\n", this_r0, r0[i][jj]);
-					printf("\nnlocal=%d, tag i=%d, tag j=%d, partner[i][jj]=%d\n", nlocal, tag[i], tag[j], partner[i][jj]);
-
-					printf("broken evdwl=%f, k=%f, v=%f %f, norm = %f %f, s=%f, r0=%f, r=%f\n", evdwl, bulkmodulus[itype][jtype],
-							vfrac[i], vfrac[j], vinter[i], vinter[j], stretch, r0[i][jj], r);
-					printf("velocity i: %f %f %f \n", v[i][0], v[i][1], v[i][2]);
-					printf("velocity j: %f %f %f \n", v[j][0], v[j][1], v[j][2]);
-					printf("position i: %f %f %f \n", x[i][0], x[i][1], x[i][2]);
-					printf("position j: %f %f %f \n", x[j][0], x[j][1], x[j][2]);
-					printf("position 0 i: %f %f %f \n", x0[i][0], x0[i][1], x0[i][2]);
-					printf("position 0 j: %f %f %f \n", x0[j][0], x0[j][1], x0[j][2]);
-
-					printf("itype=%d, imol=%d, jtype=%d, jmol=%d\n\n", itype, molecule[i], jtype, molecule[j]);
-					printf("-----------------------------------------------------------------------------\n\n");
-
-					printf("partners of tag(j)=%d : \n", tag[j]);
-					int knum = npartner[j];
-					for (int kk = 0; kk < knum; kk++) {
-						printf("partner tag = %d\n", partner[j][kk]);
-					}
-
-					error->one(FLERR, "STOP because r0 error");
-				}
 
 				// project force -- missing factor of r is recovered here as delx, dely ... are not unit vectors
 				f[i][0] += delx * fbond;
@@ -327,14 +309,6 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 				}
 
 				// bond-based plasticity
-				if (stretch > syield[itype][jtype]) {
-					r1[i][jj] = r / (1.0 + syield[itype][jtype]);
-
-					//stretch = (r - r1[i][jj]) / r1[i][jj];
-					//printf("stretch after yielding is %f, rest length is now %f\n", stretch, r1[i][jj]);
-				} else if (stretch < -syield[itype][jtype]) {
-					r1[i][jj] = r / (1.0 - syield[itype][jtype]);
-				}
 
 //			if (smax[itype][jtype] > 0.0) { // maximum-stretch based failure
 				if ((r - r0[i][jj]) / r0[i][jj] > smax[itype][jtype]) {

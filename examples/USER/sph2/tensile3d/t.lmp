@@ -3,7 +3,7 @@ variable        rho equal 2700.0e-9
 variable        h equal 0.82
 variable        E equal 10 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
-variable        sigy equal 0.1
+variable        sigy equal 0.7
 variable        vel equal 10.0
 variable        hg equal 25.0
 # ----
@@ -38,7 +38,7 @@ velocity        bot set -${vel} 0 0 sum no units box
 
 pair_style      tlsph
 #                         strength EOS                 c0    E     nu   hg    sigy     max.strain  max.stress Q1   Q2
-pair_coeff      * * linear                   linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.08        0.0      0.1 0.0
+pair_coeff      * * linearplastic            linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.08        0.0      1.0 2.0
 
 compute         E all sph2/tlsph_strain
 compute         P all sph2/plastic_strain
@@ -57,11 +57,11 @@ balance          1.0 rcb
 
 # time integration
 timestep        ${dt}
-variable        maxdist equal 0.0025*${h}
+variable        maxdist equal ${h}
 fix             dtfix all sph2/tlsph_dt_reset 5 NULL NULL ${maxdist} units box
 fix             force_fix1 top setforce 0 0 0
 fix             force_fix2 bot setforce 0 0 0
-fix             integration_fix all sph2/integrate_tlsph 1.5e3 xsph
+fix             integration_fix all sph2/integrate_tlsph 1.5e3
 
 
 variable        nrun equal round((10.0/${vel})/${dt})
