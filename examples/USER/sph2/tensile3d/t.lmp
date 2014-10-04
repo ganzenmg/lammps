@@ -5,12 +5,12 @@ variable        E equal 10 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
 variable        sigy equal 0.7
 variable        vel equal 10.0
-variable        hg equal 25.0
+variable        hg equal 1.0
 # ----
 variable        c0 equal sqrt(${E}/${rho})
 variable        dt equal 0.125*${h}/${c0}
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
-variable        skin equal 1.0*${h} # Verlet list range
+variable        skin equal 0.5*${h} # Verlet list range
 variable        contact_stiffness equal 1*${E}
 
 units		si
@@ -19,7 +19,7 @@ boundary        s s s
 atom_style      tlsph
 comm_style      tiled
 neighbor        ${skin} bin
-neigh_modify    every 1 delay 0 check no # only build neighbor list if particle has moved half the skin distance
+neigh_modify    every 100 delay 0 check no # only build neighbor list if particle has moved half the skin distance
 comm_modify     vel yes
 newton          off
 
@@ -38,7 +38,7 @@ velocity        bot set -${vel} 0 0 sum no units box
 
 pair_style      tlsph
 #                         strength EOS                 c0    E     nu   hg    sigy     max.strain  max.stress Q1   Q2
-pair_coeff      * * linearplastic            linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.08        0.0      1.0 2.0
+pair_coeff      * * linear                    linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.0       2.0      1.0 2.0
 
 compute         E all sph2/tlsph_strain
 compute         P all sph2/plastic_strain
@@ -58,10 +58,13 @@ balance          1.0 rcb
 # time integration
 timestep        ${dt}
 variable        maxdist equal ${h}
-fix             dtfix all sph2/tlsph_dt_reset 5 NULL NULL ${maxdist} units box
+fix             dtfix all sph2/tlsph_dt_reset 5 0.125
 fix             force_fix1 top setforce 0 0 0
 fix             force_fix2 bot setforce 0 0 0
-fix             integration_fix all sph2/integrate_tlsph 1.5e3
+fix             integration_fix all sph2/integrate_tlsph 1.5e3 update
+variable        a equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
+variable        disp equal 2.0*${vel}*f_dtfix[1]
+fix             output_fix all print 10 "${disp} $a" file force_displacement.dat screen no
 
 
 variable        nrun equal round((10.0/${vel})/${dt})
@@ -77,7 +80,7 @@ dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
 dump_modify     dump_id first yes
 
 thermo          100
-thermo_style    custom step ke pe v_etot c_alleint dt f_force_fix1[1]
+thermo_style    custom step ke pe v_etot c_alleint dt
 #thermo_modify   lost ignore
 
 run             ${nrun}

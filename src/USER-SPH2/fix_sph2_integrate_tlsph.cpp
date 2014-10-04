@@ -26,7 +26,6 @@
 #include "comm.h"
 #include "modify.h"
 
-
 using namespace Eigen;
 using namespace LAMMPS_NS;
 using namespace FixConst;
@@ -43,8 +42,7 @@ FixSph2IntegrateTlsph::FixSph2IntegrateTlsph(LAMMPS *lmp, int narg, char **arg) 
 	vlimit = atof(arg[3]);
 	if (vlimit > 0.0) {
 		if (comm->me == 0) {
-			error->message(FLERR,
-					"*** fix tlsph/integrate will cap velocities ***");
+			error->message(FLERR, "*** fix tlsph/integrate will cap velocities ***");
 		}
 	}
 
@@ -55,16 +53,14 @@ FixSph2IntegrateTlsph::FixSph2IntegrateTlsph(LAMMPS *lmp, int narg, char **arg) 
 		if (strcmp(arg[iarg], "update") == 0) {
 			updateReferenceConfigurationFlag = true;
 			if (comm->me == 0) {
-				error->message(FLERR,
-						"*** fix tlsph/integrate will update the reference configuration ***");
+				error->message(FLERR, "*** fix tlsph/integrate will update the reference configuration ***");
 			}
 		}
 
 		if (strcmp(arg[iarg], "xsph") == 0) {
 			xsphFlag = true;
 			if (comm->me == 0) {
-				error->message(FLERR,
-						"*** fix tlsph/integrate will use XSPH time integration ***");
+				error->message(FLERR, "*** fix tlsph/integrate will use XSPH time integration ***");
 			}
 		}
 	}
@@ -96,7 +92,7 @@ void FixSph2IntegrateTlsph::init() {
 	double **x = atom->x;
 	double **x0 = atom->x0;
 	int *mask = atom->mask;
-		int nlocal = atom->nlocal;
+	int nlocal = atom->nlocal;
 
 	for (int i = 0; i < nlocal; i++) {
 
@@ -134,8 +130,7 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 	 */
 
 	if (updateReferenceConfigurationFlag) {
-		int *updateFlag_ptr = (int *) force->pair->extract("sph2/tlsph/updateFlag_ptr",
-				itmp);
+		int *updateFlag_ptr = (int *) force->pair->extract("sph2/tlsph/updateFlag_ptr", itmp);
 		if (updateFlag_ptr == NULL) {
 			error->one(FLERR,
 					"fix tlsph/integrate failed to access updateFlag pointer. Check if a pair style exist which calculates this quantity.");
@@ -146,11 +141,9 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 		MPI_Allreduce(updateFlag_ptr, &updateFlag, 1, MPI_INT, MPI_MAX, world);
 
 		if (updateFlag > 0) {
-			if ((neighbor->ago == 0)
-					&& update->ntimestep > update->firststep + 1) {
+			if ((neighbor->ago == 0) && update->ntimestep > update->firststep + 1) {
 				if (comm->me == 0) {
-					printf("updating ref config at step: %ld\n",
-							update->ntimestep);
+					printf("updating ref config at step: %ld\n", update->ntimestep);
 				}
 
 				FixSph2IntegrateTlsph::updateReferenceConfiguration();
@@ -158,8 +151,7 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 		}
 	}
 
-	Vector3d *smoothVel = (Vector3d *) force->pair->extract("sph2/tlsph/smoothVel_ptr",
-			itmp);
+	Vector3d *smoothVel = (Vector3d *) force->pair->extract("sph2/tlsph/smoothVel_ptr", itmp);
 
 	if (xsphFlag) {
 		if (smoothVel == NULL) {
@@ -267,6 +259,7 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 	int nlocal = atom->nlocal;
 	int i, itmp;
 	double J, J0;
+	Matrix3d Ftotal;
 	int *mask = atom->mask;
 	if (igroup == atom->firstgroup) {
 		nlocal = atom->nfirst;
@@ -276,23 +269,15 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 	// access current deformation gradient
 	// copy data to output array
 	itmp = 0;
-	Matrix3d *F = (Matrix3d *) force->pair->extract("sph2/tlsph/F_ptr", itmp);
-	if (F == NULL) {
-		error->all(FLERR,
-				"FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access F array");
-	}
 
 	Matrix3d *Fincr = (Matrix3d *) force->pair->extract("sph2/tlsph/Fincr_ptr", itmp);
 	if (Fincr == NULL) {
-		error->all(FLERR,
-				"FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access Fincr array");
+		error->all(FLERR, "FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access Fincr array");
 	}
 
-	int *numNeighsRefConfig = (int *) force->pair->extract(
-			"sph2/tlsph/numNeighsRefConfig_ptr", itmp);
+	int *numNeighsRefConfig = (int *) force->pair->extract("sph2/tlsph/numNeighsRefConfig_ptr", itmp);
 	if (numNeighsRefConfig == NULL) {
-		error->all(FLERR,
-				"FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access numNeighsRefConfig array");
+		error->all(FLERR, "FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access numNeighsRefConfig array");
 	}
 
 	nRefConfigUpdates++;
@@ -321,29 +306,32 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 			x0[i][1] = x[i][1];
 			x0[i][2] = x[i][2];
 
-			// make the current deformation gradient the reference deformation gradient
-			defgrad0[i][0] = F[i](0, 0);
-			defgrad0[i][1] = F[i](0, 1);
-			defgrad0[i][2] = F[i](0, 2);
-			defgrad0[i][3] = F[i](1, 0);
-			defgrad0[i][4] = F[i](1, 1);
-			defgrad0[i][5] = F[i](1, 2);
-			defgrad0[i][6] = F[i](2, 0);
-			defgrad0[i][7] = F[i](2, 1);
-			defgrad0[i][8] = F[i](2, 2);
+			// compute current total deformation gradient
+			Ftotal = F0 * Fincr[i]; // this is the total deformation gradient: reference deformation times incremental deformation
+
+			// store the current deformation gradient the reference deformation gradient
+			defgrad0[i][0] = Ftotal(0, 0);
+			defgrad0[i][1] = Ftotal(0, 1);
+			defgrad0[i][2] = Ftotal(0, 2);
+			defgrad0[i][3] = Ftotal(1, 0);
+			defgrad0[i][4] = Ftotal(1, 1);
+			defgrad0[i][5] = Ftotal(1, 2);
+			defgrad0[i][6] = Ftotal(2, 0);
+			defgrad0[i][7] = Ftotal(2, 1);
+			defgrad0[i][8] = Ftotal(2, 2);
 
 			// adjust particle volumes
-			J = F[i].determinant();
+			J = Fincr[i].determinant();
 			vfrac[i] *= J / J0;
-
-			if (numNeighsRefConfig[i] < 20) {
-				radius[i] *= 1.2;
-			} else if (numNeighsRefConfig[i] > 50) {
-				radius[i] *= 0.9;
-			}
-
-			// do not allow radius to grow excessively
-			radius[i] = MIN(radius[i], 20.0 * contact_radius[i]);
+//
+//			if (numNeighsRefConfig[i] < 20) {
+//				radius[i] *= 1.2;
+//			} else if (numNeighsRefConfig[i] > 50) {
+//				radius[i] *= 0.9;
+//			}
+//
+//			// do not allow radius to grow excessively
+//			radius[i] = MIN(radius[i], 20.0 * contact_radius[i]);
 
 		}
 
@@ -356,14 +344,13 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 
 /* ---------------------------------------------------------------------- */
 
-int FixSph2IntegrateTlsph::pack_comm(int n, int *list, double *buf, int pbc_flag,
-		int *pbc) {
+int FixSph2IntegrateTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	int i, j, m;
 	double *radius = atom->radius;
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
 
-	//printf("in pack_comm neigh gcgc\n");
+	//printf("in FixSph2IntegrateTlsph::pack_forward_comm\n");
 	m = 0;
 	for (i = 0; i < n; i++) {
 		j = list[i];
@@ -374,17 +361,18 @@ int FixSph2IntegrateTlsph::pack_comm(int n, int *list, double *buf, int pbc_flag
 		buf[m++] = vfrac[j];
 		buf[m++] = radius[j];
 	}
-	return 5;
+	return m;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2IntegrateTlsph::unpack_comm(int n, int first, double *buf) {
+void FixSph2IntegrateTlsph::unpack_forward_comm(int n, int first, double *buf) {
 	int i, m, last;
 	double *radius = atom->radius;
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
 
+	//printf("in FixSph2IntegrateTlsph::unpack_forward_comm\n");
 	m = 0;
 	last = first + n;
 	for (i = first; i < last; i++) {

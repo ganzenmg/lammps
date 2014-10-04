@@ -38,7 +38,7 @@ using namespace FixConst;
 
 FixSph2TlsphDtReset::FixSph2TlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
-	if (narg < 7)
+	if (narg != 5)
 		error->all(FLERR, "Illegal fix tlsph/dt/reset command");
 
 	// set time_depend, else elapsed time accumulation can be messed up
@@ -55,29 +55,9 @@ FixSph2TlsphDtReset::FixSph2TlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 	if (nevery <= 0)
 		error->all(FLERR, "Illegal fix tlsph/dt/reset command");
 
-	minbound = maxbound = 1;
-	tmin = tmax = 0.0;
-	if (strcmp(arg[4], "NULL") == 0)
-		minbound = 0;
-	else
-		tmin = atof(arg[4]);
-	if (strcmp(arg[5], "NULL") == 0)
-		maxbound = 0;
-	else
-		tmax = atof(arg[5]);
-	xmax = atof(arg[6]);
-
-	if (minbound && tmin < 0.0)
-		error->all(FLERR, "Illegal fix tlsph/dt/reset command");
-	if (maxbound && tmax < 0.0)
-		error->all(FLERR, "Illegal fix tlsph/dt/reset command");
-	if (minbound && maxbound && tmin >= tmax)
-		error->all(FLERR, "Illegal fix tlsph/dt/reset command");
-	if (xmax <= 0.0)
-		error->all(FLERR, "Illegal fix tlsph/dt/reset command");
+	safety_factor = atof(arg[4]);
 
 	// initializations
-
 	t_elapsed = t_laststep = 0.0;
 	laststep = update->ntimestep;
 }
@@ -94,7 +74,6 @@ int FixSph2TlsphDtReset::setmask() {
 /* ---------------------------------------------------------------------- */
 
 void FixSph2TlsphDtReset::init() {
-	ftm2v = force->ftm2v;
 	dt = update->dt;
 }
 
@@ -115,51 +94,7 @@ void FixSph2TlsphDtReset::initial_integrate(int vflag) {
 /* ---------------------------------------------------------------------- */
 
 void FixSph2TlsphDtReset::end_of_step() {
-	double dtv, dtf, dtsq;
-	double vsq, fsq, massinv;
-	double delx, dely, delz, delr;
-
-	// compute vmax and amax of any atom in group
-
-	double **v = atom->v;
-	double **f = atom->f;
-	double *rmass = atom->rmass;
-	double *radius = atom->radius;
-	int *type = atom->type;
-	int *mask = atom->mask;
-	int nlocal = atom->nlocal;
-
 	double dtmin = BIG;
-
-	for (int i = 0; i < nlocal; i++)
-		if (mask[i] & groupbit) {
-
-			xmax = 0.01 * radius[i];
-
-
-			massinv = 1.0 / rmass[i];
-			vsq = v[i][0] * v[i][0] + v[i][1] * v[i][1] + v[i][2] * v[i][2];
-			fsq = f[i][0] * f[i][0] + f[i][1] * f[i][1] + f[i][2] * f[i][2];
-			dtv = dtf = BIG;
-			if (vsq > 0.0)
-				dtv = xmax / sqrt(vsq);
-			if (fsq > 0.0)
-				dtf = sqrt(2.0 * xmax / (ftm2v * sqrt(fsq) * massinv));
-			//dt = MIN(dtv, dtf);
-			dt = dtf;
-			dtsq = dt * dt;
-			delx = dt * v[i][0] + 0.5 * dtsq * massinv * f[i][0] * ftm2v;
-			dely = dt * v[i][1] + 0.5 * dtsq * massinv * f[i][1] * ftm2v;
-			delz = dt * v[i][2] + 0.5 * dtsq * massinv * f[i][2] * ftm2v;
-			delr = sqrt(delx * delx + dely * dely + delz * delz);
-			if (delr > xmax)
-				dt *= xmax / delr;
-			dtmin = MIN(dtmin, dt);
-
-			/* timestep based on maximum force and kernel radius */
-			dt = 0.0125 * sqrt(rmass[i] * radius[i] / sqrt(fsq));
-			dtmin = MIN(dtmin, dt);
-		}
 
 	/*
 	 * determine stable CFL timestep
@@ -171,39 +106,9 @@ void FixSph2TlsphDtReset::end_of_step() {
 		error->all(FLERR, "fix tlsph/dt/reset failed to access tlsph dtCFL");
 	}
 
-	dt = 0.125 * *dtCFL; // apply safety factor
-	dtmin = MIN(dtmin, dt);
-
-	/*
-	 * determine stable timestep based on relative velocity
-	 */
-
-	double *dtRelative = (double *) force->pair->extract("sph2/tlsph/dtRelative_ptr", itmp);
-	if (dtRelative == NULL) {
-		error->all(FLERR, "fix tlsph/dt/reset failed to access relativeVelocity");
-	}
-
-	dt = 0.01 * *dtRelative; // apply safety factor
-
-//	if (dt < dtmin) {
-//		printf("limit is due to relative velocity timestep is %f\n", dt);
-//	}
-
-	//
-	dtmin = MIN(dtmin, dt);
+	dtmin = safety_factor * *dtCFL; // apply safety factor
 
 	MPI_Allreduce(&dtmin, &dt, 1, MPI_DOUBLE, MPI_MIN, world);
-
-	if (minbound)
-		dt = MAX(dt, tmin);
-	if (maxbound)
-		dt = MIN(dt, tmax);
-
-//    double dtCFL;
-//    MPI_Allreduce(&thisDtCFL, &dtCFL, 1, MPI_DOUBLE, MPI_MIN, world);
-//    //printf("CFL stable timestep is %f, max travel timestep is %f, c0 max is %f, sign.vel is %f\n", dtCFL, dt, *c0Max,
-//    //        *signalVelMax);
-//    dt = MIN(dt, dtCFL);
 
 // if timestep didn't change, just return
 // else reset update->dt and other classes that depend on it

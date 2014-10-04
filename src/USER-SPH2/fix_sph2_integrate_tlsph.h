@@ -35,8 +35,8 @@ public:
     virtual void final_integrate();
     virtual void reset_dt();
     void updateReferenceConfiguration();
-    int pack_comm(int, int *, double *, int, int *);
-    void unpack_comm(int, int, double *);
+    int pack_forward_comm(int, int *, double *, int, int *);
+    void unpack_forward_comm(int, int, double *);
 
 protected:
     double dtv, dtf, vlimit, vlimitsq;

@@ -94,7 +94,7 @@ protected:
 	void allocate();
 
 	int nmax; // max number of atoms on this proc
-	Matrix3d *F, *K, *PK1, *Fdot, *Fincr;
+	Matrix3d *K, *PK1, *Fdot, *Fincr;
 	Matrix3d *d; // unrotated rate-of-deformation tensor
 	Matrix3d *R; // rotation matrix
 	Matrix3d *FincrInv;

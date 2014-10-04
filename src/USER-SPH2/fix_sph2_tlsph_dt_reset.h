@@ -38,9 +38,7 @@ class FixSph2TlsphDtReset : public Fix {
 
  private:
   bigint laststep;
-  int minbound,maxbound;
-  double tmin,tmax,xmax;
-  double ftm2v;
+  double safety_factor;
   double dt,t_elapsed,t_laststep;
 };
 

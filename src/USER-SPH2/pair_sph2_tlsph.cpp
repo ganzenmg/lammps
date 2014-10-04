@@ -61,7 +61,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 	strengthModel = eos = NULL;
 
 	nmax = 0; // make sure no atom on this proc such that initial memory allocation is correct
-	F = Fdot = Fincr = K = PK1 = NULL;
+	Fdot = Fincr = K = PK1 = NULL;
 	d = R = FincrInv = W = D = NULL;
 	detF = NULL;
 	smoothVel = NULL;
@@ -97,7 +97,6 @@ PairTlsph::~PairTlsph() {
 		delete[] maxrad_dynamic;
 		delete[] maxrad_frozen;
 
-		delete[] F;
 		delete[] Fdot;
 		delete[] Fincr;
 		delete[] K;
@@ -151,7 +150,7 @@ void PairTlsph::PreCompute() {
 	// zero accumulators
 	for (i = 0; i < nlocal; i++) {
 		K[i].setZero();
-		F[i].setZero();
+		//F[i].setZero();
 		Fincr[i].setZero();
 		Fdot[i].setZero();
 		shearFailureFlag[i] = false;
@@ -225,12 +224,12 @@ void PairTlsph::PreCompute() {
 				kernel_and_derivative(h, r0, wf, wfd);
 
 				// apply damage model if in tension
-				if (dx.dot(dv) > 0.0) {
-					damage_factor = sqrt(damage[i] * damage[j]);
-					damage_factor = 1.0 - pow(damage_factor, 3.0);
-				} else {
-					damage_factor = 1.0;
-				}
+//				if (dx.dot(dv) > 0.0) {
+//					damage_factor = sqrt(damage[i] * damage[j]);
+//					damage_factor = 1.0 - pow(damage_factor, 3.0);
+//				} else {
+//					damage_factor = 1.0;
+//				}
 				//wf *= damage_factor;
 				//wfd *= damage_factor;
 
@@ -293,37 +292,24 @@ void PairTlsph::PreCompute() {
 					Fincr[i](2, 2) = 1.0;
 				}
 
-				// build total deformation gradient with Eigen data structures
-				Fold(0, 0) = defgrad0[i][0];
-				Fold(0, 1) = defgrad0[i][1];
-				Fold(0, 2) = defgrad0[i][2];
-				Fold(1, 0) = defgrad0[i][3];
-				Fold(1, 1) = defgrad0[i][4];
-				Fold(1, 2) = defgrad0[i][5];
-				Fold(2, 0) = defgrad0[i][6];
-				Fold(2, 1) = defgrad0[i][7];
-				Fold(2, 2) = defgrad0[i][8];
-
-				F[i] = Fold * Fincr[i]; // this is the total deformation gradient: reference deformation times incremental deformation
-
 				/*
 				 * make sure F stays within some limits
 				 */
 
-				if (F[i].determinant() < DETF_MIN) {
-					printf("deleting particle [%d] because det(F)=%f is smaller than limit=%f\n", tag[i], F[i].determinant(),
+				if (Fincr[i].determinant() < DETF_MIN) {
+					printf("deleting particle [%d] because det(F)=%f is smaller than limit=%f\n", tag[i], Fincr[i].determinant(),
 					DETF_MIN);
-					cout << "Here is matrix F:" << endl << F[i] << endl;
+					cout << "Here is matrix F:" << endl << Fincr[i] << endl;
 					mol[i] = -1;
-				} else if (F[i].determinant() > DETF_MAX) {
-					printf("deleting particle [%d] because det(F)=%f is larger than limit=%f\n", tag[i], F[i].determinant(),
+				} else if (Fincr[i].determinant() > DETF_MAX) {
+					printf("deleting particle [%d] because det(F)=%f is larger than limit=%f\n", tag[i], Fincr[i].determinant(),
 					DETF_MAX);
-					cout << "Here is matrix F:" << endl << F[i] << endl;
+					cout << "Here is matrix F:" << endl << Fincr[i] << endl;
 					mol[i] = -1;
 				}
 
 				if (mol[i] > 0) {
-					detF[i] = F[i].determinant();
+					detF[i] = Fincr[i].determinant();
 					FincrInv[i] = PairTlsph::pseudo_inverse_SVD(Fincr[i]);
 
 					// velocity gradient, see Pronto2d, eqn.(2.1.3)
@@ -344,7 +330,8 @@ void PairTlsph::PreCompute() {
 						// stress in the true frame of reference (a stationary observer) is denoted by T, "true stress"
 
 						// polar decomposition of the deformation gradient, F = R * U
-						PairTlsph::PolDec(F[i], &R[i], &U);
+
+						PairTlsph::PolDec(Fincr[i], &R[i], &U);
 
 						// unrotated rate-of-deformation tensor d, see right side of Pronto2d, eqn.(2.1.7)
 						d[i] = R[i].transpose() * D[i] * R[i];
@@ -358,7 +345,6 @@ void PairTlsph::PreCompute() {
 			} // end if mol[i] > 0
 
 			if (mol[i] < 0) {
-				F[i].setIdentity();
 				Fdot[i].setZero();
 				Fincr[i].setIdentity();
 				smoothVel[i].setZero();
@@ -401,8 +387,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 	if (atom->nmax > nmax) {
 		nmax = atom->nmax;
-		delete[] F;
-		F = new Matrix3d[nmax]; // memory usage: 9 doubles
 		delete[] Fdot;
 		Fdot = new Matrix3d[nmax]; // memory usage: 9 doubles
 		delete[] Fincr;
@@ -540,6 +524,16 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 				gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
 
+//				if (gamma.norm() > 1.0e-3) {
+//					cout << "gamma is " << gamma << endl << endl;
+//					cout << "F[i] is" << Fincr[i] << endl << endl;
+//					cout << "F[j] is" << Fincr[j] << endl << endl;
+//
+//					cout << 0.5 * (Fincr[i] + Fincr[j]) * dx0 << endl;
+//					cout << dx << endl;
+//				}
+
+
 				if (r > 0.0) { // we divide by r, so guard against divide by zero
 					/* SPH-like formulation */
 					delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
@@ -584,18 +578,8 @@ void PairTlsph::compute(int eflag, int vflag) {
 					f_visc.setZero();
 				}
 
-				// sum stress, viscous, and hourglass forces, and apply (nonlinear) failure model only to hourglass correction force
-
-				// apply damage model if in tension
-				if (delVdotDelR > 0.0) {
-					damage_factor = sqrt(damage[i] * damage[j]);
-					damage_factor = 1.0 - pow(damage_factor, 3.0);
-				} else {
-					damage_factor = 1.0;
-				}
-
-
-				sumForces = damage_factor * (f_visc + f_stress + f_hg);
+				// sum stress, viscous, and hourglass forces
+				sumForces = f_visc + f_stress +f_hg;
 
 				// energy rate -- project velocity onto force vector
 				deltaE = 0.5 * sumForces.dot(dv);
@@ -626,7 +610,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 					}
 				}
 
-				// update relative velocity
+				// update relative velocity based timestep
 				dtRelative = MIN(dtRelative, r / (dv.norm() + 0.1 * c0_type[itype][jtype]));
 
 			}
@@ -658,34 +642,34 @@ void PairTlsph::LinearEOS(double &lambda, double &pInitial__, double &d__, doubl
 	 * limit tensile pressure
 	 */
 
-	pLimit = lambda * (DETF_MAX - 1.0);
-	if (pFinal__ > pLimit) {
-		pFinal__ = pLimit;
-
-		/* do not allow pressure to increase */
-		if (p_rate__ > 0.0) { // same signs
-			p_rate__ = 0.0;
-		}
-
-		printf("limiting pressure max\n");
-	}
+//	pLimit = lambda * (DETF_MAX - 1.0);
+//	if (pFinal__ > pLimit) {
+//		pFinal__ = pLimit;
+//
+//		/* do not allow pressure to increase */
+//		if (p_rate__ > 0.0) { // same signs
+//			p_rate__ = 0.0;
+//		}
+//
+//		printf("limiting pressure max\n");
+//	}
 
 	/*
 	 * limit compressive pressure
 	 */
-	pLimit = lambda * (DETF_MIN - 1.0);
-	if (pFinal__ < pLimit) {
-
-		printf("limiting pressure min, pIni=%f, pFin=%f, dt=%f, d_iso=%f\n", pInitial__, pFinal__, dt__, d__);
-
-		pFinal__ = pLimit;
-
-		/* do not allow negative pressure to become more gegative */
-		if (p_rate__ < 0.0) { // same signs
-			p_rate__ = 0.0;
-		}
-
-	}
+//	pLimit = lambda * (DETF_MIN - 1.0);
+//	if (pFinal__ < pLimit) {
+//
+//		printf("limiting pressure min, pIni=%f, pFin=%f, dt=%f, d_iso=%f\n", pInitial__, pFinal__, dt__, d__);
+//
+//		pFinal__ = pLimit;
+//
+//		/* do not allow negative pressure to become more gegative */
+//		if (p_rate__ < 0.0) { // same signs
+//			p_rate__ = 0.0;
+//		}
+//
+//	}
 
 }
 
@@ -842,12 +826,14 @@ void PairTlsph::AssembleStress() {
 	int *type = atom->type;
 	double *radius = atom->radius;
 	double *damage = atom->damage;
+	double *rmass = atom->rmass;
+	double *vfrac = atom->vfrac;
 	double factor, lambda, mu;
 	double pInitial, d_iso, pFinal, p_rate, plastic_strain_increment;
 	int i, itype;
 	int nlocal = atom->nlocal;
 	double dt = update->dt;
-	double bulkmodulus;
+	double bulkmodulus, K3, mu2, l2u, shear_rate_sq, this_c0;
 	Matrix3d sigma_rate, eye, sigmaInitial, sigmaFinal, T, Jaumann_rate, sigma_rate_check;
 	Matrix3d d_dev, sigmaInitial_dev, sigmaFinal_dev, sigma_dev_rate, E, sigma_damaged;
 	Vector3d x0i, xi, xp;
@@ -907,7 +893,7 @@ void PairTlsph::AssembleStress() {
 					break;
 				}
 
-				dtCFL = MIN(dtCFL, radius[i] / c0_type[itype][itype]);
+
 
 				/*
 				 * material strength
@@ -921,7 +907,7 @@ void PairTlsph::AssembleStress() {
 				case LINEAR_DEFGRAD:
 					lambda = youngsmodulus[itype] * poissonr[itype] / ((1.0 + poissonr[itype]) * (1.0 - 2.0 * poissonr[itype]));
 					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
-					LinearStrengthDefgrad(lambda, mu, F[i], &sigmaFinal_dev);
+					LinearStrengthDefgrad(lambda, mu, Fincr[i], &sigmaFinal_dev);
 					eff_plastic_strain[i] = 0.0;
 					p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
 					sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
@@ -964,7 +950,7 @@ void PairTlsph::AssembleStress() {
 					/*
 					 * maximum strain failure criterion:
 					 */
-					E = 0.5 * (F[i] * F[i].transpose() - eye);
+					E = 0.5 * (Fincr[i] * Fincr[i].transpose() - eye);
 					IsotropicMaxStrainDamage(E, sigmaFinal, maxstrain[itype], dt, c0_type[itype][itype], radius[i], damage[i],
 							sigma_damaged);
 				} else {
@@ -1015,6 +1001,31 @@ void PairTlsph::AssembleStress() {
 				 * correct stress tensor with shape matrix
 				 */
 				PK1[i] = PK1[i] * K[i];
+
+				/*
+				 * compute stable time step according to Pronto 2d
+				 */
+
+				K3 = 3.0 * p_rate / (dt * d_iso); // 3 times the effective bulk modulus, see Pronto 2d eqn 3.4.6
+				mu2 = sigma_dev_rate(0,1) / (dt * d_dev(0,1)) // 2 times the effective shear modulus, see Pronto 2d eq. 3.4.7
+				    + sigma_dev_rate(0,2) / (dt * d_dev(0,2))
+				    + sigma_dev_rate(1,2) / (dt * d_dev(1,2));
+				l2u = (K3 + 2.0 * mu2) / 3.0; // effective dilational modulus, see Pronto 2d eqn 3.4.8
+				shear_rate_sq = d_dev(0,1) * d_dev(0,1) + d_dev(0,2) * d_dev(0,2) + d_dev(1,2) * d_dev(1,2); // safety check
+
+				// can only compute effective dilational modulus if deformation is large enough in this timestep
+				if ((dt * d_iso > 1.0e-6) && (dt * dt * shear_rate_sq > 1.0e-12)) {
+					this_c0 = sqrt(l2u / (rmass[i] / vfrac[i]));
+					dtCFL = MIN(dtCFL, radius[i] / this_c0);
+				} else {
+					// fall back to initial estimate for the speed of sound
+					dtCFL = MIN(dtCFL, radius[i] / c0_type[itype][itype]);
+				}
+
+
+
+
+
 
 			} else { // end if delete_flag == 0
 				PK1[i].setZero();
@@ -1294,9 +1305,7 @@ double PairTlsph::memory_usage() {
 
 void *PairTlsph::extract(const char *str, int &i) {
 //printf("in PairTlsph::extract\n");
-	if (strcmp(str, "sph2/tlsph/F_ptr") == 0) {
-		return (void *) F;
-	} else if (strcmp(str, "sph2/tlsph/Fincr_ptr") == 0) {
+	if (strcmp(str, "sph2/tlsph/Fincr_ptr") == 0) {
 		return (void *) Fincr;
 	} else if (strcmp(str, "sph2/tlsph/detF_ptr") == 0) {
 		return (void *) detF;
