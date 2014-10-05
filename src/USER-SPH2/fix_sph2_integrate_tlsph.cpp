@@ -258,7 +258,7 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 	int *mol = atom->molecule;
 	int nlocal = atom->nlocal;
 	int i, itmp;
-	double J, J0;
+	double J, J0, vol0;
 	Matrix3d Ftotal;
 	int *mask = atom->mask;
 	if (igroup == atom->firstgroup) {
@@ -320,18 +320,18 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 			defgrad0[i][7] = Ftotal(2, 1);
 			defgrad0[i][8] = Ftotal(2, 2);
 
-			// adjust particle volumes
-			J = Fincr[i].determinant();
-			vfrac[i] *= J / J0;
+			// adjust particle volumes -- this is left out because it leads to instabilities
+			//J = Fincr[i].determinant();
+//			//vfrac[i] *= J / J0;
 //
-//			if (numNeighsRefConfig[i] < 20) {
-//				radius[i] *= 1.2;
-//			} else if (numNeighsRefConfig[i] > 50) {
-//				radius[i] *= 0.9;
-//			}
-//
-//			// do not allow radius to grow excessively
-//			radius[i] = MIN(radius[i], 20.0 * contact_radius[i]);
+			if (numNeighsRefConfig[i] < 10) {
+				radius[i] *= 1.1;
+			} else if (numNeighsRefConfig[i] > 40) {
+				radius[i] *= 0.9;
+			}
+
+			// do not allow radius to grow excessively
+			radius[i] = MIN(radius[i], 20.0 * contact_radius[i]);
 
 		}
 
@@ -345,42 +345,42 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 /* ---------------------------------------------------------------------- */
 
 int FixSph2IntegrateTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
-	int i, j, m;
-	double *radius = atom->radius;
-	double *vfrac = atom->vfrac;
-	double **x0 = atom->x0;
+int i, j, m;
+double *radius = atom->radius;
+double *vfrac = atom->vfrac;
+double **x0 = atom->x0;
 
-	//printf("in FixSph2IntegrateTlsph::pack_forward_comm\n");
-	m = 0;
-	for (i = 0; i < n; i++) {
-		j = list[i];
-		buf[m++] = x0[j][0];
-		buf[m++] = x0[j][1];
-		buf[m++] = x0[j][2];
+//printf("in FixSph2IntegrateTlsph::pack_forward_comm\n");
+m = 0;
+for (i = 0; i < n; i++) {
+	j = list[i];
+	buf[m++] = x0[j][0];
+	buf[m++] = x0[j][1];
+	buf[m++] = x0[j][2];
 
-		buf[m++] = vfrac[j];
-		buf[m++] = radius[j];
-	}
-	return m;
+	buf[m++] = vfrac[j];
+	buf[m++] = radius[j];
+}
+return m;
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixSph2IntegrateTlsph::unpack_forward_comm(int n, int first, double *buf) {
-	int i, m, last;
-	double *radius = atom->radius;
-	double *vfrac = atom->vfrac;
-	double **x0 = atom->x0;
+int i, m, last;
+double *radius = atom->radius;
+double *vfrac = atom->vfrac;
+double **x0 = atom->x0;
 
-	//printf("in FixSph2IntegrateTlsph::unpack_forward_comm\n");
-	m = 0;
-	last = first + n;
-	for (i = first; i < last; i++) {
-		x0[i][0] = buf[m++];
-		x0[i][1] = buf[m++];
-		x0[i][2] = buf[m++];
+//printf("in FixSph2IntegrateTlsph::unpack_forward_comm\n");
+m = 0;
+last = first + n;
+for (i = first; i < last; i++) {
+	x0[i][0] = buf[m++];
+	x0[i][1] = buf[m++];
+	x0[i][2] = buf[m++];
 
-		vfrac[i] = buf[m++];
-		radius[i] = buf[m++];
-	}
+	vfrac[i] = buf[m++];
+	radius[i] = buf[m++];
+}
 }

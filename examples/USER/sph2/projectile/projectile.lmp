@@ -1,20 +1,22 @@
 variable        rho equal 2700.0e-9
 variable        h equal 0.22
-variable        E equal 200 # Young's modulus
+variable        E equal 150 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
 variable        vel equal 1000.0
+variable        hg equal 0.0
+
 # ----
 variable        c0 equal sqrt(${E}/${rho})
 variable        dt equal 0.125*${h}/${c0}
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
-variable        skin equal 2.5 # Verlet list range
-variable        ghostcut equal 5.0
+variable        skin equal 0.5*${h} # Verlet list range
 variable        contact_stiffness equal 10*${E}
 
 units		si
 dimension       2
 boundary        s s p
 atom_style      tlsph
+comm_style      tiled
 atom_modify	map array
 neighbor        ${skin} bin
 neigh_modify    every 5 delay 0 check yes # only build neighbor list if particle has moved half the skin distance
@@ -26,68 +28,63 @@ group           target type 2
 
 velocity        projectile set ${vel} 0.0 0.0 sum no units box
 
-#pair_style      tlsph/ipc_hertz
-#pair_coeff      * * 1
-
-pair_style      hybrid/overlay tlsph tlsph/ipc_hertz
-#                         strength EOS             c0    E     nu   hg    visc sigy
-pair_coeff      1 1 tlsph linearplastic     linear ${c0} 150  ${nu} 0.5  0.00  0.5
-pair_coeff      2 2 tlsph linearplastic     linear ${c0} 75   ${nu} 0.5  0.00  0.5
-pair_coeff      1 2 tlsph/ipc_hertz ${contact_stiffness}
+pair_style      hybrid/overlay tlsph sph2/hertz
+#                         strength EOS                         c0    E     nu   hg    sigy     max.strain  max.stress Q1   Q2
+pair_coeff      1 1 tlsph linearplastic               linear ${c0}   50 ${nu} ${hg}       0.1     0.0        0.0        0.5  2.0
+pair_coeff      2 2 tlsph linearplastic               linear ${c0}  200  0.1  ${hg}        2.0     0.00      1.0       0.1  2.0
+pair_coeff      1 2 sph2/hertz ${contact_stiffness}
 
 variable        mx_atom atom mass*vx
 compute         mx all reduce sum v_mx_atom
 variable        my_atom atom mass*vy
 compute         my all reduce sum v_my_atom
 
-compute         F all tlsph/defgrad
-compute         E all tlsph/strain
-compute         P all tlsph/eff_plastic_strain
-compute         S all tlsph/stress
-compute         nn all tlsph/num_neighs
-compute         contact_radius all tlsph/contact_radius
-compute         eint all tlsph/e
+compute         E all sph2/tlsph_strain
+compute         P all sph2/plastic_strain
+compute         S all sph2/tlsph_stress
+compute         d all sph2/damage
+compute         nn all sph2/tlsph_num_neighs
+compute         contact_radius all sph2/contact_radius
+compute         eint all sph2/internal_energy
 compute         alleint all reduce sum c_eint
-variable        etot equal ke+c_alleint
-
+variable        etot equal ke+c_alleint+pe
 
 # update CFL timestep
-variable           travelmax equal 0.1
-
 thermo          100
 thermo_style    custom step ke c_mx c_my ke pe v_etot c_alleint
 thermo_modify   lost ignore
 
 # initial run
 
-run             2
-fix             inn all store/state 0 c_nn
+run             0
+#fix             inn all store/state 0 c_nn
 
-#balance         dynamic xy 20 1.0
+balance          1.0 rcb
 
 # time integration
 timestep        ${dt}
-
-
-
-#fix             integration_fix all tlsph/integrate/xsph 1.5e3
-fix             integration_fix_projectile projectile tlsph/integrate 1.5e3 update xsph
-fix             integration_fix_target target tlsph/integrate 1.5e3 update xsph
+fix             dtfix all sph2/tlsph_dt_reset 5 0.1
+fix             integration_fix all sph2/integrate_tlsph 1.5e3 update
+#variable        a equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
+#variable        disp equal 2.0*${vel}*f_dtfix[1]
+#fix             output_fix all print 10 "${disp} $a" file force_displacement.dat screen no
 
 variable        nrun equal round((440./${vel})/${dt})
-print "running for ${nrun} steps"
+print           "running for ${nrun} steps"
 
-variable        dumpFreq equal round(${nrun}/500)
+variable        dumpFreq equal round(${nrun}/1000)
 dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
-                c_F[10] &
-                c_E[1] c_E[2] c_E[5] &
-                c_S[1] c_S[2] c_S[5] &
-                fx fy vx vy c_P c_eint &
-                c_contact_radius radius c_nn mol
+                c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
+                fx fy fz vx vy vz c_P c_eint &
+                c_contact_radius c_nn mol c_d mass
 
 dump_modify     dump_id first yes
 
-run             ${nrun}
+thermo          100
+thermo_style    custom step ke pe v_etot c_alleint dt
+#thermo_modify   lost ignore
+run             50000
 #
 #
 #

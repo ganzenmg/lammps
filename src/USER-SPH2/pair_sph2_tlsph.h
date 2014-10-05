@@ -60,6 +60,7 @@ public:
 	void CheckIntegration();
 	void PreCompute();
 	double TestMatricesEqual(Matrix3d, Matrix3d, double);
+	double effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev, Matrix3d sigma_dev_rate, double damage);
 
 	/*
 	 * strength models
@@ -71,7 +72,7 @@ public:
 	/*
 	 * EOS models
 	 */
-	void LinearEOS(double &, double &, double &, double &, double &, double &);
+	void LinearEOS(double lambda, double pInitial, double d, double dt, double &pFinal, double &p_rate);
 	void LinearCutoffEOS(double &, double &, double &, double &, double &, double &, double &);
 
 	/*
@@ -83,9 +84,14 @@ public:
 				double &damage, Matrix3d &S_damaged);
 
 protected:
+
+	/*
+	 * per-type arrays
+	 */
 	double *youngsmodulus, *poissonr, *yieldStress, *maxstrain, *maxstress;
 	double **Q1, **Q2;
-	double **hg_coeff, **c0_type;
+	double **hg_coeff;
+	double *lmbda0, *mu0, *c0; // Lame constants in initial, elastic region, initial longitudinal modulus
 	int *strengthModel, *eos; // strength (deviatoric) and pressure constitutive models
 
 	double *onerad_dynamic, *onerad_frozen;
@@ -101,13 +107,12 @@ protected:
 	Matrix3d *D, *W; // strain rate and spin tensor
 	Vector3d *smoothVel;
 	Matrix3d *CauchyStress;
-	double *detF;
+	double *detF, *p_wave_speed;
 	bool *shearFailureFlag;
 	int *numNeighsRefConfig;
 	double *shepardWeight;
 
 	double hMin; // minimum kernel radius for two particles
-	double c0Max;
 	double dtCFL;
 	double dtRelative; // relative velocity of two particles, divided by sound speed
 	int updateFlag;

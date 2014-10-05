@@ -52,18 +52,17 @@ using namespace Eigen;
 PairTlsph::PairTlsph(LAMMPS *lmp) :
 		Pair(lmp) {
 	maxstrain = maxstress = NULL;
-	c0_type = NULL;
-	youngsmodulus = NULL;
 	poissonr = NULL;
 	hg_coeff = NULL;
 	Q1 = Q2 = NULL;
 	yieldStress = NULL;
 	strengthModel = eos = NULL;
+	lmbda0 = mu0 = c0 = NULL;
 
 	nmax = 0; // make sure no atom on this proc such that initial memory allocation is correct
 	Fdot = Fincr = K = PK1 = NULL;
 	d = R = FincrInv = W = D = NULL;
-	detF = NULL;
+	detF = p_wave_speed = NULL;
 	smoothVel = NULL;
 	shearFailureFlag = NULL;
 	numNeighsRefConfig = NULL;
@@ -72,7 +71,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 
 	updateFlag = 0;
 
-	comm_forward = 20; // this pair style communicates 20 doubles to ghost atoms : PK1 tensor + F tensor + shepardWeight
+	comm_forward = 21; // this pair style communicates 20 doubles to ghost atoms : PK1 tensor + F tensor + shepardWeight
 }
 
 /* ---------------------------------------------------------------------- */
@@ -80,7 +79,6 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 PairTlsph::~PairTlsph() {
 	if (allocated) {
 		memory->destroy(setflag);
-		memory->destroy(c0_type);
 		memory->destroy(youngsmodulus);
 		memory->destroy(poissonr);
 		memory->destroy(hg_coeff);
@@ -91,6 +89,9 @@ PairTlsph::~PairTlsph() {
 		memory->destroy(eos);
 		memory->destroy(maxstrain);
 		memory->destroy(maxstress);
+		memory->destroy(lmbda0);
+		memory->destroy(mu0);
+		memory->destroy(c0);
 
 		delete[] onerad_dynamic;
 		delete[] onerad_frozen;
@@ -112,6 +113,7 @@ PairTlsph::~PairTlsph() {
 		delete[] numNeighsRefConfig;
 		delete[] shepardWeight;
 		delete[] CauchyStress;
+		delete[] p_wave_speed;
 	}
 }
 
@@ -222,16 +224,6 @@ void PairTlsph::PreCompute() {
 
 				// kernel function
 				kernel_and_derivative(h, r0, wf, wfd);
-
-				// apply damage model if in tension
-//				if (dx.dot(dv) > 0.0) {
-//					damage_factor = sqrt(damage[i] * damage[j]);
-//					damage_factor = 1.0 - pow(damage_factor, 3.0);
-//				} else {
-//					damage_factor = 1.0;
-//				}
-				//wf *= damage_factor;
-				//wfd *= damage_factor;
 
 				// uncorrected kernel gradient
 				g = (wfd / r0) * dx0;
@@ -417,6 +409,8 @@ void PairTlsph::compute(int eflag, int vflag) {
 		shepardWeight = new double[nmax]; // memory usage: 1 double; total 109 doubles
 		delete[] CauchyStress;
 		CauchyStress = new Matrix3d[nmax]; // memory usage: 9 doubles; total 118 doubles
+		delete[] p_wave_speed;
+		p_wave_speed = new double[nmax]; // memory usage: 1 double; total 119 doubles
 	}
 
 	PairTlsph::PreCompute();
@@ -464,7 +458,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 			j &= NEIGHMASK;
 
 			if (mol[j] < 0) {
-				continue; // Particle j is not a valid SPH particle (anymore). Skip all interactiions with this particle.
+				continue; // Particle j is not a valid SPH particle (anymore). Skip all interactions with this particle.
 			}
 
 			if (mol[i] != mol[j]) {
@@ -524,16 +518,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 				gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
 
-//				if (gamma.norm() > 1.0e-3) {
-//					cout << "gamma is " << gamma << endl << endl;
-//					cout << "F[i] is" << Fincr[i] << endl << endl;
-//					cout << "F[j] is" << Fincr[j] << endl << endl;
-//
-//					cout << 0.5 * (Fincr[i] + Fincr[j]) * dx0 << endl;
-//					cout << dx << endl;
-//				}
-
-
 				if (r > 0.0) { // we divide by r, so guard against divide by zero
 					/* SPH-like formulation */
 					delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
@@ -559,27 +543,23 @@ void PairTlsph::compute(int eflag, int vflag) {
 				/*
 				 * artificial viscosity with linear and quadratic terms
 				 * note that artificial viscosity is enhanced if particles are damaged
+				 * note that quadratic term in viscosity is not useful at all apparently
 				 */
 
 				delVdotDelR = dx.dot(dv);
-				if (delVdotDelR != 0.0) {
+				//double hr = h - r; // [m]
+				//wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
 
-					double hr = h - r; // [m]
-					wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
-
-					mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
-					c_ij = c0_type[itype][jtype];
-					rho_ij = 0.5 * (rmass[i] / vfrac[i] + rmass[j] / vfrac[j]);
-					visc_magnitude = (-(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij
-							+ (Q2[itype][jtype] + 2.0 * damage_factor) * mu_ij * mu_ij) / rho_ij;
-					f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / r;
-
-				} else {
-					f_visc.setZero();
-				}
+				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
+				c_ij = 0.5 * (c0[itype] + c0[jtype]);
+				rho_ij = 0.5 * (rmass[i] / vfrac[i] + rmass[j] / vfrac[j]);
+				//visc_magnitude = (-(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij
+				//		+ (Q2[itype][jtype] + 2.0 * damage_factor) * mu_ij * mu_ij) / rho_ij;
+				visc_magnitude = -(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij / rho_ij;
+				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / r;
 
 				// sum stress, viscous, and hourglass forces
-				sumForces = f_visc + f_stress +f_hg;
+				sumForces = f_visc + f_stress + f_hg;
 
 				// energy rate -- project velocity onto force vector
 				deltaE = 0.5 * sumForces.dot(dv);
@@ -611,7 +591,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 				}
 
 				// update relative velocity based timestep
-				dtRelative = MIN(dtRelative, r / (dv.norm() + 0.1 * c0_type[itype][jtype]));
+				dtRelative = MIN(dtRelative, r / (dv.norm() + 0.1 * c_ij));
 
 			}
 
@@ -628,48 +608,15 @@ void PairTlsph::compute(int eflag, int vflag) {
  input: initial pressure pInitial, isotropic part of the strain rate d, time-step dt
  output: final pressure pFinal, pressure rate p_rate
  ------------------------------------------------------------------------- */
-void PairTlsph::LinearEOS(double &lambda, double &pInitial__, double &d__, double &dt__, double &pFinal__, double &p_rate__) {
+void PairTlsph::LinearEOS(double lambda, double pInitial, double d, double dt, double &pFinal, double &p_rate) {
 	double pLimit;
 
 	/*
 	 * pressure rate
 	 */
-	p_rate__ = lambda * d__;
+	p_rate = lambda * d;
 
-	pFinal__ = pInitial__ + dt__ * p_rate__; // increment pressure using pressure rate
-
-	/*
-	 * limit tensile pressure
-	 */
-
-//	pLimit = lambda * (DETF_MAX - 1.0);
-//	if (pFinal__ > pLimit) {
-//		pFinal__ = pLimit;
-//
-//		/* do not allow pressure to increase */
-//		if (p_rate__ > 0.0) { // same signs
-//			p_rate__ = 0.0;
-//		}
-//
-//		printf("limiting pressure max\n");
-//	}
-
-	/*
-	 * limit compressive pressure
-	 */
-//	pLimit = lambda * (DETF_MIN - 1.0);
-//	if (pFinal__ < pLimit) {
-//
-//		printf("limiting pressure min, pIni=%f, pFin=%f, dt=%f, d_iso=%f\n", pInitial__, pFinal__, dt__, d__);
-//
-//		pFinal__ = pLimit;
-//
-//		/* do not allow negative pressure to become more gegative */
-//		if (p_rate__ < 0.0) { // same signs
-//			p_rate__ = 0.0;
-//		}
-//
-//	}
+	pFinal = pInitial + dt * p_rate; // increment pressure using pressure rate
 
 }
 
@@ -833,13 +780,12 @@ void PairTlsph::AssembleStress() {
 	int i, itype;
 	int nlocal = atom->nlocal;
 	double dt = update->dt;
-	double bulkmodulus, K3, mu2, l2u, shear_rate_sq, this_c0;
+	double bulkmodulus, K3, mu2, M, shear_rate_sq;
 	Matrix3d sigma_rate, eye, sigmaInitial, sigmaFinal, T, Jaumann_rate, sigma_rate_check;
 	Matrix3d d_dev, sigmaInitial_dev, sigmaFinal_dev, sigma_dev_rate, E, sigma_damaged;
 	Vector3d x0i, xi, xp;
 
 	eye.setIdentity();
-	c0Max = 0.0;
 	dtCFL = 1.0e22;
 
 	for (i = 0; i < nlocal; i++) {
@@ -873,15 +819,11 @@ void PairTlsph::AssembleStress() {
 				//printf("eos = %d\n", eos[itype]);
 				switch (eos[itype]) {
 				case LINEAR:
-					lambda = youngsmodulus[itype] * poissonr[itype] / ((1.0 + poissonr[itype]) * (1.0 - 2.0 * poissonr[itype]));
-					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
-					bulkmodulus = lambda + 2.0 * mu / 3.0;
+					bulkmodulus = lmbda0[itype] + 2.0 * mu0[itype] / 3.0;
 					LinearEOS(bulkmodulus, pInitial, d_iso, dt, pFinal, p_rate);
 					break;
 				case LINEAR_CUTOFF:
-					lambda = youngsmodulus[itype] * poissonr[itype] / ((1.0 + poissonr[itype]) * (1.0 - 2.0 * poissonr[itype]));
-					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
-					bulkmodulus = lambda + 2.0 * mu / 3.0;
+					bulkmodulus = lmbda0[itype] + 2.0 * mu0[itype] / 3.0;
 					LinearCutoffEOS(bulkmodulus, yieldStress[itype], pInitial, d_iso, dt, pFinal, p_rate);
 					break;
 				case NONE:
@@ -893,30 +835,24 @@ void PairTlsph::AssembleStress() {
 					break;
 				}
 
-
-
 				/*
 				 * material strength
 				 */
 
 				switch (strengthModel[itype]) {
 				case LINEAR:
-					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
-					LinearStrength(mu, sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
+					LinearStrength(mu0[itype], sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
 					break;
 				case LINEAR_DEFGRAD:
-					lambda = youngsmodulus[itype] * poissonr[itype] / ((1.0 + poissonr[itype]) * (1.0 - 2.0 * poissonr[itype]));
-					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
-					LinearStrengthDefgrad(lambda, mu, Fincr[i], &sigmaFinal_dev);
+					LinearStrengthDefgrad(lmbda0[itype], mu0[itype], Fincr[i], &sigmaFinal_dev);
 					eff_plastic_strain[i] = 0.0;
 					p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
 					sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
 					R[i].setIdentity();
 					break;
 				case LINEAR_PLASTIC:
-					mu = youngsmodulus[itype] / (2.0 * (1.0 + poissonr[itype]));
-					LinearPlasticStrength(mu, yieldStress[itype], sigmaInitial_dev, d_dev, dt, &sigmaFinal_dev, &sigma_dev_rate,
-							&plastic_strain_increment);
+					LinearPlasticStrength(mu0[itype], yieldStress[itype], sigmaInitial_dev, d_dev, dt, &sigmaFinal_dev,
+							&sigma_dev_rate, &plastic_strain_increment);
 					eff_plastic_strain[i] += plastic_strain_increment;
 					break;
 				case NONE:
@@ -944,15 +880,13 @@ void PairTlsph::AssembleStress() {
 					/*
 					 * maximum stress failure criterion:
 					 */
-					IsotropicMaxStressDamage(sigmaFinal, maxstress[itype], dt, c0_type[itype][itype], radius[i], damage[i],
-							sigma_damaged);
+					IsotropicMaxStressDamage(sigmaFinal, maxstress[itype], dt, c0[itype], radius[i], damage[i], sigma_damaged);
 				} else if (maxstrain[itype] != 0.0) {
 					/*
 					 * maximum strain failure criterion:
 					 */
 					E = 0.5 * (Fincr[i] * Fincr[i].transpose() - eye);
-					IsotropicMaxStrainDamage(E, sigmaFinal, maxstrain[itype], dt, c0_type[itype][itype], radius[i], damage[i],
-							sigma_damaged);
+					IsotropicMaxStrainDamage(E, sigmaFinal, maxstrain[itype], dt, c0[itype], radius[i], damage[i], sigma_damaged);
 				} else {
 					sigma_damaged = sigmaFinal;
 				}
@@ -1005,32 +939,16 @@ void PairTlsph::AssembleStress() {
 				/*
 				 * compute stable time step according to Pronto 2d
 				 */
-
-				K3 = 3.0 * p_rate / (dt * d_iso); // 3 times the effective bulk modulus, see Pronto 2d eqn 3.4.6
-				mu2 = sigma_dev_rate(0,1) / (dt * d_dev(0,1)) // 2 times the effective shear modulus, see Pronto 2d eq. 3.4.7
-				    + sigma_dev_rate(0,2) / (dt * d_dev(0,2))
-				    + sigma_dev_rate(1,2) / (dt * d_dev(1,2));
-				l2u = (K3 + 2.0 * mu2) / 3.0; // effective dilational modulus, see Pronto 2d eqn 3.4.8
-				shear_rate_sq = d_dev(0,1) * d_dev(0,1) + d_dev(0,2) * d_dev(0,2) + d_dev(1,2) * d_dev(1,2); // safety check
-
-				// can only compute effective dilational modulus if deformation is large enough in this timestep
-				if ((dt * d_iso > 1.0e-6) && (dt * dt * shear_rate_sq > 1.0e-12)) {
-					this_c0 = sqrt(l2u / (rmass[i] / vfrac[i]));
-					dtCFL = MIN(dtCFL, radius[i] / this_c0);
-				} else {
-					// fall back to initial estimate for the speed of sound
-					dtCFL = MIN(dtCFL, radius[i] / c0_type[itype][itype]);
-				}
-
-
-
-
-
+				M = effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev,sigma_dev_rate, damage[i]);
+				p_wave_speed[i] = sqrt(M / (rmass[i] / vfrac[i]));
+				//printf("c0 = %f\n", c0[i]);
+				dtCFL = MIN(dtCFL, radius[i] / p_wave_speed[i]);
 
 			} else { // end if delete_flag == 0
 				PK1[i].setZero();
 				K[i].setIdentity();
 				CauchyStress[i].setZero();
+				p_wave_speed[i] = 0.0;
 
 				sigma_rate.setZero();
 				tlsph_stress[i][0] = 0.0;
@@ -1045,6 +963,7 @@ void PairTlsph::AssembleStress() {
 			PK1[i].setZero();
 			K[i].setIdentity();
 			CauchyStress[i].setZero();
+			p_wave_speed[i] = 0.0;
 		}
 	}
 }
@@ -1062,7 +981,6 @@ void PairTlsph::allocate() {
 		for (int j = i; j <= n; j++)
 			setflag[i][j] = 0;
 
-	memory->create(c0_type, n + 1, n + 1, "pair:soundspeed");
 	memory->create(youngsmodulus, n + 1, "pair:youngsmodulus");
 	memory->create(poissonr, n + 1, "pair:poissonratio");
 	memory->create(hg_coeff, n + 1, n + 1, "pair:hg_magnitude");
@@ -1073,6 +991,9 @@ void PairTlsph::allocate() {
 	memory->create(eos, n + 1, "pair:eosmodel");
 	memory->create(maxstrain, n + 1, "pair:maxstrain");
 	memory->create(maxstress, n + 1, "pair:maxstress");
+	memory->create(lmbda0, n + 1, "pair:lmbda0");
+	memory->create(mu0, n + 1, "pair:mu0");
+	memory->create(c0, n + 1, "pair:c0");
 
 	memory->create(cutsq, n + 1, n + 1, "pair:cutsq"); // always needs to be allocated, even with granular neighborlist
 
@@ -1147,16 +1068,19 @@ void PairTlsph::coeff(int narg, char **arg) {
 	for (int i = ilo; i <= ihi; i++) {
 
 // set all properties which are defined per type:
+
 		strengthModel[i] = mat_one;
 		eos[i] = eos_one;
+		c0[i] = c0_one;
 		yieldStress[i] = yieldstress_one;
 		youngsmodulus[i] = youngsmodulus_one;
 		poissonr[i] = poissonr_one;
 		maxstrain[i] = maxstrain_one;
 		maxstress[i] = maxstress_one;
+		lmbda0[i] = youngsmodulus_one * poissonr_one / ((1.0 + poissonr_one) * (1.0 - 2.0 * poissonr_one));
+		mu0[i] = youngsmodulus_one / (2.0 * (1.0 + poissonr_one));
 
 		for (int j = MAX(jlo, i); j <= jhi; j++) {
-			c0_type[i][j] = c0_one;
 			hg_coeff[i][j] = hg_one;
 			Q1[i][j] = q1_one;
 			Q2[i][j] = q2_one;
@@ -1181,7 +1105,6 @@ double PairTlsph::init_one(int i, int j) {
 	if (setflag[i][j] == 0)
 		error->all(FLERR, "All pair coeffs are not set");
 
-	c0_type[j][i] = c0_type[i][j];
 	hg_coeff[j][i] = hg_coeff[i][j];
 	Q1[j][i] = Q1[i][j];
 	Q2[j][i] = Q2[i][j];
@@ -1365,6 +1288,8 @@ int PairTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 
 		buf[m++] = shepardWeight[j]; // 19
 		buf[m++] = mol[j];
+		buf[m++] = p_wave_speed[j];
+
 	}
 	return m;
 }
@@ -1403,6 +1328,7 @@ void PairTlsph::unpack_forward_comm(int n, int first, double *buf) {
 
 		shepardWeight[i] = buf[m++];
 		mol[i] = static_cast<int>(buf[m++]);
+		p_wave_speed[i] = buf[m++];
 	}
 }
 
@@ -1598,4 +1524,54 @@ void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrai
 	} else {
 		S_damaged = S;
 	}
+}
+
+/* ----------------------------------------------------------------------
+ compute effectiveP-wave speed
+ determined by longitudinal modulus
+ ------------------------------------------------------------------------- */
+
+double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev, Matrix3d sigma_dev_rate, double damage) {
+	double K3; // 3 times the effective bulk modulus, see Pronto 2d eqn 3.4.6
+	double mu2; // 2 times the effective shear modulus, see Pronto 2d eq. 3.4.7
+	double shear_rate_sq;
+	double M; //effective longitudinal modulus
+
+
+	if (dt * d_iso > 1.0e-6) {
+		K3 = 3.0 * p_rate / (dt * d_iso);
+	} else {
+		K3 = 3.0 * lmbda0[itype] + 2.0 * mu0[itype];
+	}
+
+	if (domain->dimension == 3) {
+		mu2 = sigma_dev_rate(0, 1) / (dt * d_dev(0, 1))
+		+ sigma_dev_rate(0, 2) / (dt * d_dev(0, 2)) + sigma_dev_rate(1, 2) / (dt * d_dev(1, 2));
+		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1) + d_dev(0, 2) * d_dev(0, 2) + d_dev(1, 2) * d_dev(1, 2);
+	} else {
+		mu2 = sigma_dev_rate(0, 1) / (dt * d_dev(0, 1));
+		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1);
+	}
+
+	if (dt * dt * shear_rate_sq < 1.0e-12) {
+		mu2 = 0.5 * (3.0 * (lmbda0[itype] + 2.0 * mu0[itype]) - K3);
+	}
+
+	M = (K3 + 2.0 * mu2) / 3.0; // effective dilational modulus, see Pronto 2d eqn 3.4.8
+
+	if (M < lmbda0[itype] + 2.0 * mu0[itype]) { // do not allow effective dilatational modulus to decrease beyond its initial value
+		M = lmbda0[itype] + 2.0 * mu0[itype];
+	}
+
+	/*
+	 * damaged particles potentially have a very high dilatational modulus, even though damage degradation scales down the
+	 * effective stress. we simply use the initial modulus for damaged particles.
+	 */
+
+	if (damage > 0.99) {
+		M = lmbda0[itype] + 2.0 * mu0[itype]; //
+	}
+
+	return M;
+
 }
