@@ -3,7 +3,7 @@ variable        rho equal 2700.0e-9
 variable        h equal 0.82
 variable        E equal 10 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
-variable        sigy equal 0.7
+variable        sigy equal 0.1
 variable        vel equal 10.0
 variable        hg equal 1.0
 # ----
@@ -38,7 +38,7 @@ velocity        bot set -${vel} 0 0 sum no units box
 
 pair_style      tlsph
 #                         strength EOS                 c0    E     nu   hg    sigy     max.strain  max.stress Q1   Q2
-pair_coeff      * * linear                    linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.0       2.0      1.0 2.0
+pair_coeff      * * linearplastic             linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.0       0.0      1.0 2.0
 
 compute         E all sph2/tlsph_strain
 compute         P all sph2/plastic_strain

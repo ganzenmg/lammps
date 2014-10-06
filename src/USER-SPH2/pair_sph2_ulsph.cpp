@@ -42,7 +42,7 @@ using namespace LAMMPS_NS;
 #include <Eigen/Eigen>
 using namespace Eigen;
 
-#define COMPUTE_CORRECTED_DERIVATIVES true
+#define COMPUTE_CORRECTED_DERIVATIVES false
 #define DENSITY_SUMMATION true
 /* ---------------------------------------------------------------------- */
 
@@ -67,7 +67,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	smoothVel = NULL;
 	numNeighs = NULL;
 
-	comm_forward = 15; // this pair style communicates 9 doubles to ghost atoms
+	comm_forward = 9; // this pair style communicates 9 doubles to ghost atoms
 }
 
 /* ---------------------------------------------------------------------- */
@@ -193,10 +193,10 @@ void PairULSPH::PreCompute() {
 				g = (wfd / r) * dx;
 
 				/* build correction matric for kernel derivatives */
-				//if (COMPUTE_CORRECTED_DERIVATIVES) {
-				Ktmp = g * dx.transpose();
-				K[i] += vfrac[j] * Ktmp;
-				//}
+				if (COMPUTE_CORRECTED_DERIVATIVES) {
+					Ktmp = g * dx.transpose();
+					K[i] += vfrac[j] * Ktmp;
+				}
 
 				if (DENSITY_SUMMATION) {
 					if (setflag[itype][itype] == 1) {
@@ -204,26 +204,21 @@ void PairULSPH::PreCompute() {
 					}
 				}
 
-				// velocity gradient L
-				Ltmp = wfd * dv * dx.transpose();
-				L[i] += vfrac[j] * Ltmp;
-
 				shepardWeight[i] += vfrac[j] * wf;
 				smoothVel[i] += vfrac[j] * wf * dvint;
 				numNeighs[i] += 1;
 
 				if (j < nlocal) {
-					//if (COMPUTE_CORRECTED_DERIVATIVES) {
-					K[j] += vfrac[i] * Ktmp;
-					//}
+
+					if (COMPUTE_CORRECTED_DERIVATIVES) {
+						K[j] += vfrac[i] * Ktmp;
+					}
 
 					if (DENSITY_SUMMATION) {
 						if (setflag[jtype][jtype] == 1) {
 							rho[j] += wf * rmass[i];
 						}
 					}
-
-					L[j] += vfrac[i] * Ltmp;
 
 					shepardWeight[j] += vfrac[i] * wf;
 					smoothVel[j] -= vfrac[i] * wf * dvint;
@@ -359,7 +354,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 		itype = type[i];
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
-		ivol = vfrac[i]; //rmass[i] / rho[i];
+		//ivol = vfrac[i];
+		ivol = rmass[i] / rho[i];
 
 		//printf("i = %d, nj=%d\n", i, jnum);
 
@@ -389,7 +385,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 				r = sqrt(rSq);
 				jtype = type[j];
-				jvol = vfrac[j]; //rmass[j] / rho[j];
+				//jvol = vfrac[j];
+				jvol = rmass[j] / rho[j];
 
 				// distance vectors in current and reference configuration, velocity difference
 				dv = vj - vi;
@@ -397,17 +394,16 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 				// kernel and derivative
 				kernel_and_derivative(h, r, wf, wfd);
-				wfd /= r; // we divide by r and mutliply with the full (non-normalized) distance vector
 
 				// uncorrected kernel gradient
-				g = wfd * dx;
+				g = (wfd / r) * dx;
 
 				/*
 				 * force -- the classical SPH way
 				 */
 
 				//f_stress = rmass[i] * rmass[j] * (stressTensor[i] / (rho[i] * rho[i]) + stressTensor[j] / (rho[j] * rho[j])) * g;
-				f_stress = ivol * jvol * (stressTensor[i] + stressTensor[j]) * g;
+				f_stress = -ivol * jvol * (stressTensor[i] + stressTensor[j]) * g;
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
@@ -421,7 +417,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 					c_ij = 0.5 * (c0[i] + c0[j]);
 					rho_ij = 0.5 * (rho[i] + rho[j]);
 
-					visc_magnitude = (-Q1[itype][jtype] * c_ij * mu_ij + Q2[itype][jtype] * mu_ij * mu_ij) / rho_ij;
+					visc_magnitude = (Q1[itype][jtype] * c_ij * mu_ij - Q2[itype][jtype] * mu_ij * mu_ij) / rho_ij;
 					f_visc = rmass[i] * rmass[j] * visc_magnitude * g;
 
 					//printf("mu=%g, c=%g, rho=%g, magnitude=%g\n", mu_ij, c_ij, rho_ij, f_visc.norm());
@@ -435,7 +431,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				deltaE = 0.5 * sumForces.dot(dv);
 
 				// change in mass density
-				drho[i] += rmass[j] * g.dot(dv);
+				drho[i] -= rmass[j] * g.dot(dv);
 
 				// apply forces to pair of particles
 				f[i][0] += sumForces(0);
@@ -448,7 +444,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 					f[j][1] -= sumForces(1);
 					f[j][2] -= sumForces(2);
 					de[j] += deltaE;
-					drho[j] += rmass[i] * g.dot(dv);
+					drho[j] -= rmass[i] * g.dot(dv);
 				}
 
 				// accumulate smooth velocities
@@ -590,34 +586,6 @@ void PairULSPH::ComputePressure() {
 				stressTensor[i](1, 1) = pFinal;
 				stressTensor[i](2, 2) = pFinal;
 
-//				D = 0.5 * (L[i] + L[i].transpose());
-//				W = 0.5 * (L[i] - L[i].transpose());
-//
-//				lambda1 = 0.02e3;
-//				lambda2 = 0.02e3;
-//
-//				kinvisc = 0.0;
-//				eta = kinvisc * C3[itype][itype]; // C3 is reference rho;
-//				mu_s = eta * lambda2 / lambda1;
-//				mu_e = eta - mu_s;
-//
-//				// elastic stress rate
-//				elaStressDot = (2. * mu_e / lambda1) * D
-//						- (1. / lambda1) * elaStress + W * elaStress
-//						- elaStress * W + D * elaStress + elaStress * D
-//						- L[i] * elaStress;
-//
-//				elaStress += dt * elaStressDot;
-//
-//				// Newtonian part of stress
-//				viscStress = mu_s * Deviator(D);
-
-				// total stress
-				//stressTensor[i] += elaStress + viscStress;
-				stressTensor[i] += 2.0 * C4[itype][itype] * D;
-
-				//printf("atom %d: p=%f, c0=%f, rho[i]=%g\n", i, pFinal, c0[i], rho[i]);
-
 				break;
 			case LINEAR_ELASTIC:
 				lambda = C1[itype][itype] * C2[itype][itype] / ((1.0 + C2[itype][itype]) * (1.0 - 2.0 * C2[itype][itype]));
@@ -648,28 +616,7 @@ void PairULSPH::ComputePressure() {
 			 */
 			stressTensor[i] = stressTensor[i] * K[i];
 
-			// artificial stress
-//			artStress[i].setZero();
-//			epsilon = 0.01;
-//
-//			es.compute(stressTensor[i]);
-//			V = es.eigenvectors();
-//
-//			// diagonalize stress matrix
-//			sigma_diag = V.inverse() * stressTensor[i] * V;
-//
-//			flag = 0;
-//
-//			artStressDiag.setZero();
-//			for (int dim = 0; dim < 3; dim++) {
-//				if (sigma_diag(dim, dim) > 0.0) {
-//					artStressDiag(dim, dim) = -epsilon * sigma_diag(dim, dim);
-//				}
-//			}
-//			// undiagonalize artificial stress matrix
-//			artStress[i] = V * artStressDiag * V.inverse();
-
-			pressure[i] = pFinal;
+			pressure[i] = stressTensor[i].trace() / 3.0;
 
 			/*
 			 * minimum kernel Radius
@@ -989,12 +936,6 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 		buf[m++] = stressTensor[j](0, 2);
 		buf[m++] = stressTensor[j](1, 2);
 
-		buf[m++] = K[j](0, 0);
-		buf[m++] = K[j](0, 1);
-		buf[m++] = K[j](0, 2);
-		buf[m++] = K[j](1, 1);
-		buf[m++] = K[j](1, 2);
-		buf[m++] = K[j](2, 2);
 	}
 	return m;
 }
@@ -1021,16 +962,6 @@ void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
 		stressTensor[i](1, 0) = stressTensor[i](0, 1);
 		stressTensor[i](2, 0) = stressTensor[i](0, 2);
 		stressTensor[i](2, 1) = stressTensor[i](1, 2);
-
-		K[i](0, 0) = buf[m++];
-		K[i](0, 1) = buf[m++];
-		K[i](0, 2) = buf[m++];
-		K[i](1, 1) = buf[m++];
-		K[i](1, 2) = buf[m++];
-		K[i](2, 2) = buf[m++];
-		K[i](1, 0) = K[i](0, 1);
-		K[i](2, 0) = K[i](0, 2);
-		K[i](2, 1) = K[i](1, 2);
 	}
 }
 
@@ -1052,8 +983,8 @@ void PairULSPH::kernel_and_derivative(const double h, const double r, double &wf
 	}
 
 	double hr = h - r;
-	wfd = -3.0e0 * hr * hr / n;
-	wf = -0.333333333333e0 * hr * wfd;
+	wfd = 3.0e0 * hr * hr / n;
+	wf = 0.333333333333e0 * hr * wfd;
 
 	/*
 	 * cubic spline - to do
