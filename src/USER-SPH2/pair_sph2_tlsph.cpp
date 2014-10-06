@@ -139,7 +139,7 @@ void PairTlsph::PreCompute() {
 	int **firstneigh;
 	int nlocal = atom->nlocal;
 	int inum, jnum, ii, jj, i, j, iDim, itype;
-	double r0, r0Sq, wf, wfd, h, irad;
+	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
 	double pairweight;
 	Vector3d dx0, dx, dv, g;
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
@@ -177,6 +177,7 @@ void PairTlsph::PreCompute() {
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 		irad = radius[i];
+		voli = vfrac[i];
 
 		// initialize Eigen data structures from LAMMPS data structures
 		for (iDim = 0; iDim < 3; iDim++) {
@@ -216,6 +217,7 @@ void PairTlsph::PreCompute() {
 				}
 
 				r0 = sqrt(r0Sq);
+				volj = vfrac[j];
 
 				// distance vectors in current and reference configuration, velocity difference
 				dx = xj - xi;
@@ -233,19 +235,19 @@ void PairTlsph::PreCompute() {
 				Ftmp = dx * g.transpose();
 				Fdottmp = dv * g.transpose();
 
-				K[i] += vfrac[j] * Ktmp;
-				Fincr[i] += vfrac[j] * Ftmp;
-				Fdot[i] += vfrac[j] * Fdottmp;
-				shepardWeight[i] += vfrac[j] * wf;
-				smoothVel[i] += vfrac[j] * wf * dvint;
+				K[i] += volj * Ktmp;
+				Fincr[i] += volj * Ftmp;
+				Fdot[i] += volj * Fdottmp;
+				shepardWeight[i] += volj * wf;
+				smoothVel[i] += volj * wf * dvint;
 				numNeighsRefConfig[i]++;
 
 				if (j < nlocal) {
-					K[j] += vfrac[i] * Ktmp;
-					Fincr[j] += vfrac[i] * Ftmp;
-					Fdot[j] += vfrac[i] * Fdottmp;
-					shepardWeight[j] += vfrac[i] * wf;
-					smoothVel[j] -= vfrac[i] * wf * dvint;
+					K[j] += voli * Ktmp;
+					Fincr[j] += voli * Ftmp;
+					Fdot[j] += voli * Fdottmp;
+					shepardWeight[j] += voli * wf;
+					smoothVel[j] -= voli * wf * dvint;
 					numNeighsRefConfig[j]++;
 				}
 
@@ -354,6 +356,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 	double **v = atom->vest;
 	double **x0 = atom->x0;
 	double **f = atom->f;
+	double **defgrad0 = atom->tlsph_fold;
 	double *vfrac = atom->vfrac;
 	double *de = atom->de;
 	double *rmass = atom->rmass;
@@ -363,7 +366,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
 	int i, j, ii, jj, jnum, itype, jtype, iDim, inum;
-	double r, hg_mag, wf, wfd, h, r0, r0Sq;
+	double r, hg_mag, wf, wfd, h, r0, r0Sq, voli, volj;
 	double delVdotDelR, visc_magnitude, deltaE, mu_ij, c_ij, rho_ij;
 	double delta, damage_factor;
 	int *ilist, *jlist, *numneigh;
@@ -453,6 +456,8 @@ void PairTlsph::compute(int eflag, int vflag) {
 			vi(iDim) = v[i][iDim];
 		}
 
+		voli = vfrac[i];
+
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
@@ -480,7 +485,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 			if (r0Sq < h * h) {
 
 				hMin = MIN(hMin, h);
-
 				r0 = sqrt(r0Sq);
 
 				// initialize Eigen data structures from LAMMPS data structures
@@ -490,6 +494,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 				}
 
 				jtype = type[j];
+				volj = vfrac[j];
 
 				// distance vectors in current and reference configuration, velocity difference
 				dx = xj - xi;
@@ -510,7 +515,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 				 * force contribution -- note that the kernel gradient correction has been absorbed into PK1
 				 */
 
-				f_stress = vfrac[i] * vfrac[j] * (PK1[i] + PK1[j]) * g;
+				f_stress = voli * volj * (PK1[i] + PK1[j]) * g;
 
 				/*
 				 * hourglass deviation of particles i and j
@@ -522,7 +527,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 					/* SPH-like formulation */
 					delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
 					hg_mag = -hg_coeff[itype][jtype] * delta / (r0Sq); // hg_mag has dimensions [m^(-1)]
-					hg_mag *= vfrac[i] * vfrac[j] * wf * (youngsmodulus[itype] + youngsmodulus[jtype]); // hg_mag has dimensions [J*m^(-1)] = [N]
+					hg_mag *= voli * volj * wf * (youngsmodulus[itype] + youngsmodulus[jtype]); // hg_mag has dimensions [J*m^(-1)] = [N]
 
 					/* scale hourglass correction to enable plastic flow */
 					if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j]) > 1.0e-2) {
@@ -552,7 +557,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
 				c_ij = 0.5 * (c0[itype] + c0[jtype]);
-				rho_ij = 0.5 * (rmass[i] / vfrac[i] + rmass[j] / vfrac[j]);
+				rho_ij = 0.5 * (rmass[i] / voli + rmass[j] / volj);
 				//visc_magnitude = (-(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij
 				//		+ (Q2[itype][jtype] + 2.0 * damage_factor) * mu_ij * mu_ij) / rho_ij;
 				visc_magnitude = -(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij / rho_ij;
@@ -932,14 +937,14 @@ void PairTlsph::AssembleStress() {
 				PK1[i] = Fincr[i].determinant() * T * Fincr[i].inverse().transpose();
 
 				/*
-				 * correct stress tensor with shape matrix
+				 * pre-multiply stress tensor with shape matrix to save computation in force loop
 				 */
 				PK1[i] = PK1[i] * K[i];
 
 				/*
 				 * compute stable time step according to Pronto 2d
 				 */
-				M = effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev,sigma_dev_rate, damage[i]);
+				M = effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev, sigma_dev_rate, damage[i]);
 				p_wave_speed[i] = sqrt(M / (rmass[i] / vfrac[i]));
 				//printf("c0 = %f\n", c0[i]);
 				dtCFL = MIN(dtCFL, radius[i] / p_wave_speed[i]);
@@ -1531,12 +1536,12 @@ void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrai
  determined by longitudinal modulus
  ------------------------------------------------------------------------- */
 
-double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev, Matrix3d sigma_dev_rate, double damage) {
+double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev,
+		Matrix3d sigma_dev_rate, double damage) {
 	double K3; // 3 times the effective bulk modulus, see Pronto 2d eqn 3.4.6
 	double mu2; // 2 times the effective shear modulus, see Pronto 2d eq. 3.4.7
 	double shear_rate_sq;
 	double M; //effective longitudinal modulus
-
 
 	if (dt * d_iso > 1.0e-6) {
 		K3 = 3.0 * p_rate / (dt * d_iso);
@@ -1545,8 +1550,8 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 	}
 
 	if (domain->dimension == 3) {
-		mu2 = sigma_dev_rate(0, 1) / (dt * d_dev(0, 1))
-		+ sigma_dev_rate(0, 2) / (dt * d_dev(0, 2)) + sigma_dev_rate(1, 2) / (dt * d_dev(1, 2));
+		mu2 = sigma_dev_rate(0, 1) / (dt * d_dev(0, 1)) + sigma_dev_rate(0, 2) / (dt * d_dev(0, 2))
+				+ sigma_dev_rate(1, 2) / (dt * d_dev(1, 2));
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1) + d_dev(0, 2) * d_dev(0, 2) + d_dev(1, 2) * d_dev(1, 2);
 	} else {
 		mu2 = sigma_dev_rate(0, 1) / (dt * d_dev(0, 1));

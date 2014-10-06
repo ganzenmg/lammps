@@ -48,6 +48,7 @@ compute         contact_radius all sph2/contact_radius
 compute         eint all sph2/internal_energy
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
+variable        volume atom vol
 
 # update CFL timestep
 thermo          100
@@ -77,7 +78,7 @@ dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
                 c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
                 c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
                 fx fy fz vx vy vz c_P c_eint &
-                c_contact_radius c_nn mol c_d mass
+                c_contact_radius c_nn mol c_d mass v_volume
 
 dump_modify     dump_id first yes
 

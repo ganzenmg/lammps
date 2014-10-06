@@ -40,12 +40,12 @@ set             group all volume ${vol_one}
 pair_style      sph/fluid
 pair_coeff      * * tait      7.0  ${c0}  ${rho}     0.0e-6      0.0 0.0
 
-compute         eint all sph/e
-compute         rho all sph/rho
+compute         eint all sph2/internal_energy
+compute         rho all sph2/rho
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint
-compute         contact_radius all sph/contact_radius
-compute         fS all sph/fluid/stress
+compute         contact_radius all sph2/contact_radius
+compute         fS all sph2/ulsph_stress
 compute         aS all stress/atom NULL pair
 
 #
@@ -67,13 +67,13 @@ thermo          100
 thermo_style    custom step ke pe v_etot c_alleint
 thermo_modify   lost ignore
 
-fix             rhofix all sph_fluid/adjust_rho 1000 1
+fix             rhofix all sph2/adjust_rho 1000 1
 run             1000
 unfix           rhofix
 
 fix             gfix water gravity -9.81 vector 0 1 0 # add gravity. This fix also computes potential energy of mass in gravity field.
 fix             bc_fix bc setforce 0 0 0
-fix             integration_fix_resin all sph_fluid/integrate 1.5e3
+fix             integration_fix_resin all sph2/integrate_ulsph 1.5e3
 fix             10 all balance 50 0.9 rcb
 run             20000
 

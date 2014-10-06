@@ -320,10 +320,10 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 			defgrad0[i][7] = Ftotal(2, 1);
 			defgrad0[i][8] = Ftotal(2, 2);
 
-			// adjust particle volumes -- this is left out because it leads to instabilities
-			//J = Fincr[i].determinant();
-//			//vfrac[i] *= J / J0;
-//
+			// adjust particle volumes
+			J = Fincr[i].determinant();
+			vfrac[i] *= J;
+
 			if (numNeighsRefConfig[i] < 10) {
 				radius[i] *= 1.1;
 			} else if (numNeighsRefConfig[i] > 40) {
