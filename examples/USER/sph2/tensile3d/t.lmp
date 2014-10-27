@@ -38,7 +38,7 @@ velocity        bot set -${vel} 0 0 sum no units box
 
 pair_style      tlsph
 #                         strength EOS                 c0    E     nu   hg    sigy     max.strain  max.stress Q1   Q2
-pair_coeff      * * linearplastic             linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.0       0.0      1.0 2.0
+pair_coeff      * * linear                    linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.0      0.8      1.0 0.0
 
 compute         E all sph2/tlsph_strain
 compute         P all sph2/plastic_strain
@@ -63,7 +63,7 @@ fix             force_fix1 top setforce 0 0 0
 fix             force_fix2 bot setforce 0 0 0
 fix             integration_fix all sph2/integrate_tlsph 1.5e3 update
 variable        a equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
-variable        disp equal 2.0*${vel}*f_dtfix[1]
+variable        disp equal 1.0 #2.0*${vel}*f_dtfix[1]
 fix             output_fix all print 10 "${disp} $a" file force_displacement.dat screen no
 
 

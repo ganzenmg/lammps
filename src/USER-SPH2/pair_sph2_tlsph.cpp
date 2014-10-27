@@ -552,8 +552,8 @@ void PairTlsph::compute(int eflag, int vflag) {
 				 */
 
 				delVdotDelR = dx.dot(dv);
-				//double hr = h - r; // [m]
-				//wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
+				double hr = h - r; // [m]
+				wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
 
 				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
 				c_ij = 0.5 * (c0[itype] + c0[jtype]);
