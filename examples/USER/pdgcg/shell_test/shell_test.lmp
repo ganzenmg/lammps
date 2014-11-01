@@ -1,0 +1,49 @@
+# shell test for rotation
+
+variable        l0 equal 1.0
+variable        rho equal 1.0
+variable        E equal 70.0 # Young's modulus
+variable        hg equal 0.0
+variable        sigy equal 70.0
+variable        nu equal 0.3
+# ----
+variable        c0 equal 1.0
+variable        dt equal 0.1
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal 30 # Verlet list range
+
+units		si
+dimension       3
+boundary        sm sm sm
+atom_style      pdgcg/shell
+neighbor        ${skin} bin
+comm_modify     vel yes
+newton          off
+atom_modify     map array
+
+read_data       tris.data
+
+pair_style      pdgcg
+
+
+compute         alleint all reduce sum c_eint
+variable        etot equal ke+c_alleint+pe
+
+thermo          1
+thermo_style    custom step ke
+ 
+dump            dump_id all custom 1 dump.LAMMPS id type x y z &
+                fx fy fz vx vy vz 
+dump_modify     dump_id first yes
+
+#
+# time integration
+timestep        ${dt}
+variable        nrun equal 100
+print           "running for ${nrun} timesteps"
+
+fix             move_fix all move rotate 0.0 0.0 0.0 1 1 1 100
+
+run             ${nrun}
+
+#run             ${nrun}
