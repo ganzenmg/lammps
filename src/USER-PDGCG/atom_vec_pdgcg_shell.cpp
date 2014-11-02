@@ -36,7 +36,6 @@ using namespace MathConst;
 AtomVecPDGCGShell::AtomVecPDGCGShell(LAMMPS *lmp) :
 		AtomVec(lmp) {
 	molecular = 0;
-	dihedrals_allow = 1;
 
 	comm_x_only = 0;
 	comm_f_only = 1;

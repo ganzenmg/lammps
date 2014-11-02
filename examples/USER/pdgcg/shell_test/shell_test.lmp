@@ -2,37 +2,48 @@
 
 variable        l0 equal 1.0
 variable        rho equal 1.0
-variable        E equal 70.0 # Young's modulus
-variable        hg equal 0.0
-variable        sigy equal 70.0
-variable        nu equal 0.3
+variable        K equal 1 # Young's modulus
+variable        smax equal 100
+variable        syield equal 100
+variable        G0 equal -1
+variable        visc equal 0.0
 # ----
 variable        c0 equal 1.0
-variable        dt equal 0.1
+variable        dt equal 1.0
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
 variable        skin equal 30 # Verlet list range
 
 units		si
 dimension       3
 boundary        sm sm sm
-atom_style      pdgcg/shell
+atom_style      tlsph
 neighbor        ${skin} bin
 comm_modify     vel yes
 newton          off
 atom_modify     map array
 
 read_data       tris.data
+set             group all mol 1000
+set             group all mass 1
 
-pair_style      pdgcg
+variable        xcenter equal xlo+0.5*(xhi-xlo)
+region          left block EDGE ${xcenter} EDGE EDGE EDGE EDGE units box
+group           left region left
+group           right subtract all left
 
+velocity        right set 0 0 -0.01 units box
 
+pair_style      pdgcg/shells
+pair_coeff      * * ${K} ${smax} ${G0} ${visc} ${syield}
+
+compute         eint all sph2/internal_energy
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
 
-thermo          1
+thermo          100
 thermo_style    custom step ke
  
-dump            dump_id all custom 1 dump.LAMMPS id type x y z &
+dump            dump_id all custom 100 dump.LAMMPS id type x y z &
                 fx fy fz vx vy vz 
 dump_modify     dump_id first yes
 
@@ -42,8 +53,11 @@ timestep        ${dt}
 variable        nrun equal 100
 print           "running for ${nrun} timesteps"
 
-fix             move_fix all move rotate 0.0 0.0 0.0 1 1 1 100
+fix             integrate_fix right nve
 
-run             ${nrun}
+
+#fix             move_fix all move rotate 0.0 0.0 0.0 1 1 1 100
+
+run             10000
 
 #run             ${nrun}
