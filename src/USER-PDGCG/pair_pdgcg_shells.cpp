@@ -56,6 +56,7 @@ PairPDGCGShells::PairPDGCGShells(LAMMPS *lmp) :
 	alpha = NULL;
 
 	nBroken = 0;
+	ncall = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -116,6 +117,12 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 		ev_setup(eflag, vflag);
 	else
 		evflag = vflag_fdotr = 0;
+
+	ncall += 1;
+	if (ncall < 2) {
+		// return on first timestep because no bonds are defined.
+		return;
+	}
 
 	/* ----------------------- PERIDYNAMIC SHORT RANGE FORCES --------------------- */
 
@@ -377,6 +384,7 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 			i2 = atom->map(trianglePairs[i][t][3]);
 
 			if (i3 != i) {
+				printf("hurz\n");
 				char str[128];
 				sprintf(str, "triangle index cn1=%d does not match up with local index=%d", i3, i);
 				error->one(FLERR, str);
@@ -413,27 +421,38 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 
 			// determine sin(phi) / 2
 			sign = (n1.cross(n2)).dot(E_normed);
-			angle = sqrt(0.5 * (1.0 - n1.dot(n2)));
-			if (sign * angle < 0.0) {
-				angle *= -1;
-			}
+
+			double tmp = 0.5 * (1.0 - n1.dot(n2));
+			if (tmp < 0.0) tmp = 0.0;
+
+			angle = sqrt(tmp);
+			//if (sign * angle < 0.0) {
+			//	angle *= -1;
+			//}
+
+			//angle = 1.0 - n1.dot(n2);
 
 			//cout << "angle is " << trianglePairAngle0[i][t] << endl << endl;
 
 			k = 0.01;
-			force_magnitude = (angle - 1.0) * k * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
+			force_magnitude = angle * k * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
 
+			//printf("angle is %f\n", angle);
 
 
 			Vector3d force = force_magnitude * u1;
 			double fmag = force.norm();
 
-			if (fabs(fmag) > 1.0e-6) {
-				cout << "angle is" << angle <<  "force_magnitude is " <<  force_magnitude << endl;
+			if (fabs(force_magnitude) > 1.0e-1) {
+				cout << "angle is " << angle << "   sign is " << sign << "      n1 dot n2 is " << n1.dot(n2) << endl;
+				cout << "force_magnitude is " <<  force_magnitude << endl;
 				cout << "E is " << E << endl;
 				cout << "u1 is " << u1 << endl;
-				cout << "N1 is " << N1 << endl;
-				cout << "N2 is " << N2 << endl << endl;
+				cout << "u2 is " << u2 << endl;
+				cout << "u3 is " << u3 << endl;
+				cout << "u4 is " << u4 << endl;
+				cout << "N1 is " << n1 << endl;
+				cout << "N2 is " << n2 << endl << endl;
 
 			}
 

@@ -49,6 +49,8 @@ class PairPDGCGShells : public Pair {
   void allocate();
 
   int nBroken; // number of broken bonds
+
+  int ncall;
 };
 
 }

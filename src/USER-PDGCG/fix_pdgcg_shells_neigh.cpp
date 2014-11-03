@@ -63,6 +63,7 @@ FixPDGCGShellsNeigh::FixPDGCGShellsNeigh(LAMMPS *lmp, int narg, char **arg) :
 	trianglePairs = NULL;
 	trianglePairAngle0 = NULL;
 
+	nmax = atom->nmax;
 	grow_arrays(atom->nmax);
 	atom->add_callback(0);
 	atom->add_callback(1);
@@ -222,10 +223,13 @@ void FixPDGCGShellsNeigh::setup(int vflag) {
 	 */
 	read_triangles(0); // first pass: get number of local triangles
 	maxTrianglePairs = 0;
-	for (i = 0; i < nlocal; i++)
+	for (i = 0; i < nlocal; i++){
 		maxTrianglePairs = MAX(maxTrianglePairs, nTrianglePairs[i]);
+	}
+	printf("maxTrianglePairs before MPI reduce %d\n", maxTrianglePairs);
 	MPI_Allreduce(&maxTrianglePairs, &maxall, 1, MPI_INT, MPI_MAX, world);
 	maxTrianglePairs = maxall;
+	printf("maxTrianglePairs after second pass is %d\n", maxTrianglePairs);
 
 	// realloc arrays with correct value for maxpartner
 
@@ -450,7 +454,7 @@ double FixPDGCGShellsNeigh::memory_usage() {
  ------------------------------------------------------------------------- */
 
 void FixPDGCGShellsNeigh::grow_arrays(int nmax) {
-	printf("in FixPDGCGShellsNeigh::grow_arrays\n");
+	printf("in FixPDGCGShellsNeigh::grow_arrays, nmax=%d, maxTrianglePairs=%d\n", nmax, maxTrianglePairs);
 	memory->grow(npartner, nmax, "peri_neigh:npartner");
 	memory->grow(partner, nmax, maxpartner, "peri_neigh:partner");
 
@@ -800,10 +804,13 @@ void FixPDGCGShellsNeigh::read_triangles(int pass) {
 			fprintf(logfile, "number of triangle pairs is %d\n", n);
 	}
 
+	printf("MARK, nmax=%d\n", nmax);
+
 	int count = 0;
 	numTrianglesLocal = 0;
 
 	for (i = 0; i < nmax; i++) {
+		//printf("setting zero\n");
 		nTrianglePairs[i] = 0;
 	}
 
@@ -831,7 +838,7 @@ void FixPDGCGShellsNeigh::read_triangles(int pass) {
 		cn1 = atoi(values[2]); // common node 1
 		cn2 = atoi(values[3]); // common node 2
 		ncn1 = atoi(values[4]); // non-common node 1
-		ncn2 = atoi(values[4]); // non-common node 2
+		ncn2 = atoi(values[5]); // non-common node 2
 
 		i = atom->map(cn1);
 
