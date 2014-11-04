@@ -411,7 +411,7 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 			u2 = (E_norm / N2_normSq) * N2;
 
 			u3 = x41.dot(E_normed) * N1 / N1_normSq + x42.dot(E_normed) * N2 / N2_normSq;
-			u4 = x31.dot(E_normed) * N1 / N1_normSq - x32.dot(E_normed) * N2 / N2_normSq;
+			u4 = -x31.dot(E_normed) * N1 / N1_normSq - x32.dot(E_normed) * N2 / N2_normSq;
 
 			// normal of triangle 1
 			n1 = N1 / N1.norm();
@@ -426,9 +426,9 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 			if (tmp < 0.0) tmp = 0.0;
 
 			angle = sqrt(tmp);
-			//if (sign * angle < 0.0) {
-			//	angle *= -1;
-			//}
+			if (sign * angle < 0.0) {
+				angle = -angle;
+			}
 
 			//angle = 1.0 - n1.dot(n2);
 
