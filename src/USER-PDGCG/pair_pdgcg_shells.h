@@ -42,7 +42,7 @@ class PairPDGCGShells : public Pair {
 
  protected:
   int ifix_peri;
-  double **bulkmodulus;
+  double **bulkmodulus, **kbend;
   double **syield, **smax, **alpha, **G0;
   double cutoff_global;
 
