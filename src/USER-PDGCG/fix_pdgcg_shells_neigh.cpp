@@ -369,23 +369,23 @@ void FixPDGCGShellsNeigh::setup(int vflag) {
 void FixPDGCGShellsNeigh::setup_bending_triangles() {
 
 	double **x = atom->x0;
+	int *type = atom->type;
 
 	int nlocal = atom->nlocal;
-	int cn1, cn2, ncn1, ncn2, type;
+	int cn1, cn2, ncn1, ncn2;
 	int n, m, i, tnum, t;
 	int a, b, c, d;
-	int me, retcode, itype, jtype;
-	double sign, sum, ha, hb, l, mu;
+	int me, retcode, itype, jtype, itmp;
+	double sign, sum, ha, hb, l, mu, lambda;
 
 	Vector3d cb, b11, b21, n1, n2, cb_normed;
 	Vector3d Pa, Pb, Pc, Pd;
 	Vector3d Na, Nb, Nc, Nd, L;
 
-
-	double **kbend = (double **) force->pair->extract("", itmp);
-	    if (F == NULL) {
-	        error->all(FLERR, "compute sph2/tlsph_defgrad failed to access F array");
-	    }
+	double **kbend = (double **) force->pair->extract("pdgcg/shells/kbend_ptr", itmp);
+	if (kbend == NULL) {
+		error->all(FLERR, "fix pdgcg/shells failed to access kbend array");
+	}
 
 	for (i = 0; i < nmax; i++) {
 		for (t = 0; t < maxTrianglePairs; t++) {
@@ -406,6 +406,9 @@ void FixPDGCGShellsNeigh::setup_bending_triangles() {
 			a = atom->map(trianglePairs[i][t][2]);
 			b = atom->map(trianglePairs[i][t][3]);
 
+			itype = type[c];
+			jtype = type[d];
+
 			Pa << x[a][0], x[a][1], x[a][2];
 			Pb << x[b][0], x[b][1], x[b][2];
 			Pc << x[c][0], x[c][1], x[c][2];
@@ -414,7 +417,7 @@ void FixPDGCGShellsNeigh::setup_bending_triangles() {
 			Na = (Pa - Pc).cross(Pa - Pd);
 			Nb = (Pb - Pd).cross(Pb - Pc);
 			Nc = (Pc - Pb).cross(Pc - Pa);
-			Nd = (Pd - Pa).cross(Pd - Pd);
+			Nd = (Pd - Pa).cross(Pd - Pb);
 
 			trianglePairCoeffs[i][t][0] = Nb.norm() / (Na.norm() + Nb.norm()); // alpha a
 			trianglePairCoeffs[i][t][1] = Na.norm() / (Na.norm() + Nb.norm()); // alpha b
@@ -435,10 +438,28 @@ void FixPDGCGShellsNeigh::setup_bending_triangles() {
 			ha = ((Pa - Pc).cross(Pa - Pd)).norm() / l;
 			hb = ((Pb - Pc).cross(Pb - Pd)).norm() / l;
 
+			printf("ha =%f, hb = %f\n", ha, hb);
 
+			sum = hb / (ha + hb) - trianglePairCoeffs[i][t][0];
+			if (fabs(sum) > 1.0e-10) {
+				char str[128];
+				sprintf(str, "alpha a is not correct\n");
+				error->one(FLERR, str);
+			}
 
-			lambda = (2./3.) * (ha + hb) * l * mu / (ha * ha * hb * hb);
+			sum = ha / (ha + hb) - trianglePairCoeffs[i][t][1];
+			if (fabs(sum) > 1.0e-10) {
+				char str[128];
+				sprintf(str, "alpha b is not correct\n");
+				error->one(FLERR, str);
+			}
 
+			mu = kbend[itype][jtype];
+			lambda = (2. / 3.) * (ha + hb) * l * mu / (ha * ha * hb * hb);
+			trianglePairCoeffs[i][t][4] = lambda; // bending stiffness
+
+			printf("lambda = %f\n", lambda);
+			printf("");
 
 //			cn1 = atom->map(trianglePairs[i][t][0]);
 //			cn2 = atom->map(trianglePairs[i][t][1]);

@@ -39,6 +39,9 @@ class PairPDGCGShells : public Pair {
   void write_restart_settings(FILE *) {}
   void read_restart_settings(FILE *) {}
   virtual double memory_usage();
+  void *extract(const char *, int &);
+  void bending_forces();
+
 
  protected:
   int ifix_peri;

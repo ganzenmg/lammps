@@ -25,7 +25,7 @@ atom_modify     map array
 read_data       2shells.data
 set             group all mol 1000
 set             group all mass 1
-set             group all diameter 2.0
+set             group all diameter 1.1
 
 #variable        xcenter equal xlo+0.5*(xhi-xlo)
 #region          left block EDGE ${xcenter} EDGE EDGE EDGE EDGE units box
@@ -36,13 +36,13 @@ group           right id 4
 velocity        right set 0 0 -0.01 units box
 
 pair_style      pdgcg/shells
-pair_coeff      * * ${K} ${smax} ${G0} ${visc} ${syield}
+pair_coeff      * * ${K} 0.01 ${smax} ${G0} ${visc} ${syield}
 
 compute         eint all sph2/internal_energy
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
 
-thermo          100
+thermo          1000
 thermo_style    custom step ke
  
 dump            dump_id all custom 100 dump.LAMMPS id type x y z &
@@ -60,6 +60,6 @@ fix             integrate_fix right nve
 
 #fix             move_fix all move rotate 0.0 0.0 0.0 1 1 1 100
 
-run             10000
+run             20
 
 #run             ${nrun}
