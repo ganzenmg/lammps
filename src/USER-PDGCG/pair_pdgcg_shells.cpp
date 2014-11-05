@@ -119,9 +119,6 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 	double **plastic_stretch = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->r1;
 	tagint **partner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->partner;
 	int *npartner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->npartner;
-	tagint ***trianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairs;
-	int *nTrianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->nTrianglePairs;
-	double ***trianglePairAngle0 = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairCoeffs;
 	double *vinter = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->vinter;
 	tagint *tag = atom->tag;
 
@@ -288,19 +285,20 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 				jtype = type[j];
 				delta = radius[i] + radius[j];
 				r = sqrt(rsq);
-				dr = r - r0[i][jj];
+				dr = r - (r0[i][jj] + plastic_stretch[i][jj]);
 
 				// avoid roundoff errors
 				if (fabs(dr) < 2.2204e-016)
 					dr = 0.0;
 
 				// bond stretch
-				stretch = dr / r0[i][jj]; // total stretch
+				stretch = dr / (r0[i][jj] + plastic_stretch[i][jj]); // total stretch
 
-				double se;
 				if (stretch > syield[itype][jtype]) {
-					plastic_stretch[i][jj] = syield[itype][jtype] - stretch;
-					se = syield[itype][jtype]; // elastic part of stretch
+					double increment = se - syield[itype][jtype];
+					plastic_stretch[i][jj] += increment;
+					//printf("increment is %f, p is now %f\n", increment, plastic_stretch[i][jj]);
+					//se = syield[itype][jtype]; // elastic part of stretch
 				} else {
 					se = stretch;
 				}
@@ -377,126 +375,6 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 	/* ----------------------- SHELL BENDING FORCES --------------------- */
 
 	bending_forces();
-//
-//	int t, tnum;
-//	int i1, i2, i3, i4;
-//	Vector3d E, n1, n2, E_normed;
-//	Vector3d x31, x41, x42, x32, N1, N2, u1, u2, u3, u4;
-//	double sign, angle, E_norm;
-//	double N1_normSq, N2_normSq, E_normSq;
-//	double k, force_magnitude;
-//
-//	int a, b, c, d;
-//
-//	for (i = 0; i < nlocal; i++) {
-//
-//		itype = type[i];
-//		tnum = nTrianglePairs[i];
-//
-//		for (t = 0; t < tnum; t++) {
-
-//			i3 = atom->map(trianglePairs[i][t][0]);
-//			i4 = atom->map(trianglePairs[i][t][1]);
-//			i1 = atom->map(trianglePairs[i][t][2]);
-//			i2 = atom->map(trianglePairs[i][t][3]);
-//
-//			itype = type[i1]; // types are taken from non-common nodes
-//			jtype = type[i2];
-//
-//			if (i3 != i) {
-//				printf("hurz\n");
-//				char str[128];
-//				sprintf(str, "triangle index cn1=%d does not match up with local index=%d", i3, i);
-//				error->one(FLERR, str);
-//			}
-//
-//			// common bond from cn1 to cn2
-//			E << (x[i4][0] - x[i3][0]), (x[i4][1] - x[i3][1]), (x[i4][2] - x[i3][2]);
-//			E_norm = E.norm();
-//			E_normSq = E_norm * E_norm;
-//			E_normed = E / E.norm();
-//
-//			x31 << (x[i1][0] - x[i3][0]), (x[i1][1] - x[i3][1]), (x[i1][2] - x[i3][2]);
-//			x41 << (x[i1][0] - x[i4][0]), (x[i1][1] - x[i4][1]), (x[i1][2] - x[i4][2]);
-//			x42 << (x[i2][0] - x[i4][0]), (x[i2][1] - x[i4][1]), (x[i2][2] - x[i4][2]);
-//			x32 << (x[i2][0] - x[i3][0]), (x[i2][1] - x[i3][1]), (x[i2][2] - x[i3][2]);
-//
-//			N1 = x31.cross(x41);
-//			N1_normSq = N1.squaredNorm();
-//
-//			N2 = x42.cross(x32);
-//			N2_normSq = N2.squaredNorm();
-//
-//			u1 = (E_norm / N1_normSq) * N1;
-//			u2 = (E_norm / N2_normSq) * N2;
-//
-//			u3 = x41.dot(E_normed) * N1 / N1_normSq + x42.dot(E_normed) * N2 / N2_normSq;
-//			u4 = -x31.dot(E_normed) * N1 / N1_normSq - x32.dot(E_normed) * N2 / N2_normSq;
-//
-//			// normal of triangle 1
-//			n1 = N1 / N1.norm();
-//
-//			// normal of triangle 2
-//			n2 = N2 / N2.norm();
-//
-//			// determine sin(phi) / 2
-//			sign = (n1.cross(n2)).dot(E_normed);
-//
-//			angle = 0.5 * (1.0 - n1.dot(n2));
-//			if (angle < 0.0) angle = 0.0;
-//			angle = sqrt(angle);
-//			if (sign * angle < 0.0) {
-//				angle = -angle;
-//			}
-//
-//			force_magnitude = angle * kbend[itype][jtype] * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
-//
-//			//printf("angle is %f\n", angle);
-//
-//
-//			Vector3d force = force_magnitude * u1;
-//			double fmag = force.norm();
-//
-//			if (fabs(force_magnitude) > 1.0e3) {
-//				cout << "angle is " << angle << "   sign is " << sign << "      n1 dot n2 is " << n1.dot(n2) << endl;
-//				cout << "force_magnitude is " <<  force_magnitude << endl;
-//				cout << "E is " << E << endl;
-//				cout << "u1 is " << u1 << endl;
-//				cout << "u2 is " << u2 << endl;
-//				cout << "u3 is " << u3 << endl;
-//				cout << "u4 is " << u4 << endl;
-//				cout << "N1 is " << n1 << endl;
-//				cout << "N2 is " << n2 << endl << endl;
-//
-//			}
-//
-//
-//
-//			f[i1][0] += force_magnitude * u1(0);
-//			f[i1][1] += force_magnitude * u1(1);
-//			f[i1][2] += force_magnitude * u1(2);
-//
-//			if (i2 < nlocal) {
-//				f[i2][0] += force_magnitude * u2(0);
-//				f[i2][1] += force_magnitude * u2(1);
-//				f[i2][2] += force_magnitude * u2(2);
-//			}
-//
-//			if (i3 < nlocal) {
-//				f[i3][0] += force_magnitude * u3(0);
-//				f[i3][1] += force_magnitude * u3(1);
-//				f[i3][2] += force_magnitude * u3(2);
-//			}
-//
-//			if (i4 < nlocal) {
-//				f[i4][0] += force_magnitude * u4(0);
-//				f[i4][1] += force_magnitude * u4(1);
-//				f[i4][2] += force_magnitude * u4(2);
-//			}
-
-//		}
-//	}
-
 }
 
 /* ----------------------------------------------------------------------
@@ -504,6 +382,132 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
  ------------------------------------------------------------------------- */
 
 void PairPDGCGShells::bending_forces() {
+	// ---------------------------------------------------------------------------------
+	double **f = atom->f;
+	double **x = atom->x;
+	double **v = atom->v;
+	int *type = atom->type;
+	int nlocal = atom->nlocal;
+	tagint ***trianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairs;
+	int *nTrianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->nTrianglePairs;
+	double ***trianglePairCoeffs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairCoeffs;
+
+	int i, i1, i2, i3, i4, itype, jtype, tnum, t;
+	Vector3d E, n1, n2, E_normed;
+	Vector3d x31, x41, x42, x32, N1, N2, u1, u2, u3, u4;
+	double sign, angle, angle0, E_norm;
+	double N1_normSq, N2_normSq, E_normSq;
+	double force_magnitude;
+
+	for (i = 0; i < nlocal; i++) {
+
+		tnum = nTrianglePairs[i];
+
+		for (t = 0; t < tnum; t++) {
+
+			i3 = atom->map(trianglePairs[i][t][0]);
+			i4 = atom->map(trianglePairs[i][t][1]);
+			i1 = atom->map(trianglePairs[i][t][2]);
+			i2 = atom->map(trianglePairs[i][t][3]);
+
+			itype = type[i1]; // types are taken from non-common nodes
+			jtype = type[i2];
+
+			if (i3 != i) {
+				printf("hurz\n");
+				char str[128];
+				sprintf(str, "triangle index cn1=%d does not match up with local index=%d", i3, i);
+				error->one(FLERR, str);
+			}
+
+			// common bond from cn1 to cn2
+			E << (x[i4][0] - x[i3][0]), (x[i4][1] - x[i3][1]), (x[i4][2] - x[i3][2]);
+			E_norm = E.norm();
+			E_normSq = E_norm * E_norm;
+			E_normed = E / E.norm();
+
+			x31 << (x[i1][0] - x[i3][0]), (x[i1][1] - x[i3][1]), (x[i1][2] - x[i3][2]);
+			x41 << (x[i1][0] - x[i4][0]), (x[i1][1] - x[i4][1]), (x[i1][2] - x[i4][2]);
+			x42 << (x[i2][0] - x[i4][0]), (x[i2][1] - x[i4][1]), (x[i2][2] - x[i4][2]);
+			x32 << (x[i2][0] - x[i3][0]), (x[i2][1] - x[i3][1]), (x[i2][2] - x[i3][2]);
+
+			N1 = x31.cross(x41);
+			N1_normSq = N1.squaredNorm();
+
+			N2 = x42.cross(x32);
+			N2_normSq = N2.squaredNorm();
+
+			u1 = (E_norm / N1_normSq) * N1;
+			u2 = (E_norm / N2_normSq) * N2;
+
+			u3 = x41.dot(E_normed) * N1 / N1_normSq + x42.dot(E_normed) * N2 / N2_normSq;
+			u4 = -x31.dot(E_normed) * N1 / N1_normSq - x32.dot(E_normed) * N2 / N2_normSq;
+
+			// normal of triangle 1
+			n1 = N1 / N1.norm();
+
+			// normal of triangle 2
+			n2 = N2 / N2.norm();
+
+			// determine sin(phi) / 2
+			sign = (n1.cross(n2)).dot(E_normed);
+
+			angle = 0.5 * (1.0 - n1.dot(n2));
+			if (angle < 0.0)
+				angle = 0.0;
+			angle = sqrt(angle);
+			if (sign * angle < 0.0) {
+				angle = -angle;
+			}
+
+			angle0 = trianglePairCoeffs[i][t][0];
+			force_magnitude = (angle - angle0) * kbend[itype][jtype] * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
+
+			//printf("angle is %f\n", angle);
+
+			Vector3d force = force_magnitude * u1;
+			double fmag = force.norm();
+
+			if (fabs(force_magnitude) > 1.0e3) {
+				cout << "angle is " << angle << "   sign is " << sign << "      n1 dot n2 is " << n1.dot(n2) << endl;
+				cout << "force_magnitude is " << force_magnitude << endl;
+				cout << "E is " << E << endl;
+				cout << "u1 is " << u1 << endl;
+				cout << "u2 is " << u2 << endl;
+				cout << "u3 is " << u3 << endl;
+				cout << "u4 is " << u4 << endl;
+				cout << "N1 is " << n1 << endl;
+				cout << "N2 is " << n2 << endl << endl;
+
+			}
+
+			f[i1][0] += force_magnitude * u1(0);
+			f[i1][1] += force_magnitude * u1(1);
+			f[i1][2] += force_magnitude * u1(2);
+
+			if (i2 < nlocal) {
+				f[i2][0] += force_magnitude * u2(0);
+				f[i2][1] += force_magnitude * u2(1);
+				f[i2][2] += force_magnitude * u2(2);
+			}
+
+			if (i3 < nlocal) {
+				f[i3][0] += force_magnitude * u3(0);
+				f[i3][1] += force_magnitude * u3(1);
+				f[i3][2] += force_magnitude * u3(2);
+			}
+
+			if (i4 < nlocal) {
+				f[i4][0] += force_magnitude * u4(0);
+				f[i4][1] += force_magnitude * u4(1);
+				f[i4][2] += force_magnitude * u4(2);
+			}
+
+		}
+	}
+}
+
+void PairPDGCGShells::bending_forces_linear() {
 	// ---------------------------------------------------------------------------------
 	double **f = atom->f;
 	double **x = atom->x;
@@ -548,7 +552,7 @@ void PairPDGCGShells::bending_forces() {
 
 			if (b < nlocal) {
 				force_magnitude = -trianglePairCoeffs[i][t][4] * trianglePairCoeffs[i][t][1];
-			//	cout << "force on atom b is " << force_magnitude * R << endl;
+				//	cout << "force on atom b is " << force_magnitude * R << endl;
 				f[b][0] += force_magnitude * R(0);
 				f[b][1] += force_magnitude * R(1);
 				f[b][2] += force_magnitude * R(2);
@@ -556,14 +560,14 @@ void PairPDGCGShells::bending_forces() {
 
 			if (c < nlocal) {
 				force_magnitude = -trianglePairCoeffs[i][t][4] * trianglePairCoeffs[i][t][2];
-			//	cout << "force on atom c is " << force_magnitude * R << endl;
+				//	cout << "force on atom c is " << force_magnitude * R << endl;
 				f[c][0] += force_magnitude * R(0);
 				f[c][1] += force_magnitude * R(1);
 				f[c][2] += force_magnitude * R(2);
 			}
 
 			if (d < nlocal) {
-			//	cout << "force on atom d is " << force_magnitude * R << endl << endl;
+				//	cout << "force on atom d is " << force_magnitude * R << endl << endl;
 				force_magnitude = -trianglePairCoeffs[i][t][4] * trianglePairCoeffs[i][t][3];
 				f[d][0] += force_magnitude * R(0);
 				f[d][1] += force_magnitude * R(1);

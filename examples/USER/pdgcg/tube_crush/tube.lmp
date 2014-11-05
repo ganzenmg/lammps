@@ -1,20 +1,20 @@
 # shell test for rotation
 
 variable        l0 equal 1.0
-variable        rho equal 1.0
-variable        K equal 1 # Young's modulus
-variable        Ebend equal 10.0
+variable        rho equal 7.3e-6
+variable        E equal 1 # Young's modulus
 variable        nu equal 0.33
-variable        t equal 0.2 # shell thickness
+variable        t equal 0.1 # shell thickness
 variable        smax equal 100
-variable        syield equal 100
+variable        syield equal 0.05
 variable        G0 equal -1
 variable        visc equal 0.0
 variable        vel equal 0.0001
+variable        h equal 4.2
 # ----
-variable        kbend equal 4*(${Ebend}*${t}^3)/(12.0*(1.0-${nu}^2))
-variable        c0 equal 1.0
-variable        dt equal 1.0e-1
+variable        kbend equal 4*(${E}*${t}^3)/(12.0*(1.0-${nu}^2))
+variable        c0 equal sqrt(${E}/${rho})
+variable        dt equal 0.5*${h}/${c0}
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
 variable        skin equal 0.1 # Verlet list range
 
@@ -27,27 +27,18 @@ comm_modify     vel yes
 newton          off
 atom_modify     map array
 
-read_data       plate.data
+read_data       tris.data
 set             group all mol 1000
-set             group all mass 0.1
-#set             group all diameter 0.21
 
 # clamp group
-variable        x0 equal bound(all,xmin)+1.0
+variable        x0 equal bound(all,xmin)+10.0
 region          clamp block EDGE ${x0} EDGE EDGE EDGE EDGE units box
 group           clamp region clamp
 
-# create displacement boundary condition group
-variable           x1 equal bound(all,xmax)-0.01
-region             dispGrp block ${x1} EDGE EDGE EDGE EDGE EDGE units box
-group              dispGrp region dispGrp
-
-# free-to-move group
-group           integrate_group subtract all clamp dispGrp
-
 pair_style      pdgcg/shells
-pair_coeff      * * ${K} ${kbend} ${smax} ${G0} ${visc} ${syield}
+pair_coeff      * * ${E} ${kbend} ${smax} ${G0} ${visc} ${syield}
 
+compute         crad all sph2/contact_radius
 compute         eint all sph2/internal_energy
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
@@ -55,29 +46,27 @@ compute         sumF clamp reduce sum fz
 variable        d equal time*${vel}
 variable        I equal 1.0*${t}^3/12.0 
 variable        L equal 4.0
-variable        stiff_theory equal 3.0*${Ebend}*${I}/${L}^3
+variable        stiff_theory equal 3.0*${E}*${I}/${L}^3
 variable        stiff_expt equal c_sumF/(v_d+1.0e-8)
-
-
  
 dump            dump_id all custom 100 dump.LAMMPS id type x y z &
-                fx fy fz vx vy vz 
+                fx fy fz vx vy vz c_crad
 dump_modify     dump_id first yes
 
 #
 # time integration
 timestep        ${dt}
-variable        nrun equal 100000
+variable        nrun equal 1000
 print           "running for ${nrun} timesteps"
 
 
-#velocity        dispGrp set 0 0 -${vel} units box
-fix             move_fix dispGrp move linear NULL NULL -${vel} units box
-#fix		force_fix dispGrp setforce NULL NULL 0
-fix             integrate_fix integrate_group nve
+velocity        all set 0 0 10 units box
+#fix		force_fix clamp setforce 0 NULL NULL
+fix             integrate_fix all nve
 variable        sumF equal c_sumF
 fix             fd_curve all print 10 "${d} ${sumF}" file force_displacement.dat screen no
-fix             1 all viscous 0.001
-thermo          1000
+#fix             1 all viscous 0.001
+fix             zwalls all wall/reflect zhi EDGE
+thermo          100
 thermo_style    custom step ke c_sumF v_stiff_theory v_stiff_expt v_d
 run             ${nrun}

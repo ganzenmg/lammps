@@ -41,6 +41,7 @@ class PairPDGCGShells : public Pair {
   virtual double memory_usage();
   void *extract(const char *, int &);
   void bending_forces();
+  void bending_forces_linear();
 
 
  protected:

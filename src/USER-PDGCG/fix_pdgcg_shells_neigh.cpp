@@ -372,11 +372,118 @@ void FixPDGCGShellsNeigh::setup_bending_triangles() {
 	int *type = atom->type;
 
 	int nlocal = atom->nlocal;
-	int cn1, cn2, ncn1, ncn2;
-	int n, m, i, tnum, t;
+	int i, i1, i2, i3, i4;
+	int m, tnum, t;
+	int itype, jtype, itmp;
+	double sign, angle;
+	double N1_normSq, N2_normSq, E_normSq, E_norm;
+
+	Vector3d E, n1, n2, E_normed;
+	Vector3d x31, x41, x42, x32, N1, N2, u1, u2, u3, u4;
+
+	double **kbend = (double **) force->pair->extract("pdgcg/shells/kbend_ptr", itmp);
+	if (kbend == NULL) {
+		error->all(FLERR, "fix pdgcg/shells failed to access kbend array");
+	}
+
+	for (i = 0; i < nmax; i++) {
+		for (t = 0; t < maxTrianglePairs; t++) {
+			for (m = 0; m < 5; m++) {
+				trianglePairCoeffs[i][t][m] = 0.0;
+			}
+		}
+	}
+
+	for (i = 0; i < nlocal; i++) {
+
+		tnum = nTrianglePairs[i];
+
+		for (t = 0; t < tnum; t++) {
+
+			i3 = atom->map(trianglePairs[i][t][0]);
+			i4 = atom->map(trianglePairs[i][t][1]);
+			i1 = atom->map(trianglePairs[i][t][2]);
+			i2 = atom->map(trianglePairs[i][t][3]);
+
+			itype = type[i1]; // types are taken from non-common nodes
+			jtype = type[i2];
+
+			if (i3 != i) {
+				printf("hurz\n");
+				char str[128];
+				sprintf(str, "triangle index cn1=%d does not match up with local index=%d", i3, i);
+				error->one(FLERR, str);
+			}
+
+			// common bond from cn1 to cn2
+			E << (x[i4][0] - x[i3][0]), (x[i4][1] - x[i3][1]), (x[i4][2] - x[i3][2]);
+			E_norm = E.norm();
+			E_normSq = E_norm * E_norm;
+			E_normed = E / E.norm();
+
+			x31 << (x[i1][0] - x[i3][0]), (x[i1][1] - x[i3][1]), (x[i1][2] - x[i3][2]);
+			x41 << (x[i1][0] - x[i4][0]), (x[i1][1] - x[i4][1]), (x[i1][2] - x[i4][2]);
+			x42 << (x[i2][0] - x[i4][0]), (x[i2][1] - x[i4][1]), (x[i2][2] - x[i4][2]);
+			x32 << (x[i2][0] - x[i3][0]), (x[i2][1] - x[i3][1]), (x[i2][2] - x[i3][2]);
+
+			N1 = x31.cross(x41);
+			N1_normSq = N1.squaredNorm();
+
+			N2 = x42.cross(x32);
+			N2_normSq = N2.squaredNorm();
+
+			u1 = (E_norm / N1_normSq) * N1;
+			u2 = (E_norm / N2_normSq) * N2;
+
+			u3 = x41.dot(E_normed) * N1 / N1_normSq + x42.dot(E_normed) * N2 / N2_normSq;
+			u4 = -x31.dot(E_normed) * N1 / N1_normSq - x32.dot(E_normed) * N2 / N2_normSq;
+
+			// normal of triangle 1
+			n1 = N1 / N1.norm();
+
+			// normal of triangle 2
+			n2 = N2 / N2.norm();
+
+			// determine sin(phi) / 2
+			sign = (n1.cross(n2)).dot(E_normed);
+
+			angle = 0.5 * (1.0 - n1.dot(n2));
+			if (angle < 0.0)
+				angle = 0.0;
+			angle = sqrt(angle);
+			if (sign * angle < 0.0) {
+				angle = -angle;
+			}
+
+			trianglePairCoeffs[i][t][0] = angle;
+
+//			cout << "cb =" << cb << endl;
+//			cout << "b11 =" << b11 << endl;
+//			cout << "n1 =" << n1 << endl;
+//			cout << "n2 =" << n2 << endl;
+//			cout << "angle is " << trianglePairAngle0[i][t] << endl << endl;
+
+		}
+	}
+}
+
+/* ----------------------------------------------------------------------
+ set up triangles for bending
+
+ convention: dihedral atoms with indices 0, 1: common nodes
+ dihedral atoms with indices 2, 3: non-common nodes
+ ------------------------------------------------------------------------- */
+
+void FixPDGCGShellsNeigh::setup_bending_triangles_linear() {
+
+	double **x = atom->x0;
+	int *type = atom->type;
+
+	int nlocal = atom->nlocal;
+	int i, tnum, t;
 	int a, b, c, d;
-	int me, retcode, itype, jtype, itmp;
-	double sign, sum, ha, hb, l, mu, lambda;
+	int m, itype, jtype, itmp;
+	double sum, ha, hb, l, mu, lambda;
 
 	Vector3d cb, b11, b21, n1, n2, cb_normed;
 	Vector3d Pa, Pb, Pc, Pd;
@@ -835,12 +942,10 @@ int FixPDGCGShellsNeigh::count_words(const char *line) {
 
 void FixPDGCGShellsNeigh::read_triangles(int pass) {
 
-	double **x = atom->x0;
-
 	int nlocal = atom->nlocal;
-	int cn1, cn2, ncn1, ncn2, type;
+	int cn1, cn2, ncn1, ncn2;
 	int n, m, i;
-	int me, retcode;
+	int me;
 
 	Vector3d cb, b11, b21, n1, n2;
 

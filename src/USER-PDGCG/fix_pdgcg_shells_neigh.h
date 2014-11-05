@@ -36,6 +36,7 @@ public:
 	void init_list(int, class NeighList *);
 	void setup(int);
 	void setup_bending_triangles();
+	void setup_bending_triangles_linear();
 	void min_setup(int);
 
 	double memory_usage();
