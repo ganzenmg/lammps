@@ -108,7 +108,7 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 	int *npartner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->npartner;
 	tagint ***trianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairs;
 	int *nTrianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->nTrianglePairs;
-	double **trianglePairAngle0 = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairAngle0;
+	double ***trianglePairAngle0 = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairCoeffs;
 	double *vinter = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->vinter;
 	tagint *tag = atom->tag;
 
@@ -691,3 +691,15 @@ double PairPDGCGShells::memory_usage() {
 	return 0.0;
 }
 
+/* ----------------------------------------------------------------------
+ extract method to provide access to this class' data structures
+ ------------------------------------------------------------------------- */
+
+void *PairPDGCGShells::extract(const char *str, int &i) {
+
+	if (strcmp(str, "pdgcg/shells/kbend_ptr") == 0) {
+		return (void *) kbend;
+	}
+
+	return NULL;
+}
