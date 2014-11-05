@@ -50,7 +50,7 @@ PairPDGCGShells::PairPDGCGShells(LAMMPS *lmp) :
 
 	ifix_peri = -1;
 
-	bulkmodulus = NULL;
+	bulkmodulus = kbend = NULL;
 	smax = syield = NULL;
 	G0 = NULL;
 	alpha = NULL;
@@ -68,6 +68,7 @@ PairPDGCGShells::~PairPDGCGShells() {
 	if (allocated) {
 		memory->destroy(setflag);
 		memory->destroy(bulkmodulus);
+		memory->destroy(kbend);
 		memory->destroy(smax);
 		memory->destroy(syield);
 		memory->destroy(G0);
@@ -383,6 +384,9 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 			i1 = atom->map(trianglePairs[i][t][2]);
 			i2 = atom->map(trianglePairs[i][t][3]);
 
+			itype = type[i1]; // types are taken from non-common nodes
+			jtype = type[i2];
+
 			if (i3 != i) {
 				printf("hurz\n");
 				char str[128];
@@ -422,20 +426,14 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 			// determine sin(phi) / 2
 			sign = (n1.cross(n2)).dot(E_normed);
 
-			double tmp = 0.5 * (1.0 - n1.dot(n2));
-			if (tmp < 0.0) tmp = 0.0;
-
-			angle = sqrt(tmp);
+			angle = 0.5 * (1.0 - n1.dot(n2));
+			if (angle < 0.0) angle = 0.0;
+			angle = sqrt(angle);
 			if (sign * angle < 0.0) {
 				angle = -angle;
 			}
 
-			//angle = 1.0 - n1.dot(n2);
-
-			//cout << "angle is " << trianglePairAngle0[i][t] << endl << endl;
-
-			k = 0.01;
-			force_magnitude = angle * k * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
+			force_magnitude = angle * kbend[itype][jtype] * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
 
 			//printf("angle is %f\n", angle);
 
@@ -443,7 +441,7 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 			Vector3d force = force_magnitude * u1;
 			double fmag = force.norm();
 
-			if (fabs(force_magnitude) > 1.0e-1) {
+			if (fabs(force_magnitude) > 1.0e3) {
 				cout << "angle is " << angle << "   sign is " << sign << "      n1 dot n2 is " << n1.dot(n2) << endl;
 				cout << "force_magnitude is " <<  force_magnitude << endl;
 				cout << "E is " << E << endl;
@@ -498,7 +496,8 @@ void PairPDGCGShells::allocate() {
 		for (int j = i; j <= n; j++)
 			setflag[i][j] = 0;
 
-	memory->create(bulkmodulus, n + 1, n + 1, "pair:kspring");
+	memory->create(bulkmodulus, n + 1, n + 1, "pair:");
+	memory->create(kbend, n + 1, n + 1, "pair:kbend");
 	memory->create(smax, n + 1, n + 1, "pair:smax");
 	memory->create(syield, n + 1, n + 1, "pair:syield");
 	memory->create(G0, n + 1, n + 1, "pair:G0");
@@ -521,7 +520,7 @@ void PairPDGCGShells::settings(int narg, char **arg) {
  ------------------------------------------------------------------------- */
 
 void PairPDGCGShells::coeff(int narg, char **arg) {
-	if (narg != 7)
+	if (narg != 8)
 		error->all(FLERR, "Incorrect args for pair coefficients");
 	if (!allocated)
 		allocate();
@@ -531,15 +530,17 @@ void PairPDGCGShells::coeff(int narg, char **arg) {
 	force->bounds(arg[1], atom->ntypes, jlo, jhi);
 
 	double bulkmodulus_one = atof(arg[2]);
-	double smax_one = atof(arg[3]);
-	double G0_one = atof(arg[4]);
-	double alpha_one = atof(arg[5]);
-	double syield_one = atof(arg[6]);
+	double kbend_one =  atof(arg[3]);
+	double smax_one = atof(arg[4]);
+	double G0_one = atof(arg[5]);
+	double alpha_one = atof(arg[6]);
+	double syield_one = atof(arg[7]);
 
 	int count = 0;
 	for (int i = ilo; i <= ihi; i++) {
 		for (int j = MAX(jlo, i); j <= jhi; j++) {
 			bulkmodulus[i][j] = bulkmodulus_one;
+			kbend[i][j] = kbend_one;
 			smax[i][j] = smax_one;
 			syield[i][j] = syield_one;
 			G0[i][j] = G0_one;
@@ -566,6 +567,7 @@ double PairPDGCGShells::init_one(int i, int j) {
 		error->all(FLERR, "All pair coeffs are not set");
 
 	bulkmodulus[j][i] = bulkmodulus[i][j];
+	kbend [j][i] = kbend[i][j];
 	alpha[j][i] = alpha[i][j];
 	smax[j][i] = smax[i][j];
 	syield[j][i] = syield[i][j];

@@ -2,12 +2,17 @@
 
 variable        l0 equal 1.0
 variable        rho equal 1.0
-variable        K equal 1 # Young's modulus
+variable        K equal 10 # Young's modulus
+variable        Ebend equal 100.0
+variable        nu equal 0.33
+variable        t equal 0.2 # shell thickness
 variable        smax equal 100
 variable        syield equal 100
 variable        G0 equal -1
 variable        visc equal 0.0
+variable        vel equal 0.0001
 # ----
+variable        kbend equal (${Ebend}*${t}^3)/(12.0*(1.0-${nu}^2))
 variable        c0 equal 1.0
 variable        dt equal 1.0e-1
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
@@ -26,38 +31,52 @@ read_data       plate_5x1.data
 set             group all mol 1000
 set             group all mass 0.1
 
-variable        xcenter equal xlo+0.5*(xhi-xlo)
-region          left block EDGE ${xcenter} EDGE EDGE EDGE EDGE units box
-group           left region left
-group           right subtract all left
+# clamp group
+variable        x0 equal bound(all,xmin)+1.0
+region          clamp block EDGE ${x0} EDGE EDGE EDGE EDGE units box
+group           clamp region clamp
 
-velocity        right set 0 0 -0.01 units box
+# create displacement boundary condition group
+variable           x1 equal bound(all,xmax)-0.01
+region             dispGrp block ${x1} EDGE EDGE EDGE EDGE EDGE units box
+group              dispGrp region dispGrp
+
+# free-to-move group
+group           integrate_group subtract all clamp dispGrp
 
 pair_style      pdgcg/shells
-pair_coeff      * * ${K} ${smax} ${G0} ${visc} ${syield}
+pair_coeff      * * ${K} ${kbend} ${smax} ${G0} ${visc} ${syield}
 
 compute         eint all sph2/internal_energy
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
+compute         sumF clamp reduce sum fz
+variable        d equal time*${vel}
+variable        I equal 1.0*${t}^3 
+variable        L equal 4.0
+variable        stiff_theory equal 3.0*${Ebend}*${I}/${L}^3
+variable        stiff_expt equal c_sumF/(v_d+1.0e-8)
 
-thermo          1
-thermo_style    custom step ke
+
  
-dump            dump_id all custom 1 dump.LAMMPS id type x y z &
+dump            dump_id all custom 100 dump.LAMMPS id type x y z &
                 fx fy fz vx vy vz 
 dump_modify     dump_id first yes
 
 #
 # time integration
 timestep        ${dt}
-variable        nrun equal 100
+variable        nrun equal 10000
 print           "running for ${nrun} timesteps"
 
-fix             integrate_fix right nve
 
-
-#fix             move_fix all move rotate 0.0 0.0 0.0 1 1 1 100
-
-run             10000
-
-#run             ${nrun}
+#velocity        dispGrp set 0 0 -${vel} units box
+fix             move_fix dispGrp move linear 0 0 -${vel} units box
+#fix		force_fix dispGrp setforce NULL NULL 0
+fix             integrate_fix integrate_group nve
+variable        sumF equal c_sumF
+fix             fd_curve all print 10 "${d} ${sumF}" file force_displacement.dat screen no
+fix             1 all viscous 0.001
+thermo          1000
+thermo_style    custom step ke c_sumF v_stiff_theory v_stiff_expt v_d
+run             ${nrun}
