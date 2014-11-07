@@ -34,6 +34,7 @@
 #include "error.h"
 #include <stdio.h>
 #include <iostream>
+#include "math_special.h"
 
 using namespace std;
 using namespace LAMMPS_NS;
@@ -44,6 +45,7 @@ using namespace LAMMPS_NS;
 #include <Eigen/SVD>
 #include <Eigen/Eigen>
 using namespace Eigen;
+using namespace MathSpecial;
 
 #define TLSPH_DEBUG 0
 
@@ -51,18 +53,19 @@ using namespace Eigen;
 
 PairTlsph::PairTlsph(LAMMPS *lmp) :
 		Pair(lmp) {
-	maxstrain = maxstress = NULL;
 	poissonr = NULL;
 	hg_coeff = NULL;
 	Q1 = Q2 = NULL;
-	yieldStress = NULL;
 	strengthModel = eos = NULL;
-	lmbda0 = mu0 = c0 = NULL;
+	lmbda0 = mu0 = NULL;
+	materialCoeffs = NULL;
+	signal_vel0 = NULL; // signal velocity basedon on p-wave speed, used for artificial viscosity
+	rho0 = NULL;
 
 	nmax = 0; // make sure no atom on this proc such that initial memory allocation is correct
 	Fdot = Fincr = K = PK1 = NULL;
 	d = R = FincrInv = W = D = NULL;
-	detF = p_wave_speed = NULL;
+	detF = NULL;
 	smoothVel = NULL;
 	shearFailureFlag = NULL;
 	numNeighsRefConfig = NULL;
@@ -84,14 +87,13 @@ PairTlsph::~PairTlsph() {
 		memory->destroy(hg_coeff);
 		memory->destroy(Q1);
 		memory->destroy(Q2);
-		memory->destroy(yieldStress);
 		memory->destroy(strengthModel);
 		memory->destroy(eos);
-		memory->destroy(maxstrain);
-		memory->destroy(maxstress);
 		memory->destroy(lmbda0);
 		memory->destroy(mu0);
-		memory->destroy(c0);
+		memory->destroy(materialCoeffs);
+		memory->destroy(signal_vel0);
+		memory->destroy(rho0);
 
 		delete[] onerad_dynamic;
 		delete[] onerad_frozen;
@@ -113,7 +115,6 @@ PairTlsph::~PairTlsph() {
 		delete[] numNeighsRefConfig;
 		delete[] shepardWeight;
 		delete[] CauchyStress;
-		delete[] p_wave_speed;
 	}
 }
 
@@ -127,12 +128,10 @@ void PairTlsph::PreCompute() {
 	int *mol = atom->molecule;
 	double *vfrac = atom->vfrac;
 	double *radius = atom->radius;
-	double *damage = atom->damage;
 	double **x0 = atom->x0;
 	double **x = atom->x;
 	double **v = atom->vest;
 	double **vint = atom->v; // Velocity-Verlet algorithm velocities
-	double **defgrad0 = atom->tlsph_fold;
 	int *tag = atom->tag;
 	int *type = atom->type;
 	int *ilist, *jlist, *numneigh;
@@ -140,12 +139,10 @@ void PairTlsph::PreCompute() {
 	int nlocal = atom->nlocal;
 	int inum, jnum, ii, jj, i, j, iDim, itype;
 	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
-	double pairweight;
 	Vector3d dx0, dx, dv, g;
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
 	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
-	double damage_factor;
 
 	eye.setIdentity();
 
@@ -356,7 +353,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 	double **v = atom->vest;
 	double **x0 = atom->x0;
 	double **f = atom->f;
-	double **defgrad0 = atom->tlsph_fold;
 	double *vfrac = atom->vfrac;
 	double *de = atom->de;
 	double *rmass = atom->rmass;
@@ -412,8 +408,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 		shepardWeight = new double[nmax]; // memory usage: 1 double; total 109 doubles
 		delete[] CauchyStress;
 		CauchyStress = new Matrix3d[nmax]; // memory usage: 9 doubles; total 118 doubles
-		delete[] p_wave_speed;
-		p_wave_speed = new double[nmax]; // memory usage: 1 double; total 119 doubles
 	}
 
 	PairTlsph::PreCompute();
@@ -531,7 +525,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 					/* scale hourglass correction to enable plastic flow */
 					if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j]) > 1.0e-2) {
-						hg_mag = hg_mag * yieldStress[itype] / youngsmodulus[itype];
+						hg_mag = 0.1 * hg_mag;
 					}
 
 					f_hg = (hg_mag / (r + 0.1 * h)) * dx;
@@ -556,8 +550,8 @@ void PairTlsph::compute(int eflag, int vflag) {
 				wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
 
 				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
-				c_ij = 0.5 * (c0[itype] + c0[jtype]);
-				rho_ij = 0.5 * (rmass[i] / voli + rmass[j] / volj);
+				c_ij = 0.5 * (signal_vel0[itype] + signal_vel0[jtype]);
+				rho_ij = 0.5 * (rho0[i] + rho0[j]);
 				//visc_magnitude = (-(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij
 				//		+ (Q2[itype][jtype] + 2.0 * damage_factor) * mu_ij * mu_ij) / rho_ij;
 				visc_magnitude = -(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij / rho_ij;
@@ -608,13 +602,41 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 }
 
+
+/* ----------------------------------------------------------------------
+ shock EOS
+ input:
+ 	 current density rho
+ 	 reference density rho0
+ 	 current energy density e
+ 	 reference energy density e0
+ 	 reference speed of sound c0
+ 	 shock Hugoniot parameter S
+ 	 Grueneisen parameter Gamma
+ 	 initial pressure pInitial
+ 	 time step dt
+
+ output:
+	pressure rate p_rate
+	final pressure pFinal
+
+ ------------------------------------------------------------------------- */
+void PairTlsph::ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma, double pInitial, double dt, double &pFinal, double &p_rate) {
+
+	double mu = rho / rho0 - 1.0;
+	double pH = rho0 * square(c0) * mu * (1.0 + mu) / square(1.0 - (S - 1.0) * mu);
+
+	pFinal = pH + rho * Gamma * (e - e0);
+	p_rate = (pFinal - pInitial) / dt;
+
+}
+
 /* ----------------------------------------------------------------------
  linear EOS for use with linear elasticity
  input: initial pressure pInitial, isotropic part of the strain rate d, time-step dt
  output: final pressure pFinal, pressure rate p_rate
  ------------------------------------------------------------------------- */
 void PairTlsph::LinearEOS(double lambda, double pInitial, double d, double dt, double &pFinal, double &p_rate) {
-	double pLimit;
 
 	/*
 	 * pressure rate
@@ -780,12 +802,11 @@ void PairTlsph::AssembleStress() {
 	double *damage = atom->damage;
 	double *rmass = atom->rmass;
 	double *vfrac = atom->vfrac;
-	double factor, lambda, mu;
 	double pInitial, d_iso, pFinal, p_rate, plastic_strain_increment;
 	int i, itype;
 	int nlocal = atom->nlocal;
 	double dt = update->dt;
-	double bulkmodulus, K3, mu2, M, shear_rate_sq;
+	double bulkmodulus, M, p_wave_speed;
 	Matrix3d sigma_rate, eye, sigmaInitial, sigmaFinal, T, Jaumann_rate, sigma_rate_check;
 	Matrix3d d_dev, sigmaInitial_dev, sigmaFinal_dev, sigma_dev_rate, E, sigma_damaged;
 	Vector3d x0i, xi, xp;
@@ -829,11 +850,18 @@ void PairTlsph::AssembleStress() {
 					break;
 				case LINEAR_CUTOFF:
 					bulkmodulus = lmbda0[itype] + 2.0 * mu0[itype] / 3.0;
-					LinearCutoffEOS(bulkmodulus, yieldStress[itype], pInitial, d_iso, dt, pFinal, p_rate);
+					LinearCutoffEOS(bulkmodulus, materialCoeffs[itype][2], pInitial, d_iso, dt, pFinal, p_rate);
 					break;
 				case NONE:
 					pFinal = 0.0;
 					p_rate = 0.0;
+					break;
+				case SHOCK_EOS:
+
+
+					//rho = rmass[i] / ( detF[i] * vfrac[i]);
+					//  rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
+					//ShockEOS( rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
 					break;
 				default:
 					error->one(FLERR, "unknown EOS.");
@@ -856,7 +884,7 @@ void PairTlsph::AssembleStress() {
 					R[i].setIdentity();
 					break;
 				case LINEAR_PLASTIC:
-					LinearPlasticStrength(mu0[itype], yieldStress[itype], sigmaInitial_dev, d_dev, dt, &sigmaFinal_dev,
+					LinearPlasticStrength(mu0[itype], materialCoeffs[itype][12], sigmaInitial_dev, d_dev, dt, &sigmaFinal_dev,
 							&sigma_dev_rate, &plastic_strain_increment);
 					eff_plastic_strain[i] += plastic_strain_increment;
 					break;
@@ -881,17 +909,17 @@ void PairTlsph::AssembleStress() {
 				/*
 				 *  failure criteria
 				 */
-				if (maxstress[itype] != 0.0) {
+				if (materialCoeffs[itype][11] != 0.0) {
 					/*
 					 * maximum stress failure criterion:
 					 */
-					IsotropicMaxStressDamage(sigmaFinal, maxstress[itype], dt, c0[itype], radius[i], damage[i], sigma_damaged);
-				} else if (maxstrain[itype] != 0.0) {
+					IsotropicMaxStressDamage(sigmaFinal, materialCoeffs[itype][11], dt, signal_vel0[itype], radius[i], damage[i], sigma_damaged);
+				} else if (materialCoeffs[itype][10] != 0.0) {
 					/*
 					 * maximum strain failure criterion:
 					 */
 					E = 0.5 * (Fincr[i] * Fincr[i].transpose() - eye);
-					IsotropicMaxStrainDamage(E, sigmaFinal, maxstrain[itype], dt, c0[itype], radius[i], damage[i], sigma_damaged);
+					IsotropicMaxStrainDamage(E, sigmaFinal, materialCoeffs[itype][10], dt, signal_vel0[itype], radius[i], damage[i], sigma_damaged);
 				} else {
 					sigma_damaged = sigmaFinal;
 				}
@@ -945,15 +973,14 @@ void PairTlsph::AssembleStress() {
 				 * compute stable time step according to Pronto 2d
 				 */
 				M = effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev, sigma_dev_rate, damage[i]);
-				p_wave_speed[i] = sqrt(M / (rmass[i] / vfrac[i]));
+				p_wave_speed = sqrt(M / (rmass[i] / vfrac[i]));
 				//printf("c0 = %f\n", c0[i]);
-				dtCFL = MIN(dtCFL, radius[i] / p_wave_speed[i]);
+				dtCFL = MIN(dtCFL, radius[i] / p_wave_speed);
 
 			} else { // end if delete_flag == 0
 				PK1[i].setZero();
 				K[i].setIdentity();
 				CauchyStress[i].setZero();
-				p_wave_speed[i] = 0.0;
 
 				sigma_rate.setZero();
 				tlsph_stress[i][0] = 0.0;
@@ -968,7 +995,6 @@ void PairTlsph::AssembleStress() {
 			PK1[i].setZero();
 			K[i].setIdentity();
 			CauchyStress[i].setZero();
-			p_wave_speed[i] = 0.0;
 		}
 	}
 }
@@ -986,19 +1012,18 @@ void PairTlsph::allocate() {
 		for (int j = i; j <= n; j++)
 			setflag[i][j] = 0;
 
+	memory->create(materialCoeffs, n + 1, 20, "pair:materialCoeffs");
 	memory->create(youngsmodulus, n + 1, "pair:youngsmodulus");
 	memory->create(poissonr, n + 1, "pair:poissonratio");
 	memory->create(hg_coeff, n + 1, n + 1, "pair:hg_magnitude");
 	memory->create(Q1, n + 1, n + 1, "pair:q1");
 	memory->create(Q2, n + 1, n + 1, "pair:q2");
-	memory->create(yieldStress, n + 1, "pair:yieldstress");
 	memory->create(strengthModel, n + 1, "pair:strengthmodel");
 	memory->create(eos, n + 1, "pair:eosmodel");
-	memory->create(maxstrain, n + 1, "pair:maxstrain");
-	memory->create(maxstress, n + 1, "pair:maxstress");
 	memory->create(lmbda0, n + 1, "pair:lmbda0");
 	memory->create(mu0, n + 1, "pair:mu0");
-	memory->create(c0, n + 1, "pair:c0");
+	memory->create(signal_vel0, n + 1, "pair:signal_vel0");
+	memory->create(rho0, n + 1, "pair:rho0");
 
 	memory->create(cutsq, n + 1, n + 1, "pair:cutsq"); // always needs to be allocated, even with granular neighborlist
 
@@ -1027,7 +1052,7 @@ void PairTlsph::coeff(int narg, char **arg) {
 	if (!allocated)
 		allocate();
 
-	int ilo, ihi, jlo, jhi;
+	int ilo, ihi, jlo, jhi, k;
 	force->bounds(arg[0], atom->ntypes, ilo, ihi);
 	force->bounds(arg[1], atom->ntypes, jlo, jhi);
 
@@ -1055,35 +1080,46 @@ void PairTlsph::coeff(int narg, char **arg) {
 		error->all(FLERR, "unknown EOS model selected");
 	}
 
-	double c0_one = atof(arg[4]);
+	/*
+	 * read in common data defined for all material & EOS models:
+	 */
+	double rho0_one = atof(arg[4]);
 	double youngsmodulus_one = atof(arg[5]);
 	double poissonr_one = atof(arg[6]);
-	double hg_one = atof(arg[7]);
-	double yieldstress_one = atof(arg[8]);
-	double maxstrain_one = atof(arg[9]);
-	double maxstress_one = atof(arg[10]);
-	double q1_one = atof(arg[11]);
-	double q2_one = atof(arg[12]);
+	double q1_one = atof(arg[7]);
+	double q2_one = atof(arg[8]);
+	double hg_one = atof(arg[9]);
 
-	if (maxstrain_one * maxstress_one != 0.0) {
+	/*
+	 * read in EOS ans strength parameters
+	 */
+	double *materialCoeffs_one = new double[20];
+	for (k = 0; k < 20; k++) {
+		materialCoeffs_one[k] = atof(arg[10 + k]);
+	}
+
+
+	/*
+	 * check stress and strain failure criteria
+	 */
+
+	if (materialCoeffs_one[10] * materialCoeffs_one[11] != 0.0) {
 		error->all(FLERR, "both maximum strain or stress damage models are set. only one damage model is allowed to be active.");
 	}
 
 	int count = 0;
 	for (int i = ilo; i <= ihi; i++) {
 
-// set all properties which are defined per type:
+		for (k = 0; k < 20; k++) {
+			materialCoeffs[i][k] = materialCoeffs_one[k];
+		}
 
 		strengthModel[i] = mat_one;
 		eos[i] = eos_one;
-		c0[i] = c0_one;
-		yieldStress[i] = yieldstress_one;
-		youngsmodulus[i] = youngsmodulus_one;
-		poissonr[i] = poissonr_one;
-		maxstrain[i] = maxstrain_one;
-		maxstress[i] = maxstress_one;
 		lmbda0[i] = youngsmodulus_one * poissonr_one / ((1.0 + poissonr_one) * (1.0 - 2.0 * poissonr_one));
+		rho0[i] = rho0_one;
 		mu0[i] = youngsmodulus_one / (2.0 * (1.0 + poissonr_one));
+		signal_vel0[i] = sqrt((lmbda0[i] + 2.0 * mu0[i]) / rho0[i]);
 
 		for (int j = MAX(jlo, i); j <= jhi; j++) {
 			hg_coeff[i][j] = hg_one;
@@ -1293,7 +1329,6 @@ int PairTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 
 		buf[m++] = shepardWeight[j]; // 19
 		buf[m++] = mol[j];
-		buf[m++] = p_wave_speed[j];
 
 	}
 	return m;
@@ -1333,7 +1368,6 @@ void PairTlsph::unpack_forward_comm(int n, int first, double *buf) {
 
 		shepardWeight[i] = buf[m++];
 		mol[i] = static_cast<int>(buf[m++]);
-		p_wave_speed[i] = buf[m++];
 	}
 }
 

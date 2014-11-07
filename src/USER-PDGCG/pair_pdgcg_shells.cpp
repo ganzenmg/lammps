@@ -27,23 +27,23 @@
 #include <iostream>
 
 #include <Eigen/Eigen>
-#include "../../lib/sph2/Eigen/src/Core/CommaInitializer.h"
-#include "../../lib/sph2/Eigen/src/Core/DenseBase.h"
-#include "../../lib/sph2/Eigen/src/Core/Matrix.h"
-#include "../../lib/sph2/Eigen/src/Core/util/ForwardDeclarations.h"
-#include "../atom.h"
-#include "../comm.h"
-#include "../domain.h"
-#include "../error.h"
-#include "../force.h"
-#include "../lmptype.h"
-#include "../memory.h"
-#include "../modify.h"
-#include "../neigh_list.h"
-#include "../neigh_request.h"
-#include "../neighbor.h"
-#include "../pointers.h"
-#include "../STUBS/mpi.h"
+#include "../lib/sph2/Eigen/src/Core/CommaInitializer.h"
+#include "../lib/sph2/Eigen/src/Core/DenseBase.h"
+#include "../lib/sph2/Eigen/src/Core/Matrix.h"
+#include "../lib/sph2/Eigen/src/Core/util/ForwardDeclarations.h"
+#include "atom.h"
+#include "comm.h"
+#include "domain.h"
+#include "error.h"
+#include "force.h"
+#include "lmptype.h"
+#include "memory.h"
+#include "modify.h"
+#include "neigh_list.h"
+#include "neigh_request.h"
+#include "neighbor.h"
+#include "pointers.h"
+#include "mpi.h"
 //#include "fix.h"
 #include "fix_pdgcg_shells_neigh.h"
 //#include "update.h"
@@ -294,21 +294,21 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 				// bond stretch
 				stretch = dr / (r0[i][jj] + plastic_stretch[i][jj]); // total stretch
 
-				if (stretch > syield[itype][jtype]) {
-					double increment = se - syield[itype][jtype];
-					plastic_stretch[i][jj] += increment;
-					//printf("increment is %f, p is now %f\n", increment, plastic_stretch[i][jj]);
-					//se = syield[itype][jtype]; // elastic part of stretch
-				} else {
-					se = stretch;
-				}
+//				if (stretch > syield[itype][jtype]) {
+//					double increment = se - syield[itype][jtype];
+//					plastic_stretch[i][jj] += increment;
+//					//printf("increment is %f, p is now %f\n", increment, plastic_stretch[i][jj]);
+//					//se = syield[itype][jtype]; // elastic part of stretch
+//				} else {
+//					se = stretch;
+//				}
 
 				c = 4.5 * bulkmodulus[itype][jtype] * (1.0 / vinter[i] + 1.0 / vinter[j]);
 
 				// force computation -- note we divide by a factor of r
-				evdwl = 0.5 * c * se * se * vfrac[i] * vfrac[j];
+				evdwl = 0.5 * c * stretch * stretch * vfrac[i] * vfrac[j];
 				//printf("evdwl = %f\n", evdwl);
-				fbond = -c * vfrac[i] * vfrac[j] * se / r0[i][jj];
+				fbond = -c * vfrac[i] * vfrac[j] * stretch / r0[i][jj];
 				if (r > 0.0)
 					fbond = fbond / r;
 				else

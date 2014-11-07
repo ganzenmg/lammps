@@ -74,6 +74,7 @@ public:
 	 */
 	void LinearEOS(double lambda, double pInitial, double d, double dt, double &pFinal, double &p_rate);
 	void LinearCutoffEOS(double &, double &, double &, double &, double &, double &, double &);
+	void ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma, double pInitial, double dt, double &pFinal, double &p_rate);
 
 	/*
 	 * damage models
@@ -88,10 +89,11 @@ protected:
 	/*
 	 * per-type arrays
 	 */
-	double *youngsmodulus, *poissonr, *yieldStress, *maxstrain, *maxstress;
+	double **materialCoeffs;
+	double *youngsmodulus, *poissonr;
 	double **Q1, **Q2;
 	double **hg_coeff;
-	double *lmbda0, *mu0, *c0; // Lame constants in initial, elastic region, initial longitudinal modulus
+	double *lmbda0, *mu0, *signal_vel0, *rho0; // Lame constants in initial, elastic region, initial longitudinal modulus
 	int *strengthModel, *eos; // strength (deviatoric) and pressure constitutive models
 
 	double *onerad_dynamic, *onerad_frozen;
@@ -118,7 +120,7 @@ protected:
 	int updateFlag;
 
 	enum {
-		LINEAR, LINEAR_PLASTIC, NONE, LINEAR_DEFGRAD, LINEAR_CUTOFF
+		LINEAR, LINEAR_PLASTIC, NONE, LINEAR_DEFGRAD, LINEAR_CUTOFF, SHOCK_EOS
 	};
 };
 
@@ -126,4 +128,27 @@ protected:
 
 #endif
 #endif
+
+/*
+ * materialCoeffs array for EOS parameters:
+ * 1: rho0
+ *
+ *
+ * materialCoeffs array for strength parameters:
+ *
+ * Common
+ * 10: maximum strain threshold for damage model
+ * 11: maximum stress threshold for damage model
+ *
+ * Linear Plasticity model:
+ * 12: plastic yield stress
+ *
+ *
+ * Blei: rho = 11.34e-6, c0=2000, s=1.46, Gamma=2.77
+ * Stahl 1403: rho = 7.86e-3, c=4569, s=1.49, Gamma=2.17
+ */
+
+
+
+
 
