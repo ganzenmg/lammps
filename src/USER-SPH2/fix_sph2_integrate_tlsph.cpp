@@ -324,9 +324,9 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 			J = Fincr[i].determinant();
 			vfrac[i] *= J;
 
-			if (numNeighsRefConfig[i] < 10) {
+			if (numNeighsRefConfig[i] < 25) {
 				radius[i] *= 1.1;
-			} else if (numNeighsRefConfig[i] > 40) {
+			} else if (numNeighsRefConfig[i] > 80) {
 				radius[i] *= 0.9;
 			}
 
@@ -345,42 +345,42 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 /* ---------------------------------------------------------------------- */
 
 int FixSph2IntegrateTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
-int i, j, m;
-double *radius = atom->radius;
-double *vfrac = atom->vfrac;
-double **x0 = atom->x0;
+	int i, j, m;
+	double *radius = atom->radius;
+	double *vfrac = atom->vfrac;
+	double **x0 = atom->x0;
 
 //printf("in FixSph2IntegrateTlsph::pack_forward_comm\n");
-m = 0;
-for (i = 0; i < n; i++) {
-	j = list[i];
-	buf[m++] = x0[j][0];
-	buf[m++] = x0[j][1];
-	buf[m++] = x0[j][2];
+	m = 0;
+	for (i = 0; i < n; i++) {
+		j = list[i];
+		buf[m++] = x0[j][0];
+		buf[m++] = x0[j][1];
+		buf[m++] = x0[j][2];
 
-	buf[m++] = vfrac[j];
-	buf[m++] = radius[j];
-}
-return m;
+		buf[m++] = vfrac[j];
+		buf[m++] = radius[j];
+	}
+	return m;
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixSph2IntegrateTlsph::unpack_forward_comm(int n, int first, double *buf) {
-int i, m, last;
-double *radius = atom->radius;
-double *vfrac = atom->vfrac;
-double **x0 = atom->x0;
+	int i, m, last;
+	double *radius = atom->radius;
+	double *vfrac = atom->vfrac;
+	double **x0 = atom->x0;
 
 //printf("in FixSph2IntegrateTlsph::unpack_forward_comm\n");
-m = 0;
-last = first + n;
-for (i = first; i < last; i++) {
-	x0[i][0] = buf[m++];
-	x0[i][1] = buf[m++];
-	x0[i][2] = buf[m++];
+	m = 0;
+	last = first + n;
+	for (i = first; i < last; i++) {
+		x0[i][0] = buf[m++];
+		x0[i][1] = buf[m++];
+		x0[i][2] = buf[m++];
 
-	vfrac[i] = buf[m++];
-	radius[i] = buf[m++];
-}
+		vfrac[i] = buf[m++];
+		radius[i] = buf[m++];
+	}
 }

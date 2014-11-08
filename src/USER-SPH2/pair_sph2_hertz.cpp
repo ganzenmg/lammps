@@ -42,8 +42,10 @@ using namespace LAMMPS_NS;
 PairHertz::PairHertz(LAMMPS *lmp) :
         Pair(lmp) {
 
+	onerad_dynamic = onerad_frozen = maxrad_dynamic = maxrad_frozen = NULL;
     bulkmodulus = NULL;
     kn = NULL;
+    scale = 1.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -52,6 +54,7 @@ PairHertz::~PairHertz() {
 
     if (allocated) {
         memory->destroy(setflag);
+        memory->destroy(cutsq);
         memory->destroy(bulkmodulus);
         memory->destroy(kn);
 
@@ -69,7 +72,7 @@ void PairHertz::compute(int eflag, int vflag) {
     double xtmp, ytmp, ztmp, delx, dely, delz;
     double rsq, r, evdwl, fpair;
     int *ilist, *jlist, *numneigh, **firstneigh;
-    double rcut, r_geom, delta;
+    double rcut, r_geom, delta, ri, rj;
 
     evdwl = 0.0;
     if (eflag || vflag)
@@ -98,6 +101,7 @@ void PairHertz::compute(int eflag, int vflag) {
         ytmp = x[i][1];
         ztmp = x[i][2];
         itype = type[i];
+        ri = 1.5 * radius[i];
         jlist = firstneigh[i];
         jnum = numneigh[i];
 
@@ -114,21 +118,24 @@ void PairHertz::compute(int eflag, int vflag) {
             }
             rsq = delx * delx + dely * dely + delz * delz;
 
+
+            rj = 1.5 * radius[j];
+
             r = sqrt(rsq);
-            rcut = radius[i] + radius[j];
+            rcut = ri + rj;
 
             if (r < rcut) {
 
                 // Hertzian short-range forces
                 delta = rcut - r; // overlap distance
-                r_geom = radius[i] * radius[j] / rcut;
+                r_geom = ri * rj / rcut;
                 if (domain->dimension == 3) {
                     //assuming poisson ratio = 1/4 for 3d
-                    fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom) / r;
+                    fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom) / (r + 1.0e-2 * rcut);
                     evdwl = r * fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
                 } else {
                     //assuming poisson ratio = 1/3 for 2d -- one factor of delta missing compared to 3d
-                    fpair = 0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom) / r;
+                    fpair = 0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom) / (r + 1.0e-2 * rcut);
                     evdwl = r * fpair * 0.6666666666667e0 * delta;
                 }
 
@@ -264,7 +271,7 @@ void PairHertz::init_style() {
 
     int irequest = neighbor->request(this);
     neighbor->requests[irequest]->half = 0;
-    neighbor->requests[irequest]->full = 1;
+    neighbor->requests[irequest]->gran = 1;
 
     // set maxrad_dynamic and maxrad_frozen for each type
     // include future Fix pour particles as dynamic
@@ -272,12 +279,13 @@ void PairHertz::init_style() {
     for (i = 1; i <= atom->ntypes; i++)
         onerad_dynamic[i] = onerad_frozen[i] = 0.0;
 
-    double *radius = atom->contact_radius;
+    double *radius = atom->radius;
     int *type = atom->type;
     int nlocal = atom->nlocal;
 
-    for (i = 0; i < nlocal; i++)
+    for (i = 0; i < nlocal; i++) {
         onerad_dynamic[type[i]] = MAX(onerad_dynamic[type[i]], radius[i]);
+    }
 
     MPI_Allreduce(&onerad_dynamic[1], &maxrad_dynamic[1], atom->ntypes, MPI_DOUBLE, MPI_MAX, world);
     MPI_Allreduce(&onerad_frozen[1], &maxrad_frozen[1], atom->ntypes, MPI_DOUBLE, MPI_MAX, world);

@@ -7,8 +7,7 @@ SHELL = /bin/sh
 # specify flags and libraries needed for your compiler
 
 CC =		mpic++
-CCFLAGS =	-O2 \
-		-funroll-loops -fstrict-aliasing -Wall -W -Wno-uninitialized -Wno-unused-parameter -Wno-unused-result
+CCFLAGS =	-O2 -Wall -W -Wno-uninitialized -Wno-unused-parameter -Wno-unused-result
 SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 

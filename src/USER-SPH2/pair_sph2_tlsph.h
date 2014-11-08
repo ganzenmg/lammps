@@ -24,7 +24,9 @@ PairStyle(tlsph,PairTlsph)
 #include <Eigen/Eigen>
 #include <Eigen/Dense>
 #include <Eigen/SVD>
+#include <map>
 
+using namespace std;
 using namespace Eigen;
 namespace LAMMPS_NS {
 
@@ -74,7 +76,8 @@ public:
 	 */
 	void LinearEOS(double lambda, double pInitial, double d, double dt, double &pFinal, double &p_rate);
 	void LinearCutoffEOS(double &, double &, double &, double &, double &, double &, double &);
-	void ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma, double pInitial, double dt, double &pFinal, double &p_rate);
+	void ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma,
+			double pInitial, double dt, double &pFinal, double &p_rate);
 
 	/*
 	 * damage models
@@ -85,23 +88,27 @@ public:
 				double &damage, Matrix3d &S_damaged);
 
 protected:
+	void allocate();
 
 	/*
 	 * per-type arrays
 	 */
-	double **materialCoeffs;
-	double *youngsmodulus, *poissonr;
+	double *youngsmodulus, *poissonr, *lmbda0, *mu0, *signal_vel0, *rho0;
+	int *strengthModel, *eos;
+	double *onerad_dynamic, *onerad_frozen, *maxrad_dynamic, *maxrad_frozen;
+
+	/*
+	 * per type pair arrays
+	 */
 	double **Q1, **Q2;
 	double **hg_coeff;
-	double *lmbda0, *mu0, *signal_vel0, *rho0; // Lame constants in initial, elastic region, initial longitudinal modulus
-	int *strengthModel, *eos; // strength (deviatoric) and pressure constitutive models
 
-	double *onerad_dynamic, *onerad_frozen;
-	double *maxrad_dynamic, *maxrad_frozen;
 
-	void allocate();
+	/*
+	 * per atom arrays
+	 */
 
-	int nmax; // max number of atoms on this proc
+
 	Matrix3d *K, *PK1, *Fdot, *Fincr;
 	Matrix3d *d; // unrotated rate-of-deformation tensor
 	Matrix3d *R; // rotation matrix
@@ -109,11 +116,11 @@ protected:
 	Matrix3d *D, *W; // strain rate and spin tensor
 	Vector3d *smoothVel;
 	Matrix3d *CauchyStress;
-	double *detF, *p_wave_speed;
+	double *detF, *p_wave_speed, *shepardWeight;
 	bool *shearFailureFlag;
 	int *numNeighsRefConfig;
-	double *shepardWeight;
 
+	int nmax; // max number of atoms on this proc
 	double hMin; // minimum kernel radius for two particles
 	double dtCFL;
 	double dtRelative; // relative velocity of two particles, divided by sound speed
@@ -122,6 +129,9 @@ protected:
 	enum {
 		LINEAR, LINEAR_PLASTIC, NONE, LINEAR_DEFGRAD, LINEAR_CUTOFF, SHOCK_EOS
 	};
+
+	map< std::string, std::map< int, double > > strengthProps;
+	map< std::string, std::map< int, double > > EOSProps;
 };
 
 }

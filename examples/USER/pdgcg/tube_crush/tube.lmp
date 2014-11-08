@@ -14,7 +14,7 @@ variable        h equal 4.2
 # ----
 variable        kbend equal 4*(${E}*${t}^3)/(12.0*(1.0-${nu}^2))
 variable        c0 equal sqrt(${E}/${rho})
-variable        dt equal 0.5*${h}/${c0}
+variable        dt equal 0.1*${h}/${c0}
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
 variable        skin equal 0.1 # Verlet list range
 
@@ -56,7 +56,7 @@ dump_modify     dump_id first yes
 #
 # time integration
 timestep        ${dt}
-variable        nrun equal 1000
+variable        nrun equal 10000
 print           "running for ${nrun} timesteps"
 
 

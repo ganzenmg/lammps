@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <iostream>
 #include "math_special.h"
+#include <map>
 
 using namespace std;
 using namespace LAMMPS_NS;
@@ -53,16 +54,19 @@ using namespace MathSpecial;
 
 PairTlsph::PairTlsph(LAMMPS *lmp) :
 		Pair(lmp) {
+
+	onerad_dynamic = onerad_frozen = maxrad_dynamic = maxrad_frozen = NULL;
+
+
 	poissonr = NULL;
 	hg_coeff = NULL;
 	Q1 = Q2 = NULL;
 	strengthModel = eos = NULL;
 	lmbda0 = mu0 = NULL;
-	materialCoeffs = NULL;
 	signal_vel0 = NULL; // signal velocity basedon on p-wave speed, used for artificial viscosity
 	rho0 = NULL;
 
-	nmax = 0; // make sure no atom on this proc such that initial memory allocation is correct
+	nmax = 1; // make sure no atom on this proc such that initial memory allocation is correct
 	Fdot = Fincr = K = PK1 = NULL;
 	d = R = FincrInv = W = D = NULL;
 	detF = NULL;
@@ -74,7 +78,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 
 	updateFlag = 0;
 
-	comm_forward = 21; // this pair style communicates 20 doubles to ghost atoms : PK1 tensor + F tensor + shepardWeight
+	comm_forward = 20; // this pair style communicates 20 doubles to ghost atoms : PK1 tensor + F tensor + shepardWeight
 }
 
 /* ---------------------------------------------------------------------- */
@@ -82,6 +86,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 PairTlsph::~PairTlsph() {
 	if (allocated) {
 		memory->destroy(setflag);
+	    memory->destroy(cutsq);
 		memory->destroy(youngsmodulus);
 		memory->destroy(poissonr);
 		memory->destroy(hg_coeff);
@@ -91,9 +96,9 @@ PairTlsph::~PairTlsph() {
 		memory->destroy(eos);
 		memory->destroy(lmbda0);
 		memory->destroy(mu0);
-		memory->destroy(materialCoeffs);
 		memory->destroy(signal_vel0);
 		memory->destroy(rho0);
+
 
 		delete[] onerad_dynamic;
 		delete[] onerad_frozen;
@@ -141,7 +146,7 @@ void PairTlsph::PreCompute() {
 	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
 	Vector3d dx0, dx, dv, g;
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
-	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint;
+	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
 
 	eye.setIdentity();
@@ -149,13 +154,21 @@ void PairTlsph::PreCompute() {
 	// zero accumulators
 	for (i = 0; i < nlocal; i++) {
 		K[i].setZero();
-		//F[i].setZero();
 		Fincr[i].setZero();
 		Fdot[i].setZero();
 		shearFailureFlag[i] = false;
 		shepardWeight[i] = 0.0;
 		numNeighsRefConfig[i] = 0;
 		smoothVel[i].setZero();
+
+//		x0i << x0[i][0], x0[i][1], x0[i][2];
+//		xi << x[i][0], x[i][1], x[i][2];
+//		if ((xi - x0i).norm() > 1.0e-8) {
+//			printf("particle positions deviate in zeroth time step\n");
+//			error->one(FLERR, "d");
+//		}
+
+
 	}
 
 	// set up neighbor list variables
@@ -214,12 +227,18 @@ void PairTlsph::PreCompute() {
 				}
 
 				r0 = sqrt(r0Sq);
+
+//				if (r0 < 0.1) {
+//					printf("distance is %f\n", r0);
+//				}
+
 				volj = vfrac[j];
 
 				// distance vectors in current and reference configuration, velocity difference
 				dx = xj - xi;
 				dv = vj - vi;
 				dvint = vintj - vinti;
+				du = xj - x0j - (xi - x0i);
 
 				// kernel function
 				kernel_and_derivative(h, r0, wf, wfd);
@@ -229,6 +248,21 @@ void PairTlsph::PreCompute() {
 
 				/* build matrices */
 				Ktmp = g * dx0.transpose();
+
+//				if (tag[i] == 9575) {
+//					cout << "displacement vector is " << dx << endl;
+//					cout << "current pos is " << xi << endl;
+//					cout << "pos0 is " << x0i << endl;
+//
+//					cout << "displacement of i is " << x0i - xi << endl;
+//					cout << "displacement of j is " << x0j - xj << endl << endl;
+//
+//
+//				}
+
+
+
+				//Ftmp = du * g.transpose(); // only use displacement here, turns out to be numerically more stable
 				Ftmp = dx * g.transpose();
 				Fdottmp = dv * g.transpose();
 
@@ -267,19 +301,26 @@ void PairTlsph::PreCompute() {
 			}
 
 			if (mol[i] > 0) {
+
+//				if (tag[i] == 9575) {
+//					cout << "Here is matrix F before corection:" << endl << Fincr[i] << endl << endl;
+//				}
+
 				K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
+				//K[i] = K[i].inverse().eval();
 
 				if (domain->dimension == 2) {
 					K[i](2, 2) = 1.0; // make inverse of K well defined even when it is rank-deficient (3d matrix, only 2d information)
 				}
 
 				Fincr[i] *= K[i];
-				Fdot[i] = Fdot[i] * K[i];
+				//Fincr[i] += eye; // need to add identity matrix to comple the deformation gradient
+				Fdot[i] *=  K[i];
 
 				/*
 				 * we need to be able to recover from a potentially planar (2d) configuration of particles
 				 */
-				if ((domain->dimension == 2) || (Fincr[i](2, 2) < 1.0e-2)) {
+				if ((domain->dimension == 2)) {
 					Fincr[i](2, 2) = 1.0;
 				}
 
@@ -290,7 +331,9 @@ void PairTlsph::PreCompute() {
 				if (Fincr[i].determinant() < DETF_MIN) {
 					printf("deleting particle [%d] because det(F)=%f is smaller than limit=%f\n", tag[i], Fincr[i].determinant(),
 					DETF_MIN);
+					printf("nn = %d\n", numNeighsRefConfig[i]);
 					cout << "Here is matrix F:" << endl << Fincr[i] << endl;
+					cout << "Here is matrix K-1:" << endl << K[i] << endl;
 					mol[i] = -1;
 				} else if (Fincr[i].determinant() > DETF_MAX) {
 					printf("deleting particle [%d] because det(F)=%f is larger than limit=%f\n", tag[i], Fincr[i].determinant(),
@@ -302,6 +345,7 @@ void PairTlsph::PreCompute() {
 				if (mol[i] > 0) {
 					detF[i] = Fincr[i].determinant();
 					FincrInv[i] = PairTlsph::pseudo_inverse_SVD(Fincr[i]);
+					//FincrInv[i] = Fincr[i].inverse();
 
 					// velocity gradient, see Pronto2d, eqn.(2.1.3)
 					// I think that the incremental defgrad should be used here as we describe the motion relative to the reference configuration
@@ -377,6 +421,10 @@ void PairTlsph::compute(int eflag, int vflag) {
 		evflag = vflag_fdotr = 0;
 
 	if (atom->nmax > nmax) {
+
+		printf("******************************** REALLOC\n");
+
+
 		nmax = atom->nmax;
 		delete[] Fdot;
 		Fdot = new Matrix3d[nmax]; // memory usage: 9 doubles
@@ -551,14 +599,16 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
 				c_ij = 0.5 * (signal_vel0[itype] + signal_vel0[jtype]);
-				rho_ij = 0.5 * (rho0[i] + rho0[j]);
+				//printf("c_ij = %f\n", c_ij);
+				rho_ij = 0.5 * (rho0[itype] + rho0[jtype]);
 				//visc_magnitude = (-(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij
 				//		+ (Q2[itype][jtype] + 2.0 * damage_factor) * mu_ij * mu_ij) / rho_ij;
-				visc_magnitude = -(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij / rho_ij;
-				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / r;
+				visc_magnitude = -(Q1[itype][jtype]) * c_ij * mu_ij / rho_ij;
+				//printf("visc_magnitude = %f, c_ij=%f, mu_ij=%f\n", visc_magnitude, c_ij, mu_ij);
+				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-3 * h);
 
 				// sum stress, viscous, and hourglass forces
-				sumForces = f_visc + f_stress + f_hg;
+				sumForces = f_stress + f_visc + f_hg;
 
 				// energy rate -- project velocity onto force vector
 				deltaE = 0.5 * sumForces.dot(dv);
@@ -583,7 +633,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 				// check if a particle has moved too much w.r.t another particles
 				if (r > r0) {
-					if ((r - r0) > neighbor->skin) {
+					if ((r - r0) > 0.5 * neighbor->skin) {
 						//printf("current distance is %f, r0 distance is %f\n", r, r0);
 						updateFlag = 1;
 					}
@@ -602,31 +652,34 @@ void PairTlsph::compute(int eflag, int vflag) {
 
 }
 
-
 /* ----------------------------------------------------------------------
  shock EOS
  input:
- 	 current density rho
- 	 reference density rho0
- 	 current energy density e
- 	 reference energy density e0
- 	 reference speed of sound c0
- 	 shock Hugoniot parameter S
- 	 Grueneisen parameter Gamma
- 	 initial pressure pInitial
- 	 time step dt
+ current density rho
+ reference density rho0
+ current energy density e
+ reference energy density e0
+ reference speed of sound c0
+ shock Hugoniot parameter S
+ Grueneisen parameter Gamma
+ initial pressure pInitial
+ time step dt
 
  output:
-	pressure rate p_rate
-	final pressure pFinal
+ pressure rate p_rate
+ final pressure pFinal
 
  ------------------------------------------------------------------------- */
-void PairTlsph::ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma, double pInitial, double dt, double &pFinal, double &p_rate) {
+void PairTlsph::ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma, double pInitial,
+		double dt, double &pFinal, double &p_rate) {
 
 	double mu = rho / rho0 - 1.0;
 	double pH = rho0 * square(c0) * mu * (1.0 + mu) / square(1.0 - (S - 1.0) * mu);
 
-	pFinal = pH + rho * Gamma * (e - e0);
+	pFinal = -(pH + rho * Gamma * (e - e0));
+
+	//printf("shock EOS: rho = %g, rho0 = %g, Gamma=%f, c0=%f, S=%f, e=%f, e0=%f\n", rho, rho0, Gamma, c0, S, e, e0);
+	//printf("pFinal = %f\n", pFinal);
 	p_rate = (pFinal - pInitial) / dt;
 
 }
@@ -802,6 +855,7 @@ void PairTlsph::AssembleStress() {
 	double *damage = atom->damage;
 	double *rmass = atom->rmass;
 	double *vfrac = atom->vfrac;
+	double *e = atom->e;
 	double pInitial, d_iso, pFinal, p_rate, plastic_strain_increment;
 	int i, itype;
 	int nlocal = atom->nlocal;
@@ -842,26 +896,40 @@ void PairTlsph::AssembleStress() {
 				 * pressure
 				 */
 
+				double rho, especific;
+
 				//printf("eos = %d\n", eos[itype]);
 				switch (eos[itype]) {
 				case LINEAR:
 					bulkmodulus = lmbda0[itype] + 2.0 * mu0[itype] / 3.0;
+					//printf("bulk modulus is %f\n", bulkmodulus);
 					LinearEOS(bulkmodulus, pInitial, d_iso, dt, pFinal, p_rate);
 					break;
 				case LINEAR_CUTOFF:
 					bulkmodulus = lmbda0[itype] + 2.0 * mu0[itype] / 3.0;
-					LinearCutoffEOS(bulkmodulus, materialCoeffs[itype][2], pInitial, d_iso, dt, pFinal, p_rate);
+					LinearCutoffEOS(bulkmodulus, EOSProps["cutoff_pressure"][itype], pInitial, d_iso, dt, pFinal, p_rate);
 					break;
 				case NONE:
 					pFinal = 0.0;
 					p_rate = 0.0;
 					break;
 				case SHOCK_EOS:
+					// check that required parameters are known
+					if (EOSProps.count("c0") != 1) {
+						error->one(FLERR, "c0 for shock EOS is missing in EOS property map");
+					}
+					if (EOSProps.count("S_Hugoniot") != 1) {
+						error->one(FLERR, "S_Hugoniot for shock EOS is missing in EOS property map");
+					}
+					if (EOSProps.count("Gamma_Grueneisen") != 1) {
+						error->one(FLERR, "Gamma_Grueneisen for shock EOS is missing in EOS property map");
+					}
 
-
-					//rho = rmass[i] / ( detF[i] * vfrac[i]);
+					rho = rmass[i] / (detF[i] * vfrac[i]);
+					especific = e[i] / rmass[i];
 					//  rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
-					//ShockEOS( rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
+					ShockEOS(rho, rho0[itype], especific, 0.0, EOSProps["c0"][itype], EOSProps["S_Hugoniot"][itype],
+							EOSProps["Gamma_Grueneisen"][itype], pInitial, dt, pFinal, p_rate);
 					break;
 				default:
 					error->one(FLERR, "unknown EOS.");
@@ -874,6 +942,7 @@ void PairTlsph::AssembleStress() {
 
 				switch (strengthModel[itype]) {
 				case LINEAR:
+					//printf("mu0 is %f\n", mu0[itype]);
 					LinearStrength(mu0[itype], sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
 					break;
 				case LINEAR_DEFGRAD:
@@ -884,8 +953,13 @@ void PairTlsph::AssembleStress() {
 					R[i].setIdentity();
 					break;
 				case LINEAR_PLASTIC:
-					LinearPlasticStrength(mu0[itype], materialCoeffs[itype][12], sigmaInitial_dev, d_dev, dt, &sigmaFinal_dev,
-							&sigma_dev_rate, &plastic_strain_increment);
+					// check that required parameters are known
+					if (strengthProps.count("yield_stress0") != 1) {
+						error->one(FLERR, "yield stress for linear plasticity is missing in strength property map");
+					}
+
+					LinearPlasticStrength(mu0[itype], strengthProps["yield_stress0"][itype], sigmaInitial_dev, d_dev, dt,
+							&sigmaFinal_dev, &sigma_dev_rate, &plastic_strain_increment);
 					eff_plastic_strain[i] += plastic_strain_increment;
 					break;
 				case NONE:
@@ -909,17 +983,19 @@ void PairTlsph::AssembleStress() {
 				/*
 				 *  failure criteria
 				 */
-				if (materialCoeffs[itype][11] != 0.0) {
+				if (strengthProps["max_tensile_stress"][itype] != 0.0) {
 					/*
 					 * maximum stress failure criterion:
 					 */
-					IsotropicMaxStressDamage(sigmaFinal, materialCoeffs[itype][11], dt, signal_vel0[itype], radius[i], damage[i], sigma_damaged);
-				} else if (materialCoeffs[itype][10] != 0.0) {
+					IsotropicMaxStressDamage(sigmaFinal, strengthProps["max_tensile_stress"][itype], dt, signal_vel0[itype],
+							radius[i], damage[i], sigma_damaged);
+				} else if (strengthProps["max_tensile_strain"][itype] != 0.0) {
 					/*
 					 * maximum strain failure criterion:
 					 */
 					E = 0.5 * (Fincr[i] * Fincr[i].transpose() - eye);
-					IsotropicMaxStrainDamage(E, sigmaFinal, materialCoeffs[itype][10], dt, signal_vel0[itype], radius[i], damage[i], sigma_damaged);
+					IsotropicMaxStrainDamage(E, sigmaFinal, strengthProps["max_tensile_strain"][itype], dt, signal_vel0[itype],
+							radius[i], damage[i], sigma_damaged);
 				} else {
 					sigma_damaged = sigmaFinal;
 				}
@@ -1012,7 +1088,6 @@ void PairTlsph::allocate() {
 		for (int j = i; j <= n; j++)
 			setflag[i][j] = 0;
 
-	memory->create(materialCoeffs, n + 1, 20, "pair:materialCoeffs");
 	memory->create(youngsmodulus, n + 1, "pair:youngsmodulus");
 	memory->create(poissonr, n + 1, "pair:poissonratio");
 	memory->create(hg_coeff, n + 1, n + 1, "pair:hg_magnitude");
@@ -1047,8 +1122,12 @@ void PairTlsph::settings(int narg, char **arg) {
  ------------------------------------------------------------------------- */
 
 void PairTlsph::coeff(int narg, char **arg) {
-	if (narg != 13)
-		error->all(FLERR, "Incorrect args for pair coefficients");
+
+	if (narg != 30) {
+		char str[128];
+		sprintf(str, "number of arguments for pair tlsph is %d but 30 are required!", narg);
+		error->all(FLERR, str);
+	}
 	if (!allocated)
 		allocate();
 
@@ -1056,7 +1135,7 @@ void PairTlsph::coeff(int narg, char **arg) {
 	force->bounds(arg[0], atom->ntypes, ilo, ihi);
 	force->bounds(arg[1], atom->ntypes, jlo, jhi);
 
-	int mat_one;
+	int mat_one = NONE;
 	if (strcmp(arg[2], "linear") == 0) {
 		mat_one = LINEAR;
 	} else if (strcmp(arg[2], "linearplastic") == 0) {
@@ -1069,11 +1148,13 @@ void PairTlsph::coeff(int narg, char **arg) {
 		error->all(FLERR, "unknown material strength model selected");
 	}
 
-	int eos_one;
+	int eos_one = NONE;
 	if (strcmp(arg[3], "linear") == 0) {
 		eos_one = LINEAR;
 	} else if (strcmp(arg[3], "linear_cutoff") == 0) {
 		eos_one = LINEAR_CUTOFF;
+	} else if (strcmp(arg[3], "shock_eos") == 0) {
+		eos_one = SHOCK_EOS;
 	} else if (strcmp(arg[3], "none") == 0) {
 		eos_one = NONE;
 	} else {
@@ -1098,22 +1179,19 @@ void PairTlsph::coeff(int narg, char **arg) {
 		materialCoeffs_one[k] = atof(arg[10 + k]);
 	}
 
-
 	/*
 	 * check stress and strain failure criteria
 	 */
 
-	if (materialCoeffs_one[10] * materialCoeffs_one[11] != 0.0) {
-		error->all(FLERR, "both maximum strain or stress damage models are set. only one damage model is allowed to be active.");
-	}
-
 	int count = 0;
 	for (int i = ilo; i <= ihi; i++) {
 
-		for (k = 0; k < 20; k++) {
-			materialCoeffs[i][k] = materialCoeffs_one[k];
-		}
+		if (comm->me == 0)
+			printf("\n******************SPH2 / TLSPH PROPERTIES OF PARTICLE TYPE %d **************************\n", i);
 
+		/*
+		 * assign properties which are defined for all material & eos models
+		 */
 		strengthModel[i] = mat_one;
 		eos[i] = eos_one;
 		lmbda0[i] = youngsmodulus_one * poissonr_one / ((1.0 + poissonr_one) * (1.0 - 2.0 * poissonr_one));
@@ -1121,6 +1199,23 @@ void PairTlsph::coeff(int narg, char **arg) {
 		mu0[i] = youngsmodulus_one / (2.0 * (1.0 + poissonr_one));
 		signal_vel0[i] = sqrt((lmbda0[i] + 2.0 * mu0[i]) / rho0[i]);
 
+		EOSProps["bulk_modulus"][i] = lmbda0[i] + 2.0 * mu0[i] / 3.0;
+
+		if (comm->me == 0) {
+			printf("\n material unspecific properties for SPH2/TLSPH definition of particle type %d:\n", i);
+			printf("%40s : %g\n", "Young's modulus", youngsmodulus_one);
+			printf("%40s : %g\n", "Poisson ratio", poissonr_one);
+			printf("%40s : %g\n", "Lame constants lambda", lmbda0[i]);
+			printf("%40s : %g\n", "shear modulus", mu0[i]);
+			printf("%40s : %g\n", "reference density", rho0[i]);
+			printf("%40s : %g\n", "signal velocity", signal_vel0[i]);
+			printf("%40s : %g\n", "linear viscosity coefficient", q1_one);
+			printf("%40s : %g\n", "quadratic viscosity coefficient", q2_one);
+		}
+
+		/*
+		 * assign pairwise defined quantities which are defined for all material & eos models
+		 */
 		for (int j = MAX(jlo, i); j <= jhi; j++) {
 			hg_coeff[i][j] = hg_one;
 			Q1[i][j] = q1_one;
@@ -1128,6 +1223,64 @@ void PairTlsph::coeff(int narg, char **arg) {
 			setflag[i][j] = 1;
 			count++;
 		}
+
+		/*
+		 * assign data specific to EOS model
+		 */
+		if (comm->me == 0)
+			printf("\nEOS specific properties for SPH2/TLSPH definition of particle type %d:\n", i);
+
+		if (eos[i] == LINEAR) {
+			if (comm->me == 0)
+				printf("%60s\n", "linear EOS");
+		} else if (eos[i] == LINEAR_CUTOFF) {
+			if (comm->me == 0)
+				printf("%60s\n", "linear EOS");
+			EOSProps["pressure_cutoff"][i] = materialCoeffs_one[0];
+			if (comm->me == 0)
+				printf("%60s : %g\n", "pressure cutoff for linear EOS", EOSProps["pressure_cutoff"][i]);
+		} else if (eos[i] == SHOCK_EOS) {
+			if (comm->me == 0)
+				printf("\n%60s\n", "shock EOS");
+			EOSProps["c0"][i] = materialCoeffs_one[0];
+			EOSProps["S_Hugoniot"][i] = materialCoeffs_one[1];
+			EOSProps["Gamma_Grueneisen"][i] = materialCoeffs_one[2];
+			if (comm->me == 0) {
+				printf("%60s : %g\n", "reference speed of sound", EOSProps["c0"][i]);
+				printf("%60s : %g\n", "Hugoniot parameter S", EOSProps["S_Hugoniot"][i]);
+				printf("%60s : %g\n", "Grueneisen Gamma", EOSProps["Gamma_Grueneisen"][i]);
+			}
+		}
+
+		/*
+		 * assign data specific to Strength model
+		 */
+		if (comm->me == 0)
+			printf("\nStrength specific properties for SPH2/TLSPH definition of particle type %d:\n", i);
+		if (materialCoeffs_one[10] * materialCoeffs_one[11] != 0.0) {
+			error->all(FLERR,
+					"both maximum strain or stress damage models are set. only one damage model is allowed to be active.");
+		}
+
+		strengthProps["max_tensile_strain"][i] = materialCoeffs_one[10];
+		strengthProps["max_tensile_stress"][i] = materialCoeffs_one[11];
+		if (comm->me == 0) {
+			printf("%40s : %g\n", "maximum tensile strain (not active if zero)", strengthProps["max_tensile_strain"][i]);
+			printf("%40s : %g\n", "maximum tensile stress (not active if zero)", strengthProps["max_tensile_stress"][i]);
+		}
+
+		if (strengthModel[i] == LINEAR) {
+			// nothing to be done here
+		} else if (strengthModel[i] == LINEAR_PLASTIC) {
+			strengthProps["yield_stress0"][i] = materialCoeffs_one[12];
+			if (comm->me == 0) {
+				printf("\n%40s\n", "linear plastic material strength model");
+				printf("%40s : %g\n", "initial plastic yield stress", strengthProps["yield_stress0"][i]);
+			}
+		}
+
+		if (comm->me == 0)
+			printf("***************************************************************************************\n");
 	}
 
 	if (count == 0)
@@ -1385,7 +1538,6 @@ void PairTlsph::kernel_and_derivative(const double h, const double r, double &wf
 	} else {
 		double hr = h - r; // [m]
 		wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
-		wfd = -1.0;
 		wf = -0.333333333333e0 * hr * wfd; // [m/m^4] ==> [1/m^3] correct for W in 3D
 	}
 
@@ -1461,7 +1613,7 @@ Matrix3d PairTlsph::pseudo_inverse_SVD(Matrix3d M) {
 		if (singularValues(row) > pinvtoler) {
 			singularValuesInv(row) = 1.0 / singularValues(row);
 		} else {
-			singularValuesInv(row) = 0.0;
+			singularValuesInv(row) = 1.0;
 		}
 	}
 
@@ -1577,7 +1729,7 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 	double shear_rate_sq;
 	double M; //effective longitudinal modulus
 
-	if (dt * d_iso > 1.0e-6) {
+	if (dt * d_iso > 1.0e-3) {
 		K3 = 3.0 * p_rate / (dt * d_iso);
 	} else {
 		K3 = 3.0 * lmbda0[itype] + 2.0 * mu0[itype];
@@ -1592,7 +1744,7 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1);
 	}
 
-	if (dt * dt * shear_rate_sq < 1.0e-12) {
+	if (dt * dt * shear_rate_sq < 1.0e-8) {
 		mu2 = 0.5 * (3.0 * (lmbda0[itype] + 2.0 * mu0[itype]) - K3);
 	}
 

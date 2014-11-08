@@ -10,7 +10,7 @@ variable        c0 equal sqrt(${E}/${rho})
 variable        dt equal 0.125*${h}/${c0}
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
 variable        skin equal 0.5*${h} # Verlet list range
-variable        contact_stiffness equal 10*${E}
+variable        contact_stiffness equal 0.1*${E}
 
 units		si
 dimension       2
@@ -29,9 +29,15 @@ group           target type 2
 velocity        projectile set ${vel} 0.0 0.0 sum no units box
 
 pair_style      hybrid/overlay tlsph sph2/hertz
-#                         strength EOS                         c0    E     nu   hg    sigy     max.strain  max.stress Q1   Q2
-pair_coeff      1 1 tlsph linearplastic               linear ${c0}   50 ${nu} ${hg}       0.1     0.0        0.0        0.5  2.0
-pair_coeff      2 2 tlsph linearplastic               linear ${c0}  200  0.1  ${hg}        2.0     0.00      1.0       0.1  2.0
+#                         strength EOS                          rh0        E     nu     Q1   Q2   hg   c0    E     nu   hg    sigy     max.strain  max.stress Q1   Q2
+pair_coeff      1 1 tlsph linearplastic            shock_eos    7800.0e-9  70    0.3    0.1  0.0  10 &
+                          2000 1.46 2.77 0 0 0 0 0 0 0 &
+                          0 0 0.1 0 0 0 0 0 0 0
+
+pair_coeff      2 2 tlsph linearplastic            shock_eos    2700.0e-9  70   0.3    0.1  0.0  10 &
+                          2000 1.46 2.77 0 0 0 0 0 0 0 &  
+                          0 0 0.1 0 0 0 0 0 0 0 
+
 pair_coeff      1 2 sph2/hertz ${contact_stiffness}
 
 variable        mx_atom atom mass*vx
