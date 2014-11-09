@@ -20,21 +20,25 @@
 #include "update.h"
 #include "error.h"
 #include "pair.h"
+#include "neigh_list.h"
 #include <Eigen/Eigen>
 #include "domain.h"
 #include "neighbor.h"
 #include "comm.h"
 #include "modify.h"
+#include "stdio.h"
+#include <iostream>
 
 using namespace Eigen;
 using namespace LAMMPS_NS;
 using namespace FixConst;
+using namespace std;
 
 /* ---------------------------------------------------------------------- */
 
 FixSph2IntegrateTlsph::FixSph2IntegrateTlsph(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
-	if (narg < 4) {
+	if (narg < 5) {
 		printf("narg=%d\n", narg);
 		error->all(FLERR, "Illegal fix tlsph/integrate command");
 	}
@@ -46,10 +50,11 @@ FixSph2IntegrateTlsph::FixSph2IntegrateTlsph(LAMMPS *lmp, int narg, char **arg) 
 		}
 	}
 
+	smoothPeriod = force->inumeric(FLERR, arg[4]);
 	updateReferenceConfigurationFlag = false;
 	xsphFlag = false;
 
-	for (int iarg = 4; iarg < narg; iarg++) {
+	for (int iarg = 5; iarg < narg; iarg++) {
 		if (strcmp(arg[iarg], "update") == 0) {
 			updateReferenceConfigurationFlag = true;
 			if (comm->me == 0) {
@@ -70,6 +75,8 @@ FixSph2IntegrateTlsph::FixSph2IntegrateTlsph(LAMMPS *lmp, int narg, char **arg) 
 
 	// set comm sizes needed by this fix
 	comm_forward = 5;
+
+	atom->add_callback(0);
 
 }
 
@@ -124,6 +131,17 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 	int itmp;
 	if (igroup == atom->firstgroup)
 		nlocal = atom->nfirst;
+
+	/*
+	 * perform smoothing of stress field
+	 */
+
+	if (smoothPeriod > 0) {
+		if (update->ntimestep % smoothPeriod == 0) {
+			printf("smoothing\n");
+			smooth_fields();
+		}
+	}
 
 	/*
 	 * update the reference configuration if needed
@@ -387,4 +405,146 @@ void FixSph2IntegrateTlsph::unpack_forward_comm(int n, int first, double *buf) {
 		vfrac[i] = buf[m++];
 		radius[i] = buf[m++];
 	}
+}
+
+void FixSph2IntegrateTlsph::smooth_fields() {
+	int i, j, ii, jj, m, n, inum, jnum;
+	int *ilist, *jlist, *numneigh, **firstneigh;
+	int *touch, **firsttouch;
+	double *shear, *allshear, **firstshear;
+	double h, r0Sq;
+	Vector3d x0i, x0j, dx0;
+
+	// nlocal may include atoms added since last neigh build
+
+	int nlocal = atom->nlocal;
+
+	// zero npartner for all current atoms
+	// clear 2 page data structures
+
+	//for (i = 0; i < nlocal; i++) npartner[i] = 0;
+
+	// 1st loop over neighbor list
+	// calculate npartner for each owned atom
+	// nlocal_neigh = nlocal when neigh list was built, may be smaller than nlocal
+
+	double *radius = atom->radius;
+	double **x0 = atom->x0;
+	double **tlsph_stress = atom->tlsph_stress;
+	tagint *tag = atom->tag;
+	NeighList *list = pair->list;
+	inum = list->inum;
+	ilist = list->ilist;
+	numneigh = list->numneigh;
+	firstneigh = list->firstneigh;
+	Matrix3d *average_stress;
+	double *shepard_weight;
+	Matrix3d stress;
+	double weight;
+
+	average_stress = new Matrix3d[nlocal];
+	shepard_weight = new double[nlocal];
+
+	for (i = 0; i < nlocal; i++) {
+
+		stress(0, 0) = tlsph_stress[i][0];
+		stress(0, 1) = tlsph_stress[i][1];
+		stress(0, 2) = tlsph_stress[i][2];
+		stress(1, 1) = tlsph_stress[i][3];
+		stress(1, 2) = tlsph_stress[i][4];
+		stress(2, 2) = tlsph_stress[i][5];
+
+		weight = 1.0;
+
+		average_stress[i] = weight * stress;
+		shepard_weight[i] = weight;
+	}
+
+	for (ii = 0; ii < inum; ii++) {
+		i = ilist[ii];
+		jlist = firstneigh[i];
+		jnum = numneigh[i];
+
+		x0i << x0[i][0], x0[i][1], x0[i][2];
+
+		for (jj = 0; jj < jnum; jj++) {
+
+			j = jlist[jj];
+			j &= NEIGHMASK;
+
+			x0j << x0[j][0], x0[j][1], x0[j][2];
+
+			dx0 = x0j - x0i;
+			r0Sq = dx0.squaredNorm();
+
+			h = radius[i] + radius[j];
+
+			if (r0Sq < h * h) {
+
+				weight = 1.0; //(h * h - r0Sq) / (h * h);
+
+				stress(0, 0) = tlsph_stress[j][0];
+				stress(0, 1) = tlsph_stress[j][1];
+				stress(0, 2) = tlsph_stress[j][2];
+				stress(1, 1) = tlsph_stress[j][3];
+				stress(1, 2) = tlsph_stress[j][4];
+				stress(2, 2) = tlsph_stress[j][5];
+
+				average_stress[i] += weight * stress;
+				shepard_weight[i] += weight;
+
+				//printf("r0sq = %f\n", r0Sq);
+
+				if (j < nlocal) {
+
+					stress(0, 0) = tlsph_stress[i][0];
+					stress(0, 1) = tlsph_stress[i][1];
+					stress(0, 2) = tlsph_stress[i][2];
+					stress(1, 1) = tlsph_stress[i][3];
+					stress(1, 2) = tlsph_stress[i][4];
+					stress(2, 2) = tlsph_stress[i][5];
+
+					average_stress[j] += weight * stress;
+					shepard_weight[j] += weight;
+
+				}
+			}
+		}
+
+		for (i = 0; i < nlocal; i++) {
+
+			average_stress[i] /= shepard_weight[i];
+
+			stress(0, 0) = tlsph_stress[i][0];
+			stress(0, 1) = tlsph_stress[i][1];
+			stress(0, 2) = tlsph_stress[i][2];
+			stress(1, 1) = tlsph_stress[i][3];
+			stress(1, 2) = tlsph_stress[i][4];
+			stress(2, 2) = tlsph_stress[i][5];
+
+//			cout << "original stress " << endl << stress << endl << endl;
+//			cout << "average  stress " << endl << average_stress[i] << endl << endl;
+//			cout << "------------------------------------------" << endl;
+
+			tlsph_stress[i][0] = average_stress[i](0, 0);
+			tlsph_stress[i][1] = average_stress[i](0, 1);
+			tlsph_stress[i][2] = average_stress[i](0, 2);
+			tlsph_stress[i][3] = average_stress[i](1, 1);
+			tlsph_stress[i][4] = average_stress[i](1, 2);
+			tlsph_stress[i][5] = average_stress[i](2, 2);
+
+//			tlsph_stress[i][0] = stress(0, 0);
+//			tlsph_stress[i][1] = stress(0, 1);
+//			tlsph_stress[i][2] = stress(0, 2);
+//			tlsph_stress[i][3] = stress(1, 1);
+//			tlsph_stress[i][4] = stress(1, 2);
+//			tlsph_stress[i][5] = stress(2, 2);
+
+		}
+
+	}
+
+	delete[] average_stress;
+	delete[] shepard_weight;
+
 }

@@ -36,6 +36,7 @@
 #include <iostream>
 #include "math_special.h"
 #include <map>
+#include "fix_sph2_integrate_tlsph.h"
 
 using namespace std;
 using namespace LAMMPS_NS;
@@ -77,6 +78,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 	CauchyStress = NULL;
 
 	updateFlag = 0;
+	not_first = 0;
 
 	comm_forward = 20; // this pair style communicates 20 doubles to ghost atoms : PK1 tensor + F tensor + shepardWeight
 }
@@ -309,7 +311,6 @@ void PairTlsph::PreCompute() {
 					K[i] = K[i].inverse().eval();
 				}
 
-
 				Fincr[i] *= K[i];
 				//Fincr[i] += eye; // need to add identity matrix to comple the deformation gradient
 				Fdot[i] *= K[i];
@@ -437,6 +438,25 @@ void PairTlsph::compute(int eflag, int vflag) {
 	comm->forward_comm_pair(this);
 
 	ComputeForces(eflag, vflag);
+
+	/*
+	 * initialize neighbor list pointer for time integration fix.
+	 * this needs to be done here beacuse fix is created after pair.
+	 */
+	if (update->ntimestep == 1) {
+
+		ifix_tlsph = -1;
+		for (int i = 0; i < modify->nfix; i++) {
+			printf("fix %d\n", i);
+			if (strcmp(modify->fix[i]->style, "sph2/integrate_tlsph") == 0)
+				ifix_tlsph = i;
+		}
+		if (ifix_tlsph == -1)
+			error->all(FLERR, "Fix ifix_tlsph does not exist");
+
+		fix_tlsph_time_integration = (FixSph2IntegrateTlsph *) modify->fix[ifix_tlsph];
+		fix_tlsph_time_integration->pair = this;
+	}
 
 }
 
@@ -577,14 +597,12 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				//if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j]) > 1.0e-2) {
 				//	hg_mag = 0.1 * hg_mag;
 				//}
-
 				f_hg = (hg_mag / (r + 0.1 * h)) * dx;
 
 				/*
 				 * maximum (symmetric damage factor)
 				 */
 				//damage_factor = MAX(damage[i], damage[j]);
-
 				/*
 				 * artificial viscosity with linear and quadratic terms
 				 * note that artificial viscosity is enhanced if particles are damaged
@@ -1112,6 +1130,7 @@ void PairTlsph::AssembleStress() {
 				if (eff_plastic_strain[i] > 1.0) {
 					shearFailureFlag[i] = true;
 				}
+				eff_plastic_strain[i] = MIN(eff_plastic_strain[i], 2.0);
 
 				/*
 				 *  assemble total stress from pressure and deviatoric stress
@@ -1136,6 +1155,14 @@ void PairTlsph::AssembleStress() {
 							radius[i], damage[i], sigma_damaged);
 				} else {
 					sigma_damaged = sigmaFinal;
+				}
+
+				if (shearFailureFlag[i]) {
+					if (pFinal < 0.0) {
+						sigma_damaged = pFinal * eye;
+					} else {
+						sigma_damaged	.setZero();
+					}
 				}
 
 				/*
@@ -1190,6 +1217,12 @@ void PairTlsph::AssembleStress() {
 				/*
 				 * compute stable time step according to Pronto 2d
 				 */
+
+				Matrix3d deltaSigma;
+				deltaSigma = sigma_damaged - sigmaInitial;
+				p_rate = deltaSigma.trace() / (3.0 * dt);
+				sigma_dev_rate = Deviator(deltaSigma) / dt;
+
 				M = effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev, sigma_dev_rate, damage[i]);
 				p_wave_speed = sqrt(M / (rmass[i] / vfrac[i]));
 				//printf("c0 = %f\n", c0[i]);

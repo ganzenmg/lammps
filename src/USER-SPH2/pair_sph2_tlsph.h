@@ -142,6 +142,11 @@ protected:
 	map< std::string, std::map< int, double > > commonProps;
 	map< std::string, std::map< int, double > > strengthProps;
 	map< std::string, std::map< int, double > > EOSProps;
+
+	int ifix_tlsph;
+	int not_first;
+
+	class FixSph2IntegrateTlsph *fix_tlsph_time_integration;
 };
 
 }

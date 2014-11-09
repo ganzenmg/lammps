@@ -25,6 +25,8 @@ FixStyle(sph2/integrate_tlsph,FixSph2IntegrateTlsph)
 namespace LAMMPS_NS {
 
 class FixSph2IntegrateTlsph: public Fix {
+	friend class Neighbor;
+	friend class PairTlsph;
 public:
     FixSph2IntegrateTlsph(class LAMMPS *, int, char **);
     virtual ~FixSph2IntegrateTlsph() {
@@ -37,12 +39,16 @@ public:
     void updateReferenceConfiguration();
     int pack_forward_comm(int, int *, double *, int, int *);
     void unpack_forward_comm(int, int, double *);
+    void smooth_fields();
 
 protected:
     double dtv, dtf, vlimit, vlimitsq;
     int mass_require;
     bool updateReferenceConfigurationFlag, xsphFlag;
+    int smoothPeriod;
     int nRefConfigUpdates;
+
+    class Pair *pair;
 };
 
 }

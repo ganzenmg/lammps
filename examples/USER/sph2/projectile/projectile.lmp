@@ -79,7 +79,7 @@ balance          1.0 rcb
 # time integration
 timestep        1.0e-10 #${dt}
 fix             dtfix all sph2/tlsph_dt_reset 5 0.1
-fix             integration_fix all sph2/integrate_tlsph 1.5e3 update
+fix             integration_fix all sph2/integrate_tlsph 1.5e3 50 update
 
 #variable        a equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
 #variable        disp equal 2.0*${vel}*f_dtfix[1]
@@ -97,9 +97,9 @@ dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
 
 dump_modify     dump_id first yes
 
-thermo          100
+thermo          10
 thermo_style    custom step ke pe v_etot c_alleint dt
-run             50000
+run             1500
 
 
 
