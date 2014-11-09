@@ -95,8 +95,11 @@ Atom::Atom(LAMMPS *lmp) : Pointers(lmp)
   vest = NULL;
 
   // USER-SPH2
-  contact_radius = eff_plastic_strain = eff_plastic_strain_rate = NULL;
-  tlsph_fold = tlsph_stress = NULL;
+  contact_radius = NULL;
+  tlsph_fold = NULL;
+  tlsph_stress = NULL;
+  eff_plastic_strain = NULL;
+  eff_plastic_strain_rate = NULL;
   damage = NULL;
 
   bond_per_atom =  extra_bond_per_atom = 0;
@@ -154,11 +157,15 @@ Atom::Atom(LAMMPS *lmp) : Pointers(lmp)
   rho_flag = e_flag = cv_flag = vest_flag = 0;
 
   // USER-SPH2
-  contact_radius_flag = eff_plastic_strain_flag = tlsph_fold_flag = damage_flag = 0;
+  sph2_flag = 0;
+  contact_radius_flag = 0;
+  tlsph_fold_flag = 0;
   tlsph_stress_flag = 0;
   x0_flag = 0;
-  sph2_flag = 0;
+  eff_plastic_strain_flag = 0;
   eff_plastic_strain_rate_flag = 0;
+  damage_flag = 0;
+
 
   // Peridynamic scale factor
 
@@ -284,6 +291,13 @@ Atom::~Atom()
   memory->destroy(improper_atom3);
   memory->destroy(improper_atom4);
 
+  memory->destroy(contact_radius);
+  memory->destroy(tlsph_fold);
+  memory->destroy(tlsph_stress);
+  memory->destroy(eff_plastic_strain);
+  memory->destroy(eff_plastic_strain_rate);
+  memory->destroy(damage);
+
   // delete custom atom arrays
 
   for (int i = 0; i < nivector; i++) {
@@ -368,6 +382,15 @@ void Atom::create_avec(const char *style, int narg, char **arg, char *suffix)
   cs_flag = csforce_flag = vforce_flag = etag_flag = 0;
 
   rho_flag = e_flag = cv_flag = vest_flag = 0;
+
+  sph2_flag = 0;
+    contact_radius_flag = 0;
+    tlsph_fold_flag = 0;
+    tlsph_stress_flag = 0;
+    x0_flag = 0;
+    eff_plastic_strain_flag = 0;
+    eff_plastic_strain_rate_flag = 0;
+    damage_flag = 0;
 
   // create instance of AtomVec
   // use grow() to initialize atom-based arrays to length 1
@@ -1953,6 +1976,13 @@ void *Atom::extract(char *name)
   if (strcmp(name,"de") == 0) return (void *) de;
   if (strcmp(name,"cv") == 0) return (void *) cv;
   if (strcmp(name,"vest") == 0) return (void *) vest;
+
+  if (strcmp(name,"contact_radius") == 0) return (void *) contact_radius;
+  if (strcmp(name,"tlsph_fold") == 0) return (void *) tlsph_fold;
+  if (strcmp(name,"tlsph_stress") == 0) return (void *) tlsph_stress;
+  if (strcmp(name,"eff_plastic_strain") == 0) return (void *) eff_plastic_strain;
+  if (strcmp(name,"eff_plastic_strain_rate") == 0) return (void *) eff_plastic_strain_rate;
+  if (strcmp(name,"damage") == 0) return (void *) damage;
 
   return NULL;
 }

@@ -66,7 +66,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 	signal_vel0 = NULL; // signal velocity basedon on p-wave speed, used for artificial viscosity
 	rho0 = NULL;
 
-	nmax = 1; // make sure no atom on this proc such that initial memory allocation is correct
+	nmax = 0; // make sure no atom on this proc such that initial memory allocation is correct
 	Fdot = Fincr = K = PK1 = NULL;
 	d = R = FincrInv = W = D = NULL;
 	detF = NULL;
@@ -302,12 +302,13 @@ void PairTlsph::PreCompute() {
 //					cout << "Here is matrix F before corection:" << endl << Fincr[i] << endl << endl;
 //				}
 
-				//K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
-				K[i] = K[i].inverse().eval();
-
 				if (domain->dimension == 2) {
+					K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
 					K[i](2, 2) = 1.0; // make inverse of K well defined even when it is rank-deficient (3d matrix, only 2d information)
+				} else {
+					K[i] = K[i].inverse().eval();
 				}
+
 
 				Fincr[i] *= K[i];
 				//Fincr[i] += eye; // need to add identity matrix to comple the deformation gradient
@@ -567,14 +568,15 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
 
 				/* SPH-like formulation */
+
 				delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
-				hg_mag = -hg_coeff[itype][jtype] * delta / (r0Sq); // hg_mag has dimensions [m^(-1)]
+				hg_mag = -hg_coeff[itype][jtype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
 				hg_mag *= voli * volj * wf * (youngsmodulus[itype] + youngsmodulus[jtype]); // hg_mag has dimensions [J*m^(-1)] = [N]
 
 				/* scale hourglass correction to enable plastic flow */
-				if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j]) > 1.0e-2) {
-					hg_mag = 0.1 * hg_mag;
-				}
+				//if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j]) > 1.0e-2) {
+				//	hg_mag = 0.1 * hg_mag;
+				//}
 
 				f_hg = (hg_mag / (r + 0.1 * h)) * dx;
 
@@ -590,8 +592,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				 */
 
 				delVdotDelR = dx.dot(dv);
-				hr = h - r; // [m]
-				wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
+				//hr = h - r; // [m]
+				//wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
 
 				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
 				c_ij = 0.5 * (signal_vel0[itype] + signal_vel0[jtype]);
@@ -599,11 +601,12 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				rho_ij = 0.5 * (rho0[itype] + rho0[jtype]);
 				//visc_magnitude = (-(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij
 				//		+ (Q2[itype][jtype] + 2.0 * damage_factor) * mu_ij * mu_ij) / rho_ij;
-				visc_magnitude = -(Q1[itype][jtype]) * c_ij * mu_ij / rho_ij;
+				visc_magnitude = -(Q1[itype][jtype]) * c_ij * mu_ij / rho_ij; // this has units of pressure
 				//printf("visc_magnitude = %f, c_ij=%f, mu_ij=%f\n", visc_magnitude, c_ij, mu_ij);
-				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-3 * h);
+				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h);
 
 				// sum stress, viscous, and hourglass forces
+				//cout << "fstress: " << f_stress << endl;
 				sumForces = f_stress + f_visc + f_hg;
 
 				// energy rate -- project velocity onto force vector
@@ -1180,6 +1183,10 @@ void PairTlsph::AssembleStress() {
 				 */
 				PK1[i] = PK1[i] * K[i];
 
+				//cout << "F:" << Fincr[i] << endl;
+				//cout << "T:" << T << endl;
+				//cout << "PK1:" << PK1[i] << endl << endl;
+
 				/*
 				 * compute stable time step according to Pronto 2d
 				 */
@@ -1469,6 +1476,8 @@ void PairTlsph::coeff(int narg, char **arg) {
 
 	if (count == 0)
 		error->all(FLERR, "Incorrect args for pair coefficients");
+
+	delete[] materialCoeffs_one;
 }
 
 /* ----------------------------------------------------------------------

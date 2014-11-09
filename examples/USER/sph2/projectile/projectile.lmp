@@ -14,32 +14,41 @@ variable        contact_stiffness equal 0.1*${E}
 
 units		si
 dimension       2
-boundary        s s p
+boundary        sm sm p
 atom_style      tlsph
 comm_style      tiled
-atom_modify	map array
+#atom_modify	map array
 neighbor        ${skin} bin
 neigh_modify    every 5 delay 0 check yes # only build neighbor list if particle has moved half the skin distance
-comm_modify      vel yes
+comm_modify      vel yes cutoff 20.0
 newton          off
 read_data       in.data
 group           projectile type 1
 group           target type 2
+
 
 velocity        projectile set ${vel} 0.0 0.0 sum no units box
 
 pair_style      hybrid/overlay tlsph sph2/hertz
 #                         strength EOS                          rh0        E     nu     Q1   Q2   hg  Cp
 
-pair_coeff      1 1 tlsph johnson_cook        polynomial_eos    7800.0e-9  70   0.3    0.1  0.0  10  910 &
+#pair_coeff      1 1 tlsph linear              linear            7800.0e-9  70   0.3    1.0  0.0  10  910 &
+#0 0 0 0 0 0 0 0 0 0  &
+#0 0 0.1 0 0 0 0 0 0 0 
+#pair_coeff      2 2 tlsph linear              linear            2700.0e-9  70   0.3    0.1  0.0  10  910 &
+#0 0 0 0 0 0 0 0 0 0  &
+#0 0 0.1 0 0 0 0 0 0 0 
+
+pair_coeff      1 1 tlsph johnson_cook        polynomial_eos    7800.0e-9  70   0.3    1.0  0.0  10  910 &
                           0 74.2 60.5 36.5 1.96 0 0 0 0 0 &  
                           0 0 0.3241 0.1138 0.42 0.002 1.0e-3 298 893 1.34
 
 pair_coeff      2 2 tlsph johnson_cook        polynomial_eos    2700.0e-9  70   0.3    0.1  0.0  10  910 &
                           0 74.2 60.5 36.5 1.96 0 0 0 0 0 &  
                           0 0 0.3241 0.1138 0.42 0.002 1.0e-3 298 893 1.34
-
 pair_coeff      1 2 sph2/hertz ${contact_stiffness}
+
+
 
 variable        mx_atom atom mass*vx
 compute         mx all reduce sum v_mx_atom
@@ -58,22 +67,20 @@ compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
 variable        volume atom vol
 
-# update CFL timestep
-thermo          100
+thermo          1
 thermo_style    custom step ke c_mx c_my ke pe v_etot c_alleint
-thermo_modify   lost ignore
 
 # initial run
-
 run             0
-#fix             inn all store/state 0 c_nn
+fix             inn all store/state 0 c_nn
 
 balance          1.0 rcb
 
 # time integration
-timestep        ${dt}
+timestep        1.0e-10 #${dt}
 fix             dtfix all sph2/tlsph_dt_reset 5 0.1
 fix             integration_fix all sph2/integrate_tlsph 1.5e3 update
+
 #variable        a equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
 #variable        disp equal 2.0*${vel}*f_dtfix[1]
 #fix             output_fix all print 10 "${disp} $a" file force_displacement.dat screen no
@@ -92,8 +99,7 @@ dump_modify     dump_id first yes
 
 thermo          100
 thermo_style    custom step ke pe v_etot c_alleint dt
-#thermo_modify   lost ignore
 run             50000
-#
-#
-#
+
+
+

@@ -77,8 +77,12 @@ class Atom : protected Pointers {
   double **vest;
 
   // USER-SPH2 package
-  double *contact_radius, *eff_plastic_strain, *eff_plastic_strain_rate, *damage;
-  double **tlsph_fold, **tlsph_stress;
+  double *contact_radius;
+  double **tlsph_fold;
+  double **tlsph_stress;
+  double *eff_plastic_strain;
+  double *eff_plastic_strain_rate;
+  double *damage;
 
   int **nspecial;               // 0,1,2 = cummulative # of 1-2,1-3,1-4 neighs
   tagint **special;             // IDs of 1-2,1-3,1-4 neighs of each atom
@@ -128,11 +132,14 @@ class Atom : protected Pointers {
   int rho_flag,e_flag,cv_flag,vest_flag;
 
   // USER-SPH2 package
-  int contact_radius_flag, eff_plastic_strain_flag, tlsph_fold_flag, damage_flag;
+  int contact_radius_flag;
+  int tlsph_fold_flag;
   int tlsph_stress_flag;
   int x0_flag;
   int sph2_flag;
+  int eff_plastic_strain_flag;
   int eff_plastic_strain_rate_flag;
+  int damage_flag;
 
   // Peridynamics scale factor, used by dump cfg
 

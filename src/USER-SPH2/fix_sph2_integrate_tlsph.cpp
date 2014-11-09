@@ -183,9 +183,13 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 			vest[i][2] = v[i][2] + dtfm * f[i][2];
 
 			if (xsphFlag) {
-				x[i][0] += dtv * (v[i][0] + 0.5 * smoothVel[i](0));
-				x[i][1] += dtv * (v[i][1] + 0.5 * smoothVel[i](1));
-				x[i][2] += dtv * (v[i][2] + 0.5 * smoothVel[i](2));
+				vest[i][0] -= 0.5 * smoothVel[i](0); // extrapolated velocities need to be smoothed as well
+				vest[i][1] -= 0.5 * smoothVel[i](1);
+				vest[i][2] -= 0.5 * smoothVel[i](2);
+
+				x[i][0] += dtv * (v[i][0] - 0.5 * smoothVel[i](0));
+				x[i][1] += dtv * (v[i][1] - 0.5 * smoothVel[i](1));
+				x[i][2] += dtv * (v[i][2] - 0.5 * smoothVel[i](2));
 			} else {
 				x[i][0] += dtv * v[i][0];
 				x[i][1] += dtv * v[i][1];
