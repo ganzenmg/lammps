@@ -60,6 +60,7 @@ AtomVecSph2::AtomVecSph2(LAMMPS *lmp) :
 	atom->rho_flag = 1;
 	atom->x0_flag = 1;
 	atom->damage_flag = 1;
+	atom->eff_plastic_strain_rate_flag = 1;
 
 	forceclearflag = 1;
 
@@ -104,17 +105,14 @@ void AtomVecSph2::grow(int n) {
 	rmass = memory->grow(atom->rmass, nmax, "atom:rmass");
 	x0 = memory->grow(atom->x0, nmax, 3, "atom:x0");
 	radius = memory->grow(atom->radius, nmax, "atom:radius");
-	contact_radius = memory->grow(atom->contact_radius, nmax,
-			"atom:contact_radius");
+	contact_radius = memory->grow(atom->contact_radius, nmax, "atom:contact_radius");
 	molecule = memory->grow(atom->molecule, nmax, "atom:molecule");
-	tlsph_fold = memory->grow(atom->tlsph_fold, nmax, NMAT_FULL,
-			"atom:defgrad_old");
+	tlsph_fold = memory->grow(atom->tlsph_fold, nmax, NMAT_FULL, "atom:defgrad_old");
 	e = memory->grow(atom->e, nmax, "atom:e");
 	vest = memory->grow(atom->vest, nmax, 3, "atom:vest");
-	tlsph_stress = memory->grow(atom->tlsph_stress, nmax, NMAT_SYMM,
-			"atom:tlsph_stress");
-	eff_plastic_strain = memory->grow(atom->eff_plastic_strain, nmax,
-			"atom:eff_plastic_strain");
+	tlsph_stress = memory->grow(atom->tlsph_stress, nmax, NMAT_SYMM, "atom:tlsph_stress");
+	eff_plastic_strain = memory->grow(atom->eff_plastic_strain, nmax, "atom:eff_plastic_strain");
+	eff_plastic_strain_rate = memory->grow(atom->eff_plastic_strain_rate, nmax, "atom:eff_plastic_strain_rate");
 	rho = memory->grow(atom->rho, nmax, "atom:rho");
 	damage = memory->grow(atom->damage, nmax, "atom:damage");
 
@@ -147,6 +145,7 @@ void AtomVecSph2::grow_reset() {
 	de = atom->de;
 	tlsph_stress = atom->tlsph_stress;
 	eff_plastic_strain = atom->eff_plastic_strain;
+	eff_plastic_strain_rate = atom->eff_plastic_strain_rate;
 	rho = atom->rho;
 	drho = atom->drho;
 	damage = atom->damage;
@@ -179,6 +178,7 @@ void AtomVecSph2::copy(int i, int j, int delflag) {
 	e[j] = e[i];
 	rho[j] = rho[i];
 	eff_plastic_strain[j] = eff_plastic_strain[i];
+	eff_plastic_strain_rate[j] = eff_plastic_strain_rate[i];
 	vest[j][0] = vest[i][0];
 	vest[j][1] = vest[i][1];
 	vest[j][2] = vest[i][2];
@@ -200,17 +200,14 @@ void AtomVecSph2::copy(int i, int j, int delflag) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecSph2::pack_comm(int n, int *list, double *buf, int pbc_flag,
-		int *pbc) {
-	error->one(FLERR,
-			"atom vec tlsph can only be used with ghost velocities turned on");
+int AtomVecSph2::pack_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
+	error->one(FLERR, "atom vec tlsph can only be used with ghost velocities turned on");
 	return -1;
 }
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecSph2::pack_comm_vel(int n, int *list, double *buf, int pbc_flag,
-		int *pbc) {
+int AtomVecSph2::pack_comm_vel(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	//no need to pack stress or defgrad information here, as these quantities are not required for ghost atoms.
 	// Inside pair_style tlsph, these quantities are computed and communicated to ghosts.
 	int i, j, m;
@@ -242,8 +239,7 @@ int AtomVecSph2::pack_comm_vel(int n, int *list, double *buf, int pbc_flag,
 			dy = pbc[1] * domain->yprd;
 			dz = pbc[2] * domain->zprd;
 		} else {
-			dx = pbc[0] * domain->xprd + pbc[5] * domain->xy
-					+ pbc[4] * domain->xz;
+			dx = pbc[0] * domain->xprd + pbc[5] * domain->xy + pbc[4] * domain->xz;
 			dy = pbc[1] * domain->yprd + pbc[3] * domain->yz;
 			dz = pbc[2] * domain->zprd;
 		}
@@ -325,8 +321,7 @@ int AtomVecSph2::pack_comm_hybrid(int n, int *list, double *buf) {
 /* ---------------------------------------------------------------------- */
 
 void AtomVecSph2::unpack_comm(int n, int first, double *buf) {
-	error->one(FLERR,
-			"atom vec tlsph can only be used with ghost velocities turned on");
+	error->one(FLERR, "atom vec tlsph can only be used with ghost velocities turned on");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -438,17 +433,14 @@ int AtomVecSph2::unpack_reverse_hybrid(int n, int *list, double *buf) {
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecSph2::pack_border(int n, int *list, double *buf, int pbc_flag,
-		int *pbc) {
-	error->one(FLERR,
-			"atom vec tlsph can only be used with ghost velocities turned on");
+int AtomVecSph2::pack_border(int n, int *list, double *buf, int pbc_flag, int *pbc) {
+	error->one(FLERR, "atom vec tlsph can only be used with ghost velocities turned on");
 	return -1;
 }
 
 /* ---------------------------------------------------------------------- */
 
-int AtomVecSph2::pack_border_vel(int n, int *list, double *buf, int pbc_flag,
-		int *pbc) {
+int AtomVecSph2::pack_border_vel(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	int i, j, m;
 	double dx, dy, dz, dvx, dvy, dvz;
 
@@ -592,8 +584,7 @@ int AtomVecSph2::pack_border_vel(int n, int *list, double *buf, int pbc_flag,
 
 	if (atom->nextra_border)
 		for (int iextra = 0; iextra < atom->nextra_border; iextra++)
-			m += modify->fix[atom->extra_border[iextra]]->pack_border(n, list,
-					&buf[m]);
+			m += modify->fix[atom->extra_border[iextra]]->pack_border(n, list, &buf[m]);
 
 	return m;
 }
@@ -634,8 +625,7 @@ int AtomVecSph2::pack_border_hybrid(int n, int *list, double *buf) {
 /* ---------------------------------------------------------------------- */
 
 void AtomVecSph2::unpack_border(int n, int first, double *buf) {
-	error->one(FLERR,
-			"atom vec tlsph can only be used with ghost velocities turned on");
+	error->one(FLERR, "atom vec tlsph can only be used with ghost velocities turned on");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -685,8 +675,7 @@ void AtomVecSph2::unpack_border_vel(int n, int first, double *buf) {
 
 	if (atom->nextra_border)
 		for (int iextra = 0; iextra < atom->nextra_border; iextra++)
-			m += modify->fix[atom->extra_border[iextra]]->unpack_border(n,
-					first, &buf[m]);
+			m += modify->fix[atom->extra_border[iextra]]->unpack_border(n, first, &buf[m]);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -748,6 +737,7 @@ int AtomVecSph2::pack_exchange(int i, double *buf) {
 	buf[m++] = e[i];
 	buf[m++] = rho[i];
 	buf[m++] = eff_plastic_strain[i]; // 18
+	buf[m++] = eff_plastic_strain_rate[i]; // 19
 
 	for (int k = 0; k < NMAT_FULL; k++) {
 		buf[m++] = tlsph_fold[i][k];
@@ -768,8 +758,7 @@ int AtomVecSph2::pack_exchange(int i, double *buf) {
 
 	if (atom->nextra_grow)
 		for (int iextra = 0; iextra < atom->nextra_grow; iextra++)
-			m += modify->fix[atom->extra_grow[iextra]]->pack_exchange(i,
-					&buf[m]);
+			m += modify->fix[atom->extra_grow[iextra]]->pack_exchange(i, &buf[m]);
 
 	buf[0] = m;
 	return m;
@@ -803,6 +792,7 @@ int AtomVecSph2::unpack_exchange(double *buf) {
 	e[nlocal] = buf[m++];
 	rho[nlocal] = buf[m++];
 	eff_plastic_strain[nlocal] = buf[m++]; // 18
+	eff_plastic_strain_rate[nlocal] = buf[m++]; // 19
 
 	for (int k = 0; k < NMAT_FULL; k++) {
 		tlsph_fold[nlocal][k] = buf[m++];
@@ -823,8 +813,7 @@ int AtomVecSph2::unpack_exchange(double *buf) {
 
 	if (atom->nextra_grow)
 		for (int iextra = 0; iextra < atom->nextra_grow; iextra++)
-			m += modify->fix[atom->extra_grow[iextra]]->unpack_exchange(nlocal,
-					&buf[m]);
+			m += modify->fix[atom->extra_grow[iextra]]->unpack_exchange(nlocal, &buf[m]);
 
 	atom->nlocal++;
 	return m;
@@ -896,8 +885,7 @@ int AtomVecSph2::pack_restart(int i, double *buf) {
 
 	if (atom->nextra_restart)
 		for (int iextra = 0; iextra < atom->nextra_restart; iextra++)
-			m += modify->fix[atom->extra_restart[iextra]]->pack_restart(i,
-					&buf[m]);
+			m += modify->fix[atom->extra_restart[iextra]]->pack_restart(i, &buf[m]);
 
 	buf[0] = m;
 	return m;
@@ -984,8 +972,7 @@ void AtomVecSph2::create_atom(int itype, double *coord) {
 	x0[nlocal][1] = coord[1];
 	x0[nlocal][2] = coord[2];
 	mask[nlocal] = 1;
-	image[nlocal] = ((imageint) IMGMAX << IMG2BITS)
-			| ((imageint) IMGMAX << IMGBITS) | IMGMAX;
+	image[nlocal] = ((imageint) IMGMAX << IMG2BITS) | ((imageint) IMGMAX << IMGBITS) | IMGMAX;
 	v[nlocal][0] = 0.0;
 	v[nlocal][1] = 0.0;
 	v[nlocal][2] = 0.0;
@@ -1001,6 +988,7 @@ void AtomVecSph2::create_atom(int itype, double *coord) {
 	e[nlocal] = 0.0;
 	rho[nlocal] = 1.0;
 	eff_plastic_strain[nlocal] = 0.0;
+	eff_plastic_strain_rate[nlocal] = 0.0;
 
 	for (int k = 0; k < NMAT_FULL; k++) {
 		tlsph_fold[nlocal][k] = 0.0;
@@ -1052,8 +1040,7 @@ void AtomVecSph2::data_atom(double *coord, imageint imagetmp, char **values) {
 
 	contact_radius[nlocal] = atof(values[6]);
 	if (contact_radius[nlocal] < 0.0)
-		error->one(FLERR,
-				"Invalid contact radius in Atoms section of data file");
+		error->one(FLERR, "Invalid contact radius in Atoms section of data file");
 
 	e[nlocal] = 0.0;
 	rho[nlocal] = rmass[nlocal] / vfrac[nlocal];
@@ -1079,6 +1066,7 @@ void AtomVecSph2::data_atom(double *coord, imageint imagetmp, char **values) {
 	damage[nlocal] = 0.0;
 
 	eff_plastic_strain[nlocal] = 0.0;
+	eff_plastic_strain_rate[nlocal] = 0.0;
 
 	for (int k = 0; k < NMAT_FULL; k++) {
 		tlsph_fold[nlocal][k] = 0.0;
@@ -1101,8 +1089,7 @@ void AtomVecSph2::data_atom(double *coord, imageint imagetmp, char **values) {
  ------------------------------------------------------------------------- */
 
 int AtomVecSph2::data_atom_hybrid(int nlocal, char **values) {
-	error->one(FLERR,
-			"hybrid atom style functionality not yet implemented for atom style tlsph");
+	error->one(FLERR, "hybrid atom style functionality not yet implemented for atom style tlsph");
 	return -1;
 }
 
@@ -1124,8 +1111,7 @@ void AtomVecSph2::data_vel(int m, char **values) {
  ------------------------------------------------------------------------- */
 
 int AtomVecSph2::data_vel_hybrid(int m, char **values) {
-	error->one(FLERR,
-			"hybrid atom style functionality not yet implemented for atom style tlsph");
+	error->one(FLERR, "hybrid atom style functionality not yet implemented for atom style tlsph");
 	return 0;
 }
 
@@ -1159,8 +1145,7 @@ void AtomVecSph2::pack_data(double **buf) {
  ------------------------------------------------------------------------- */
 
 int AtomVecSph2::pack_data_hybrid(int i, double *buf) {
-	error->one(FLERR,
-			"hybrid atom style functionality not yet implemented for atom style tlsph");
+	error->one(FLERR, "hybrid atom style functionality not yet implemented for atom style tlsph");
 	return -1;
 }
 
@@ -1171,13 +1156,10 @@ int AtomVecSph2::pack_data_hybrid(int i, double *buf) {
 void AtomVecSph2::write_data(FILE *fp, int n, double **buf) {
 	for (int i = 0; i < n; i++)
 		fprintf(fp,
-				TAGINT_FORMAT
-				" %d %d %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e %d %d %d\n",
-				(tagint) ubuf(buf[i][0]).i, (int) ubuf(buf[i][1]).i,
-				(int) ubuf(buf[i][2]).i, buf[i][3], buf[i][4], buf[i][5],
-				buf[i][6], buf[i][7], buf[i][8], buf[i][9],
-				(int) ubuf(buf[i][7]).i, (int) ubuf(buf[i][8]).i,
-				(int) ubuf(buf[i][9]).i);
+		TAGINT_FORMAT
+		" %d %d %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e %d %d %d\n", (tagint) ubuf(buf[i][0]).i,
+				(int) ubuf(buf[i][1]).i, (int) ubuf(buf[i][2]).i, buf[i][3], buf[i][4], buf[i][5], buf[i][6], buf[i][7], buf[i][8],
+				buf[i][9], (int) ubuf(buf[i][7]).i, (int) ubuf(buf[i][8]).i, (int) ubuf(buf[i][9]).i);
 }
 
 /* ----------------------------------------------------------------------
@@ -1185,8 +1167,7 @@ void AtomVecSph2::write_data(FILE *fp, int n, double **buf) {
  ------------------------------------------------------------------------- */
 
 int AtomVecSph2::write_data_hybrid(FILE *fp, double *buf) {
-	error->one(FLERR,
-			"hybrid atom style functionality not yet implemented for atom style tlsph");
+	error->one(FLERR, "hybrid atom style functionality not yet implemented for atom style tlsph");
 	return -1;
 }
 
@@ -1209,8 +1190,7 @@ void AtomVecSph2::pack_vel(double **buf) {
  ------------------------------------------------------------------------- */
 
 int AtomVecSph2::pack_vel_hybrid(int i, double *buf) {
-	error->one(FLERR,
-			"hybrid atom style functionality not yet implemented for atom style tlsph");
+	error->one(FLERR, "hybrid atom style functionality not yet implemented for atom style tlsph");
 	return 0;
 }
 
@@ -1221,8 +1201,7 @@ int AtomVecSph2::pack_vel_hybrid(int i, double *buf) {
 void AtomVecSph2::write_vel(FILE *fp, int n, double **buf) {
 	for (int i = 0; i < n; i++)
 		fprintf(fp, TAGINT_FORMAT
-		" %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e\n",
-				(tagint) ubuf(buf[i][0]).i, buf[i][1], buf[i][2], buf[i][3],
+		" %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e %-1.16e\n", (tagint) ubuf(buf[i][0]).i, buf[i][1], buf[i][2], buf[i][3],
 				buf[i][4], buf[i][5], buf[i][6]);
 }
 
@@ -1231,8 +1210,7 @@ void AtomVecSph2::write_vel(FILE *fp, int n, double **buf) {
  ------------------------------------------------------------------------- */
 
 int AtomVecSph2::write_vel_hybrid(FILE *fp, double *buf) {
-	error->one(FLERR,
-			"hybrid atom style functionality not yet implemented for atom style tlsph");
+	error->one(FLERR, "hybrid atom style functionality not yet implemented for atom style tlsph");
 	return 3;
 }
 
@@ -1272,6 +1250,8 @@ bigint AtomVecSph2::memory_usage() {
 		bytes += memory->usage(rmass, nmax);
 	if (atom->memcheck("eff_plastic_strain"))
 		bytes += memory->usage(eff_plastic_strain, nmax);
+	if (atom->memcheck("eff_plastic_strain_rate"))
+		bytes += memory->usage(eff_plastic_strain_rate, nmax);
 	if (atom->memcheck("rho"))
 		bytes += memory->usage(rho, nmax);
 	if (atom->memcheck("drho"))

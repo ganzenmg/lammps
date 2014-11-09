@@ -95,7 +95,7 @@ Atom::Atom(LAMMPS *lmp) : Pointers(lmp)
   vest = NULL;
 
   // USER-SPH2
-  contact_radius = eff_plastic_strain = NULL;
+  contact_radius = eff_plastic_strain = eff_plastic_strain_rate = NULL;
   tlsph_fold = tlsph_stress = NULL;
   damage = NULL;
 
@@ -158,6 +158,7 @@ Atom::Atom(LAMMPS *lmp) : Pointers(lmp)
   tlsph_stress_flag = 0;
   x0_flag = 0;
   sph2_flag = 0;
+  eff_plastic_strain_rate_flag = 0;
 
   // Peridynamic scale factor
 

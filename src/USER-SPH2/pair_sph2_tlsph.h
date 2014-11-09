@@ -61,6 +61,7 @@ public:
 
 	void CheckIntegration();
 	void PreCompute();
+	void ComputeForces(int eflag, int vflag);
 	double TestMatricesEqual(Matrix3d, Matrix3d, double);
 	double effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev, Matrix3d sigma_dev_rate, double damage);
 
@@ -70,6 +71,11 @@ public:
 	void LinearStrength(double, Matrix3d, Matrix3d, double, Matrix3d *, Matrix3d*);
 	void LinearPlasticStrength(double, double, Matrix3d, Matrix3d, double, Matrix3d *, Matrix3d*, double *);
 	void LinearStrengthDefgrad(double, double, Matrix3d, Matrix3d *);
+	void JohnsonCookStrength(double G, double cp, double espec,
+			double A, double B, double a, double C, double epdot0, double T0, double Tmelt, double M, double dt,
+			double ep, double epdot,
+			Matrix3d sigmaInitial_dev, Matrix3d d_dev,
+			Matrix3d &sigmaFinal_dev__, Matrix3d &sigma_dev_rate__, double &plastic_strain_increment);
 
 	/*
 	 * EOS models
@@ -78,6 +84,8 @@ public:
 	void LinearCutoffEOS(double &, double &, double &, double &, double &, double &, double &);
 	void ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma,
 			double pInitial, double dt, double &pFinal, double &p_rate);
+	void polynomialEOS(double rho, double rho0, double e, double C0, double C1, double C2, double C3, double C4, double C5,
+			double C6, double pInitial, double dt, double &pFinal, double &p_rate);
 
 	/*
 	 * damage models
@@ -127,9 +135,11 @@ protected:
 	int updateFlag;
 
 	enum {
-		LINEAR, LINEAR_PLASTIC, NONE, LINEAR_DEFGRAD, LINEAR_CUTOFF, SHOCK_EOS
+		LINEAR, LINEAR_PLASTIC, NONE, LINEAR_DEFGRAD, LINEAR_CUTOFF, SHOCK_EOS, JOHNSON_COOK,
+		POLYNOMIAL_EOS
 	};
 
+	map< std::string, std::map< int, double > > commonProps;
 	map< std::string, std::map< int, double > > strengthProps;
 	map< std::string, std::map< int, double > > EOSProps;
 };
