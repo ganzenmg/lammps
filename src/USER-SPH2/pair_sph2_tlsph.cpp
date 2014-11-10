@@ -260,8 +260,8 @@ void PairTlsph::PreCompute() {
 //
 //				}
 
-				//Ftmp = du * g.transpose(); // only use displacement here, turns out to be numerically more stable
-				Ftmp = dx * g.transpose();
+				Ftmp = du * g.transpose(); // only use displacement here, turns out to be numerically more stable
+				//Ftmp = dx * g.transpose();
 				Fdottmp = dv * g.transpose();
 
 				K[i] += volj * Ktmp;
@@ -300,19 +300,17 @@ void PairTlsph::PreCompute() {
 
 			if (mol[i] > 0) {
 
-//				if (tag[i] == 9575) {
-//					cout << "Here is matrix F before corection:" << endl << Fincr[i] << endl << endl;
-//				}
 
 				if (domain->dimension == 2) {
 					K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
 					K[i](2, 2) = 1.0; // make inverse of K well defined even when it is rank-deficient (3d matrix, only 2d information)
 				} else {
-					K[i] = K[i].inverse().eval();
+					//K[i] = K[i].inverse().eval();
+					K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
 				}
 
 				Fincr[i] *= K[i];
-				//Fincr[i] += eye; // need to add identity matrix to comple the deformation gradient
+				Fincr[i] += eye; // need to add identity matrix to comple the deformation gradient
 				Fdot[i] *= K[i];
 
 				/*
@@ -342,8 +340,8 @@ void PairTlsph::PreCompute() {
 
 				if (mol[i] > 0) {
 					detF[i] = Fincr[i].determinant();
-					//FincrInv[i] = PairTlsph::pseudo_inverse_SVD(Fincr[i]);
-					FincrInv[i] = Fincr[i].inverse();
+					FincrInv[i] = PairTlsph::pseudo_inverse_SVD(Fincr[i]);
+					//FincrInv[i] = Fincr[i].inverse();
 
 					// velocity gradient, see Pronto2d, eqn.(2.1.3)
 					// I think that the incremental defgrad should be used here as we describe the motion relative to the reference configuration

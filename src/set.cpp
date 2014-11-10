@@ -618,28 +618,33 @@ void Set::set(int keyword)
     // else set rmass to density directly
 
     else if (keyword == DENSITY) {
-      if (dvalue <= 0.0) error->one(FLERR,"Invalid density in set command");
-      if (atom->radius_flag && atom->radius[i] > 0.0)
-        atom->rmass[i] = 4.0*MY_PI/3.0 *
-          atom->radius[i]*atom->radius[i]*atom->radius[i] * dvalue;
-      else if (atom->ellipsoid_flag && atom->ellipsoid[i] >= 0) {
-        double *shape = avec_ellipsoid->bonus[atom->ellipsoid[i]].shape;
-        atom->rmass[i] = 4.0*MY_PI/3.0 * shape[0]*shape[1]*shape[2] * dvalue;
-      } else if (atom->line_flag && atom->line[i] >= 0) {
-        double length = avec_line->bonus[atom->line[i]].length;
-        atom->rmass[i] = length * dvalue;
-      } else if (atom->tri_flag && atom->tri[i] >= 0) {
-        double *c1 = avec_tri->bonus[atom->tri[i]].c1;
-        double *c2 = avec_tri->bonus[atom->tri[i]].c2;
-        double *c3 = avec_tri->bonus[atom->tri[i]].c3;
-        double c2mc1[2],c3mc1[3];
-        MathExtra::sub3(c2,c1,c2mc1);
-        MathExtra::sub3(c3,c1,c3mc1);
-        double norm[3];
-        MathExtra::cross3(c2mc1,c3mc1,norm);
-        double area = 0.5 * MathExtra::len3(norm);
-        atom->rmass[i] = area * dvalue;
-      } else atom->rmass[i] = dvalue;
+    	//printf("setting mass density\n");
+    	atom->rmass[i] = atom->vfrac[i] * dvalue;
+//      if (dvalue <= 0.0) error->one(FLERR,"Invalid density in set command");
+//      if (atom->radius_flag && atom->radius[i] > 0.0)
+//        atom->rmass[i] = 4.0*MY_PI/3.0 *
+//          atom->radius[i]*atom->radius[i]*atom->radius[i] * dvalue;
+//      else if (atom->ellipsoid_flag && atom->ellipsoid[i] >= 0) {
+//        double *shape = avec_ellipsoid->bonus[atom->ellipsoid[i]].shape;
+//        atom->rmass[i] = 4.0*MY_PI/3.0 * shape[0]*shape[1]*shape[2] * dvalue;
+//      } else if (atom->line_flag && atom->line[i] >= 0) {
+//        double length = avec_line->bonus[atom->line[i]].length;
+//        atom->rmass[i] = length * dvalue;
+//      } else if (atom->tri_flag && atom->tri[i] >= 0) {
+//        double *c1 = avec_tri->bonus[atom->tri[i]].c1;
+//        double *c2 = avec_tri->bonus[atom->tri[i]].c2;
+//        double *c3 = avec_tri->bonus[atom->tri[i]].c3;
+//        double c2mc1[2],c3mc1[3];
+//        MathExtra::sub3(c2,c1,c2mc1);
+//        MathExtra::sub3(c3,c1,c3mc1);
+//        double norm[3];
+//        MathExtra::cross3(c2mc1,c3mc1,norm);
+//        double area = 0.5 * MathExtra::len3(norm);
+//        atom->rmass[i] = area * dvalue;
+//      } else if (atom->sph2_flag) {
+//    	  printf("setting mass density\n");
+//    	  atom->rmass[i] = atom->vfrac[i] * dvalue;
+//      } else atom->rmass[i] = dvalue;
     }
 
     // set dipole moment
