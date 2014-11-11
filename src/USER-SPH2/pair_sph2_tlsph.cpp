@@ -236,6 +236,8 @@ void PairTlsph::PreCompute() {
 
 				// distance vectors in current and reference configuration, velocity difference
 				dx = xj - xi;
+				if (periodic)
+						domain->minimum_image(dx(0), dx(1), dx(2));
 				dv = vj - vi;
 				dvint = vintj - vinti;
 				du = xj - x0j - (xi - x0i);
@@ -441,20 +443,20 @@ void PairTlsph::compute(int eflag, int vflag) {
 	 * initialize neighbor list pointer for time integration fix.
 	 * this needs to be done here beacuse fix is created after pair.
 	 */
-	if (update->ntimestep == 1) {
-
-		ifix_tlsph = -1;
-		for (int i = 0; i < modify->nfix; i++) {
-			printf("fix %d\n", i);
-			if (strcmp(modify->fix[i]->style, "sph2/integrate_tlsph") == 0)
-				ifix_tlsph = i;
-		}
-		if (ifix_tlsph == -1)
-			error->all(FLERR, "Fix ifix_tlsph does not exist");
-
-		fix_tlsph_time_integration = (FixSph2IntegrateTlsph *) modify->fix[ifix_tlsph];
-		fix_tlsph_time_integration->pair = this;
-	}
+//	if (update->ntimestep == 1) {
+//
+//		ifix_tlsph = -1;
+//		for (int i = 0; i < modify->nfix; i++) {
+//			printf("fix %d\n", i);
+//			if (strcmp(modify->fix[i]->style, "sph2/integrate_tlsph") == 0)
+//				ifix_tlsph = i;
+//		}
+//		if (ifix_tlsph == -1)
+//			error->all(FLERR, "Fix ifix_tlsph does not exist");
+//
+//		fix_tlsph_time_integration = (FixSph2IntegrateTlsph *) modify->fix[ifix_tlsph];
+//		fix_tlsph_time_integration->pair = this;
+//	}
 
 }
 

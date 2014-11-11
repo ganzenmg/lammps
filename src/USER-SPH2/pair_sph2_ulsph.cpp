@@ -204,6 +204,10 @@ void PairULSPH::PreCompute() {
 					}
 				}
 
+				// velocity gradient L
+				Ltmp = -dv * g.transpose();
+				L[i] += vfrac[j] * Ltmp;
+
 				shepardWeight[i] += vfrac[j] * wf;
 				smoothVel[i] += vfrac[j] * wf * dvint;
 				numNeighs[i] += 1;
@@ -219,6 +223,8 @@ void PairULSPH::PreCompute() {
 							rho[j] += wf * rmass[i];
 						}
 					}
+
+					L[j] += vfrac[i] * Ltmp;
 
 					shepardWeight[j] += vfrac[i] * wf;
 					smoothVel[j] -= vfrac[i] * wf * dvint;
@@ -585,6 +591,34 @@ void PairULSPH::ComputePressure() {
 				stressTensor[i](0, 0) = pFinal;
 				stressTensor[i](1, 1) = pFinal;
 				stressTensor[i](2, 2) = pFinal;
+
+				D = 0.5 * (L[i] + L[i].transpose());
+				W = 0.5 * (L[i] - L[i].transpose());
+//
+//				lambda1 = 0.02e3;
+//				lambda2 = 0.02e3;
+//
+//				kinvisc = 0.0;
+//				eta = kinvisc * C3[itype][itype]; // C3 is reference rho;
+//				mu_s = eta * lambda2 / lambda1;
+//				mu_e = eta - mu_s;
+//
+//				// elastic stress rate
+//				elaStressDot = (2. * mu_e / lambda1) * D
+//						- (1. / lambda1) * elaStress + W * elaStress
+//						- elaStress * W + D * elaStress + elaStress * D
+//						- L[i] * elaStress;
+//
+//				elaStress += dt * elaStressDot;
+//
+//				// Newtonian part of stress
+//				viscStress = mu_s * Deviator(D);
+
+				// total stress
+				//stressTensor[i] += elaStress + viscStress;
+				stressTensor[i] += 2.0 * C4[itype][itype] * D;
+
+				//printf("atom %d: p=%f, c0=%f, rho[i]=%g\n", i, pFinal, c0[i], rho[i]);
 
 				break;
 			case LINEAR_ELASTIC:
