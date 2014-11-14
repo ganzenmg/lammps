@@ -65,6 +65,9 @@ public:
 	double TestMatricesEqual(Matrix3d, Matrix3d, double);
 	double effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev, Matrix3d sigma_dev_rate, double damage);
 
+	void SmoothField();
+	void SmoothFieldXSPH();
+
 	/*
 	 * strength models
 	 */

@@ -106,9 +106,9 @@ void FixSph2IntegrateTlsph::init() {
 		if (mask[i] & groupbit) {
 
 			// re-set x0 coordinates
-			x0[i][0] = x[i][0];
-			x0[i][1] = x[i][1];
-			x0[i][2] = x[i][2];
+			//x0[i][0] = x[i][0];
+			//x0[i][1] = x[i][1];
+			//x0[i][2] = x[i][2];
 		}
 	}
 }
@@ -129,6 +129,7 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 	int *mask = atom->mask;
 	int nlocal = atom->nlocal;
 	int itmp;
+	double vxsph_x, vxsph_y, vxsph_z;
 	if (igroup == atom->firstgroup)
 		nlocal = atom->nfirst;
 
@@ -195,20 +196,28 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 				}
 			}
 
-			// extrapolate velocity from half- to full-step
-			vest[i][0] = v[i][0] + dtfm * f[i][0];
-			vest[i][1] = v[i][1] + dtfm * f[i][1];
-			vest[i][2] = v[i][2] + dtfm * f[i][2];
-
 			if (xsphFlag) {
-				vest[i][0] -= 0.5 * smoothVel[i](0); // extrapolated velocities need to be smoothed as well
-				vest[i][1] -= 0.5 * smoothVel[i](1);
-				vest[i][2] -= 0.5 * smoothVel[i](2);
 
-				x[i][0] += dtv * (v[i][0] - 0.5 * smoothVel[i](0));
-				x[i][1] += dtv * (v[i][1] - 0.5 * smoothVel[i](1));
-				x[i][2] += dtv * (v[i][2] - 0.5 * smoothVel[i](2));
+				// construct XSPH velocity
+
+				vxsph_x = v[i][0] + 0.5 * smoothVel[i](0);
+				vxsph_y = v[i][1] + 0.5 * smoothVel[i](1);
+				vxsph_z = v[i][2] + 0.5 * smoothVel[i](2);
+
+				vest[i][0] = v[i][0] + dtfm * f[i][0];
+				vest[i][1] = v[i][1] + dtfm * f[i][1];
+				vest[i][2] = v[i][2] + dtfm * f[i][2];
+
+				x[i][0] += dtv * vxsph_x;
+				x[i][1] += dtv * vxsph_y;
+				x[i][2] += dtv * vxsph_z;
 			} else {
+
+				// extrapolate velocity from half- to full-step
+				vest[i][0] = v[i][0] + dtfm * f[i][0];
+				vest[i][1] = v[i][1] + dtfm * f[i][1];
+				vest[i][2] = v[i][2] + dtfm * f[i][2];
+
 				x[i][0] += dtv * v[i][0];
 				x[i][1] += dtv * v[i][1];
 				x[i][2] += dtv * v[i][2];

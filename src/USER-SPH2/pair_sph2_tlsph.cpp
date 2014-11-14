@@ -261,7 +261,7 @@ void PairTlsph::PreCompute() {
 //				}
 
 				Ftmp = du * g.transpose(); // only use displacement here, turns out to be numerically more stable
-				//Ftmp = dx * g.transpose();
+						//Ftmp = dx * g.transpose();
 				Fdottmp = dv * g.transpose();
 
 				K[i] += volj * Ktmp;
@@ -299,7 +299,6 @@ void PairTlsph::PreCompute() {
 			}
 
 			if (mol[i] > 0) {
-
 
 				if (domain->dimension == 2) {
 					K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
@@ -426,6 +425,10 @@ void PairTlsph::compute(int eflag, int vflag) {
 		CauchyStress = new Matrix3d[nmax]; // memory usage: 9 doubles; total 118 doubles
 	}
 
+//	if (update->ntimestep % 1 == 0) {
+//	SmoothField();
+//	}
+
 	PairTlsph::PreCompute();
 	PairTlsph::AssembleStress();
 
@@ -441,21 +444,20 @@ void PairTlsph::compute(int eflag, int vflag) {
 	 * initialize neighbor list pointer for time integration fix.
 	 * this needs to be done here beacuse fix is created after pair.
 	 */
-	if (update->ntimestep == 1) {
-
-		ifix_tlsph = -1;
-		for (int i = 0; i < modify->nfix; i++) {
-			printf("fix %d\n", i);
-			if (strcmp(modify->fix[i]->style, "sph2/integrate_tlsph") == 0)
-				ifix_tlsph = i;
-		}
-		if (ifix_tlsph == -1)
-			error->all(FLERR, "Fix ifix_tlsph does not exist");
-
-		fix_tlsph_time_integration = (FixSph2IntegrateTlsph *) modify->fix[ifix_tlsph];
-		fix_tlsph_time_integration->pair = this;
-	}
-
+//	if (update->ntimestep == 1) {
+//
+//		ifix_tlsph = -1;
+//		for (int i = 0; i < modify->nfix; i++) {
+//			printf("fix %d\n", i);
+//			if (strcmp(modify->fix[i]->style, "sph2/integrate_tlsph") == 0)
+//				ifix_tlsph = i;
+//		}
+//		if (ifix_tlsph == -1)
+//			error->all(FLERR, "Fix ifix_tlsph does not exist");
+//
+//		fix_tlsph_time_integration = (FixSph2IntegrateTlsph *) modify->fix[ifix_tlsph];
+//		fix_tlsph_time_integration->pair = this;
+//	}
 }
 
 void PairTlsph::ComputeForces(int eflag, int vflag) {
@@ -468,14 +470,12 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	double *de = atom->de;
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
-	double *damage = atom->damage;
-	double *eff_plastic_strain = atom->eff_plastic_strain;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
 	int i, j, ii, jj, jnum, itype, jtype, iDim, inum;
 	double r, hg_mag, wf, wfd, h, r0, r0Sq, voli, volj;
 	double delVdotDelR, visc_magnitude, deltaE, mu_ij, c_ij, rho_ij;
-	double delta, hr;
+	double delta;
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
 	Vector3d fi, fj, dx0, dx, dv, f_stress, f_hg, dxp_i, dxp_j, gamma, g, gamma_i, gamma_j;
@@ -587,15 +587,33 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				/* SPH-like formulation */
 
-				delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
-				hg_mag = -hg_coeff[itype][jtype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
-				hg_mag *= voli * volj * wf * (youngsmodulus[itype] + youngsmodulus[jtype]); // hg_mag has dimensions [J*m^(-1)] = [N]
+//				delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
+//				hg_mag = -hg_coeff[itype][jtype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
+//				hg_mag *= voli * volj * wf * (youngsmodulus[itype] + youngsmodulus[jtype]); // hg_mag has dimensions [J*m^(-1)] = [N]
+//				/* scale hourglass correction to enable plastic flow */
+//				//if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j]) > 1.0e-2) {
+//				//	hg_mag = 0.1 * hg_mag;
+//				//}
+//				f_hg = (hg_mag / r) * dx;
+//				//printf("delta = %g, hg_mag = %g, coeff=%g, wf=%g, vi=%g, vj=%g, Ei=%f, Ej-%f\n",delta, hg_mag, hg_coeff[itype][jtype], wf, voli, volj,
+//				//		youngsmodulus[itype], youngsmodulus[jtype]);
 
-				/* scale hourglass correction to enable plastic flow */
-				//if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j]) > 1.0e-2) {
-				//	hg_mag = 0.1 * hg_mag;
-				//}
-				f_hg = (hg_mag / (r + 0.1 * h)) * dx;
+				/*
+				 * viscous hourglass formulation
+				 */
+				delta = gamma.dot(dx);
+				delVdotDelR = dx.dot(dv);
+				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
+				c_ij = 0.5 * (signal_vel0[itype] + signal_vel0[jtype]);
+				rho_ij = 0.5 * (rho0[itype] + rho0[jtype]);
+				if (delVdotDelR * delta < 0.0) {
+					hg_mag = -(gamma.norm() / r0) * hg_coeff[itype][jtype] * c_ij * mu_ij / rho_ij; // this has units of pressure
+					//f_hg.setZero();
+				} else {
+					hg_mag = 0.9 * (gamma.norm() / r0) * hg_coeff[itype][jtype] * c_ij * mu_ij / rho_ij; // this has units of pressure
+					f_hg.setZero();
+				}
+				f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
 
 				/*
 				 * maximum (symmetric damage factor)
@@ -1125,9 +1143,9 @@ void PairTlsph::AssembleStress() {
 					break;
 				}
 
-				if (eff_plastic_strain[i] > 1.0) {
-					shearFailureFlag[i] = true;
-				}
+//				if (eff_plastic_strain[i] > 10.0) {
+//					shearFailureFlag[i] = true;
+//				}
 				eff_plastic_strain[i] = MIN(eff_plastic_strain[i], 2.0);
 
 				/*
@@ -1159,7 +1177,7 @@ void PairTlsph::AssembleStress() {
 					if (pFinal < 0.0) {
 						sigma_damaged = pFinal * eye;
 					} else {
-						sigma_damaged	.setZero();
+						sigma_damaged.setZero();
 					}
 				}
 
@@ -1370,6 +1388,7 @@ void PairTlsph::coeff(int narg, char **arg) {
 		/*
 		 * assign properties which are defined for all material & eos models
 		 */
+		youngsmodulus[i] = youngsmodulus_one;
 		strengthModel[i] = mat_one;
 		eos[i] = eos_one;
 		lmbda0[i] = youngsmodulus_one * poissonr_one / ((1.0 + poissonr_one) * (1.0 - 2.0 * poissonr_one));
@@ -1388,6 +1407,7 @@ void PairTlsph::coeff(int narg, char **arg) {
 			printf("%40s : %g\n", "shear modulus", mu0[i]);
 			printf("%40s : %g\n", "reference density", rho0[i]);
 			printf("%40s : %g\n", "signal velocity", signal_vel0[i]);
+			printf("%40s : %g\n", "hourglass control coefficient", hg_one);
 			printf("%40s : %g\n", "linear viscosity coefficient", q1_one);
 			printf("%40s : %g\n", "quadratic viscosity coefficient", q2_one);
 			printf("%40s : %g\n", "heat capacity [energy / (mass * temperature)]", commonProps["heat_capacity"][i]);
@@ -1990,3 +2010,256 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 	return M;
 
 }
+
+/* ----------------------------------------------------------------------
+ smooth stress field
+ ------------------------------------------------------------------------- */
+
+void PairTlsph::SmoothField() {
+	int *mol = atom->molecule;
+	double *vfrac = atom->vfrac;
+	double *radius = atom->radius;
+	double **x0 = atom->x0;
+	double **tlsph_stress = atom->tlsph_stress;
+	int *ilist, *jlist, *numneigh;
+	int **firstneigh;
+	int nlocal = atom->nlocal;
+	int inum, jnum, ii, jj, i, j;
+	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
+	Vector3d dx0;
+	Matrix3d stress;
+	Matrix3d *average_stress;
+	double *norm;
+	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
+	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+
+	// allocate storage
+	average_stress = new Matrix3d[nlocal];
+	norm = new double[nlocal];
+
+	// zero accumulators
+	stress.setZero();
+	for (i = 0; i < nlocal; i++) {
+		stress(0, 0) = tlsph_stress[i][0];
+		stress(0, 1) = tlsph_stress[i][1];
+		stress(0, 2) = tlsph_stress[i][2];
+		stress(1, 1) = tlsph_stress[i][3];
+		stress(1, 2) = tlsph_stress[i][4];
+		stress(2, 2) = tlsph_stress[i][5];
+
+		h = 2.0 * radius[i];
+		r0 = 0.0;
+
+		kernel_and_derivative(h, r0, wf, wfd);
+		average_stress[i] = wf * vfrac[i] * stress;
+		norm[i] = wf * vfrac[i];
+	}
+
+	// set up neighbor list variables
+	inum = list->inum;
+	ilist = list->ilist;
+	numneigh = list->numneigh;
+	firstneigh = list->firstneigh;
+
+	for (ii = 0; ii < inum; ii++) {
+		i = ilist[ii];
+
+		if (mol[i] < 0) { // valid SPH particle have mol > 0
+			continue;
+		}
+
+		jlist = firstneigh[i];
+		jnum = numneigh[i];
+		irad = radius[i];
+		voli = vfrac[i];
+		x0i << x0[i][0], x0[i][1], x0[i][2];
+
+		for (jj = 0; jj < jnum; jj++) {
+			j = jlist[jj];
+			j &= NEIGHMASK;
+
+			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
+				continue;
+			}
+
+			if (mol[i] != mol[j]) {
+				continue;
+			}
+
+			x0j << x0[j][0], x0[j][1], x0[j][2];
+			dx0 = x0j - x0i;
+
+			if (periodic)
+				domain->minimum_image(dx0(0), dx0(1), dx0(2));
+
+			r0Sq = dx0.squaredNorm();
+			h = irad + radius[j];
+			if (r0Sq < h * h) {
+
+				r0 = sqrt(r0Sq);
+				volj = vfrac[j];
+
+				stress(0, 0) = tlsph_stress[j][0];
+				stress(0, 1) = tlsph_stress[j][1];
+				stress(0, 2) = tlsph_stress[j][2];
+				stress(1, 1) = tlsph_stress[j][3];
+				stress(1, 2) = tlsph_stress[j][4];
+				stress(2, 2) = tlsph_stress[j][5];
+
+				// kernel function
+				kernel_and_derivative(h, r0, wf, wfd);
+
+				average_stress[i] += wf * volj * stress;
+				norm[i] += volj * wf;
+
+				if (j < nlocal) {
+
+					stress(0, 0) = tlsph_stress[i][0];
+					stress(0, 1) = tlsph_stress[i][1];
+					stress(0, 2) = tlsph_stress[i][2];
+					stress(1, 1) = tlsph_stress[i][3];
+					stress(1, 2) = tlsph_stress[i][4];
+					stress(2, 2) = tlsph_stress[i][5];
+
+					average_stress[j] += wf * voli * stress;
+					norm[j] += voli * wf;
+				}
+
+			} // end if check distance
+		} // end loop over j
+	} // end loop over i
+
+	for (i = 0; i < nlocal; i++) {
+		stress = average_stress[i] / norm[i];
+
+		tlsph_stress[i][0] = stress(0, 0);
+		tlsph_stress[i][1] = stress(0, 1);
+		tlsph_stress[i][2] = stress(0, 2);
+		tlsph_stress[i][3] = stress(1, 1);
+		tlsph_stress[i][4] = stress(1, 2);
+		tlsph_stress[i][5] = stress(2, 2);
+
+	}
+
+}
+
+/* ----------------------------------------------------------------------
+ XSPH-like smoothing of stress field
+ ------------------------------------------------------------------------- */
+
+void PairTlsph::SmoothFieldXSPH() {
+	int *mol = atom->molecule;
+	double *vfrac = atom->vfrac;
+	double *radius = atom->radius;
+	double **x0 = atom->x0;
+	double **tlsph_stress = atom->tlsph_stress;
+	int *ilist, *jlist, *numneigh;
+	int **firstneigh;
+	int nlocal = atom->nlocal;
+	int inum, jnum, ii, jj, i, j;
+	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
+	Vector3d dx0;
+	Matrix3d stress_i, stress_j;
+	Matrix3d *stress_difference;
+	double *norm;
+	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
+	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+
+	// allocate storage
+	stress_difference = new Matrix3d[nlocal];
+	norm = new double[nlocal];
+
+	// zero accumulators
+	stress_i.setZero();
+	for (i = 0; i < nlocal; i++) {
+		stress_difference[i].setZero();
+		norm[i] = 0.0;
+	}
+
+	// set up neighbor list variables
+	inum = list->inum;
+	ilist = list->ilist;
+	numneigh = list->numneigh;
+	firstneigh = list->firstneigh;
+
+	for (ii = 0; ii < inum; ii++) {
+		i = ilist[ii];
+
+		if (mol[i] < 0) { // valid SPH particle have mol > 0
+			continue;
+		}
+
+		jlist = firstneigh[i];
+		jnum = numneigh[i];
+		irad = radius[i];
+		voli = vfrac[i];
+		x0i << x0[i][0], x0[i][1], x0[i][2];
+
+		stress_i(0, 0) = tlsph_stress[i][0];
+		stress_i(0, 1) = tlsph_stress[i][1];
+		stress_i(0, 2) = tlsph_stress[i][2];
+		stress_i(1, 1) = tlsph_stress[i][3];
+		stress_i(1, 2) = tlsph_stress[i][4];
+		stress_i(2, 2) = tlsph_stress[i][5];
+
+		for (jj = 0; jj < jnum; jj++) {
+			j = jlist[jj];
+			j &= NEIGHMASK;
+
+			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
+				continue;
+			}
+
+			if (mol[i] != mol[j]) {
+				continue;
+			}
+
+			x0j << x0[j][0], x0[j][1], x0[j][2];
+			dx0 = x0j - x0i;
+
+			if (periodic)
+				domain->minimum_image(dx0(0), dx0(1), dx0(2));
+
+			r0Sq = dx0.squaredNorm();
+			h = irad + radius[j];
+			if (r0Sq < h * h) {
+
+				r0 = sqrt(r0Sq);
+				volj = vfrac[j];
+
+				stress_j(0, 0) = tlsph_stress[j][0];
+				stress_j(0, 1) = tlsph_stress[j][1];
+				stress_j(0, 2) = tlsph_stress[j][2];
+				stress_j(1, 1) = tlsph_stress[j][3];
+				stress_j(1, 2) = tlsph_stress[j][4];
+				stress_j(2, 2) = tlsph_stress[j][5];
+
+				// kernel function
+				kernel_and_derivative(h, r0, wf, wfd);
+
+				stress_difference[i] += wf * volj * (stress_j - stress_i);
+				norm[i] += volj * wf;
+
+				if (j < nlocal) {
+
+					stress_difference[j] += wf * voli * (stress_i - stress_j);
+					norm[j] += voli * wf;
+				}
+
+			} // end if check distance
+		} // end loop over j
+	} // end loop over i
+
+	for (i = 0; i < nlocal; i++) {
+
+		tlsph_stress[i][0] += stress_difference[i](0, 0) / norm[i];
+		tlsph_stress[i][1] += stress_difference[i](0, 1) / norm[i];
+		tlsph_stress[i][2] += stress_difference[i](0, 2) / norm[i];
+		tlsph_stress[i][3] += stress_difference[i](1, 1) / norm[i];
+		tlsph_stress[i][4] += stress_difference[i](1, 2) / norm[i];
+		tlsph_stress[i][5] += stress_difference[i](2, 2) / norm[i];
+
+	}
+
+}
+
