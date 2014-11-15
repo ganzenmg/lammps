@@ -41,8 +41,6 @@ public:
 	double init_one(int, int);
 	void init_style();
 	void init_list(int, class NeighList *);
-	void write_restart(FILE *);
-	void read_restart(FILE *);
 	void write_restart_settings(FILE *) {
 	}
 	void read_restart_settings(FILE *) {
@@ -84,7 +82,7 @@ public:
 	 * EOS models
 	 */
 	void LinearEOS(double lambda, double pInitial, double d, double dt, double &pFinal, double &p_rate);
-	void LinearCutoffEOS(double &, double &, double &, double &, double &, double &, double &);
+	//void LinearCutoffEOS(double &, double &, double &, double &, double &, double &, double &);
 	void ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma,
 			double pInitial, double dt, double &pFinal, double &p_rate);
 	void polynomialEOS(double rho, double rho0, double e, double C0, double C1, double C2, double C3, double C4, double C5,
@@ -104,15 +102,15 @@ protected:
 	/*
 	 * per-type arrays
 	 */
-	double *youngsmodulus, *poissonr, *lmbda0, *mu0, *signal_vel0, *rho0;
+	double *youngsmodulus, *signal_vel0, *rho0;
 	int *strengthModel, *eos;
 	double *onerad_dynamic, *onerad_frozen, *maxrad_dynamic, *maxrad_frozen;
 
 	/*
 	 * per type pair arrays
 	 */
-	double **Q1, **Q2;
-	double **hg_coeff;
+	double *Q1, *Q2;
+	double *hg_coeff;
 
 
 	/*
@@ -138,18 +136,23 @@ protected:
 	int updateFlag;
 
 	enum {
-		LINEAR, LINEAR_PLASTIC, NONE, LINEAR_DEFGRAD, LINEAR_CUTOFF, SHOCK_EOS, JOHNSON_COOK,
-		POLYNOMIAL_EOS
+		LINEAR_DEFGRAD, LINEAR_STRENGTH, LINEAR_PLASTICITY, STRENGTH_JOHNSON_COOK,
+		EOS_LINEAR, EOS_SHOCK, EOS_POLYNOMIAL,
+		NONE
 	};
 
-	map< std::string, std::map< int, double > > commonProps;
-	map< std::string, std::map< int, double > > strengthProps;
-	map< std::string, std::map< int, double > > EOSProps;
+	map< std::string, std::map< int, double > > matProp;
+	typedef std::map<std::pair<std::string, int>, double> Dict;
+
+	Dict matProp2;
 
 	int ifix_tlsph;
 	int not_first;
 
 	class FixSph2IntegrateTlsph *fix_tlsph_time_integration;
+
+private:
+	double SafeLookup(const char *str, int itype);
 };
 
 }
