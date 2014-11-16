@@ -88,7 +88,7 @@ void FixSph2TlsphDtReset::setup(int vflag) {
 void FixSph2TlsphDtReset::initial_integrate(int vflag) {
 	// calculate elapsed time based on previous reset timestep
 
-	t_elapsed = t_laststep + (update->ntimestep - laststep) * dt;
+	t_elapsed = t_laststep + (update->ntimestep - laststep) * update->dt;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -116,7 +116,9 @@ void FixSph2TlsphDtReset::end_of_step() {
 	if (dt == update->dt)
 		return;
 
-	t_elapsed = t_laststep += (update->ntimestep - laststep) * update->dt;
+
+	t_elapsed = t_laststep + (update->ntimestep - laststep) * update->dt;
+	t_laststep = t_elapsed;
 	laststep = update->ntimestep;
 
 	update->dt = dt;

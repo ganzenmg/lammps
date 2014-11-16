@@ -126,6 +126,7 @@ protected:
 	Vector3d *smoothVel;
 	Matrix3d *CauchyStress;
 	double *detF, *p_wave_speed, *shepardWeight;
+	double *hourglass_error;
 	bool *shearFailureFlag;
 	int *numNeighsRefConfig;
 
@@ -141,10 +142,11 @@ protected:
 		NONE
 	};
 
-	map< std::string, std::map< int, double > > matProp;
+	//map< std::string, std::map< int, double > > matProp;
 	typedef std::map<std::pair<std::string, int>, double> Dict;
 
 	Dict matProp2;
+	typedef Dict::const_iterator It;
 
 	int ifix_tlsph;
 	int not_first;
@@ -152,7 +154,8 @@ protected:
 	class FixSph2IntegrateTlsph *fix_tlsph_time_integration;
 
 private:
-	double SafeLookup(const char *str, int itype);
+	double SafeLookup(std::string str, int itype);
+	bool CheckKeywordPresent(std::string str, int itype);
 };
 
 }

@@ -27,11 +27,10 @@ velocity        all set 0.0 0.0 0.0 sum no units box
 set             group all diameter ${h}
 
 pair_style      tlsph
-#                   strength         eos    rh0    E    nu    Q1    Q2   hg    Cp
+#                           rh0    E    nu    Q1    Q2   hg    Cp
 pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  5.0 1.0 &
                 *LINEAR_DEFGRAD &
                 *END
-#pair_coeff      1 1 linear           linear ${c0} ${E} ${nu} ${hg} 0.0 1000000
 
 compute         E all sph2/tlsph_strain
 compute         S all sph2/tlsph_stress
