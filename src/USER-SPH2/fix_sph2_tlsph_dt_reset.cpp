@@ -110,6 +110,7 @@ void FixSph2TlsphDtReset::end_of_step() {
 
 	MPI_Allreduce(&dtmin, &dt, 1, MPI_DOUBLE, MPI_MIN, world);
 
+
 // if timestep didn't change, just return
 // else reset update->dt and other classes that depend on it
 
@@ -127,6 +128,7 @@ void FixSph2TlsphDtReset::end_of_step() {
 	for (int i = 0; i < modify->nfix; i++)
 		modify->fix[i]->reset_dt();
 }
+
 
 /* ---------------------------------------------------------------------- */
 

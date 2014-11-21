@@ -101,7 +101,7 @@ void PairHertz::compute(int eflag, int vflag) {
         ytmp = x[i][1];
         ztmp = x[i][2];
         itype = type[i];
-        ri = 1.5 * radius[i];
+        ri = 1.1 * radius[i];
         jlist = firstneigh[i];
         jnum = numneigh[i];
 
@@ -119,7 +119,7 @@ void PairHertz::compute(int eflag, int vflag) {
             rsq = delx * delx + dely * dely + delz * delz;
 
 
-            rj = 1.5 * radius[j];
+            rj = 1.1 * radius[j];
 
             r = sqrt(rsq);
             rcut = ri + rj;

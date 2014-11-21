@@ -51,7 +51,8 @@ public:
 	void *extract(const char *, int &);
 	int pack_forward_comm(int, int *, double *, int, int *);
 	void unpack_forward_comm(int, int, double *);
-	void kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
+	void spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
+	void barbara_kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
 	Matrix3d pseudo_inverse_SVD(Matrix3d);
 	void PolDec(Matrix3d &, Matrix3d *, Matrix3d *);
 	void AssembleStress();
@@ -95,6 +96,8 @@ public:
 			double &damage, Matrix3d &S_damaged);
 	void IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStress, double dt, double soundspeed, double characteristicLength,
 				double &damage, Matrix3d &S_damaged);
+	double JohnsonCookFailureStrain(double p, Matrix3d Sdev, double d1, double d2, double d3, double d4, double epdot0,
+			double epdot);
 
 protected:
 	void allocate();

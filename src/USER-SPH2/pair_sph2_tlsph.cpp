@@ -239,7 +239,7 @@ void PairTlsph::PreCompute() {
 				du = xj - x0j - (xi - x0i);
 
 				// kernel function
-				kernel_and_derivative(h, r0, wf, wfd);
+				spiky_kernel_and_derivative(h, r0, wf, wfd);
 
 				// uncorrected kernel gradient
 				g = (wfd / r0) * dx0;
@@ -313,7 +313,7 @@ void PairTlsph::PreCompute() {
 				/*
 				 * we need to be able to recover from a potentially planar (2d) configuration of particles
 				 */
-				if ((domain->dimension == 2)) {
+				if (domain->dimension == 2) {
 					Fincr[i](2, 2) = 1.0;
 				}
 
@@ -470,6 +470,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	double *de = atom->de;
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
+	double *plastic_strain = atom->eff_plastic_strain;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
 	int i, j, ii, jj, jnum, itype, iDim, inum;
@@ -568,7 +569,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				// derivative of kernel function and reference distance
 				// kernel function
-				kernel_and_derivative(h, r0, wf, wfd);
+				spiky_kernel_and_derivative(h, r0, wf, wfd);
 				//printf("wf = %f, wfd = %f\n", wf, wfd);
 
 				// current distance
@@ -587,11 +588,19 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				 * artificial viscosity
 				 */
 
+				// because hourglass control and artificial viscosity are evaluated using the current coordinates,
+				// call kernel and kernel gradient with current separation
+				//barbara_kernel_and_derivative(h, r, wf, wfd);
 				delVdotDelR = dx.dot(dv);
 				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
-				visc_magnitude = -Q1[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
+				//if (delVdotDelR < 0.0) {
+
+				visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // this has units of pressure
 				//printf("visc_magnitude = %f, c_ij=%f, mu_ij=%f\n", visc_magnitude, c_ij, mu_ij);
 				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h);
+				//} else {
+				//	f_visc.setZero();
+				//}
 
 				/*
 				 * hourglass deviation of particles i and j
@@ -603,7 +612,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				/* SPH-like formulation */
 
-				if (hg_coeff[itype] > 0.0) {
+				//if (hg_coeff[itype] > 0.0) {
+				if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-3) {
 
 					/*
 					 * viscous hourglass formulation
@@ -617,7 +627,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					}
 					f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
 
-				} else if (hg_coeff[itype] < 0.0) {
+				} else {
+					//} else if (hg_coeff[itype] < 0.0) {
 
 					/*
 					 * stiffness hourglass formulation
@@ -625,14 +636,15 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 					delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
 					hg_mag = hg_coeff[itype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
-					hg_mag *= voli * volj * wf * youngsmodulus[itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
+					hg_mag *= -voli * volj * wf * youngsmodulus[itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
 					f_hg = (hg_mag / r) * dx;
 					//printf("delta = %g, hg_mag = %g, coeff=%g, wf=%g, vi=%g, vj=%g, Ei=%f, Ej-%f\n",delta, hg_mag, hg_coeff[itype][jtype], wf, voli, volj,
 					//		youngsmodulus[itype], youngsmodulus[jtype]);
 
-				} else {
-					f_hg.setZero();
 				}
+				//else {
+				//	f_hg.setZero();
+				//}
 
 				// sum stress, viscous, and hourglass forces
 				//cout << "fstress: " << f_stress << endl;
@@ -1053,54 +1065,54 @@ void PairTlsph::AssembleStress() {
 				 * material strength
 				 */
 
-				switch (strengthModel[itype]) {
-				case LINEAR_STRENGTH:
-					//printf("mu0 is %f\n", mu0[itype]);
-					LinearStrength(SafeLookup("lame_mu", itype), sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
-					break;
-				case LINEAR_DEFGRAD:
-					LinearStrengthDefgrad(SafeLookup("lame_lambda", itype), SafeLookup("lame_mu", itype), Fincr[i],
-							&sigmaFinal_dev);
-					eff_plastic_strain[i] = 0.0;
-					p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
-					sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
-					R[i].setIdentity();
-					break;
-				case LINEAR_PLASTICITY:
-					LinearPlasticStrength(SafeLookup("lame_mu", itype), SafeLookup("yield_stress0", itype), sigmaInitial_dev, d_dev,
-							dt, &sigmaFinal_dev, &sigma_dev_rate, &plastic_strain_increment);
-					eff_plastic_strain[i] += plastic_strain_increment;
+				if (damage[i] < 1.0) {
 
-					eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
-					eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
-					break;
-				case STRENGTH_JOHNSON_COOK:
-					JohnsonCookStrength(SafeLookup("lame_mu", itype), SafeLookup("heat_capacity", itype), mass_specific_energy,
-							SafeLookup("JC_A", itype), SafeLookup("JC_B", itype), SafeLookup("JC_a", itype),
-							SafeLookup("JC_C", itype), SafeLookup("JC_epdot0", itype), SafeLookup("JC_T0", itype),
-							SafeLookup("JC_Tmelt", itype), SafeLookup("JC_M", itype), dt, eff_plastic_strain[i],
-							eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev, sigmaFinal_dev, sigma_dev_rate,
-							plastic_strain_increment);
+					switch (strengthModel[itype]) {
+					case LINEAR_STRENGTH:
+						//printf("mu0 is %f\n", mu0[itype]);
+						LinearStrength(SafeLookup("lame_mu", itype), sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
+						break;
+					case LINEAR_DEFGRAD:
+						LinearStrengthDefgrad(SafeLookup("lame_lambda", itype), SafeLookup("lame_mu", itype), Fincr[i],
+								&sigmaFinal_dev);
+						eff_plastic_strain[i] = 0.0;
+						p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
+						sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
+						R[i].setIdentity();
+						break;
+					case LINEAR_PLASTICITY:
+						LinearPlasticStrength(SafeLookup("lame_mu", itype), SafeLookup("yield_stress0", itype), sigmaInitial_dev,
+								d_dev, dt, &sigmaFinal_dev, &sigma_dev_rate, &plastic_strain_increment);
+						eff_plastic_strain[i] += plastic_strain_increment;
 
-					eff_plastic_strain[i] += plastic_strain_increment;
+						eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
+						eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
+						break;
+					case STRENGTH_JOHNSON_COOK:
+						JohnsonCookStrength(SafeLookup("lame_mu", itype), SafeLookup("heat_capacity", itype), mass_specific_energy,
+								SafeLookup("JC_A", itype), SafeLookup("JC_B", itype), SafeLookup("JC_a", itype),
+								SafeLookup("JC_C", itype), SafeLookup("JC_epdot0", itype), SafeLookup("JC_T0", itype),
+								SafeLookup("JC_Tmelt", itype), SafeLookup("JC_M", itype), dt, eff_plastic_strain[i],
+								eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev, sigmaFinal_dev, sigma_dev_rate,
+								plastic_strain_increment);
 
-					eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
-					eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
+						eff_plastic_strain[i] += plastic_strain_increment;
 
-					break;
-				case NONE:
-					sigmaFinal_dev.setZero();
-					sigma_dev_rate.setZero();
-					break;
-				default:
-					error->one(FLERR, "unknown strength model.");
-					break;
+						eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
+						eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
+
+						break;
+					case NONE:
+						sigmaFinal_dev.setZero();
+						sigma_dev_rate.setZero();
+						break;
+					default:
+						error->one(FLERR, "unknown strength model.");
+						break;
+					}
+				} else {
+					sigmaFinal_dev.setZero(); // damage[i] >= 1, therefore it cannot carry shear stress
 				}
-
-//				if (eff_plastic_strain[i] > 10.0) {
-//					shearFailureFlag[i] = true;
-//				}
-				eff_plastic_strain[i] = MIN(eff_plastic_strain[i], 2.0);
 
 				/*
 				 *  assemble total stress from pressure and deviatoric stress
@@ -1116,28 +1128,54 @@ void PairTlsph::AssembleStress() {
 				/*
 				 *  failure criteria
 				 */
-				if (CheckKeywordPresent("failure_max_principal_stress", itype)) {
-					/*
-					 * maximum stress failure criterion:
-					 */
-					IsotropicMaxStressDamage(sigmaFinal, SafeLookup("failure_max_principal_stress", itype), dt, signal_vel0[itype],
-							radius[i], damage[i], sigma_damaged);
-				}
-				if (CheckKeywordPresent("failure_max_principal_strain", itype)) {
-					/*
-					 * maximum strain failure criterion:
-					 */
-					E = 0.5 * (Fincr[i] * Fincr[i].transpose() - eye);
-					IsotropicMaxStrainDamage(E, sigmaFinal, SafeLookup("failure_max_principal_strain", itype), dt,
-							signal_vel0[itype], radius[i], damage[i], sigma_damaged);
-				}
 
-				if (CheckKeywordPresent("failure_max_plastic_strain", itype)) {
-					if (pFinal < 0.0) {
-						sigma_damaged = pFinal * eye;
-					} else {
-						sigma_damaged.setZero();
+				if (damage[i] < 1.0) {
+
+					if (CheckKeywordPresent("failure_max_principal_stress", itype)) {
+						/*
+						 * maximum stress failure criterion:
+						 */
+						IsotropicMaxStressDamage(sigmaFinal, SafeLookup("failure_max_principal_stress", itype), dt,
+								signal_vel0[itype], radius[i], damage[i], sigma_damaged);
 					}
+					if (CheckKeywordPresent("failure_max_principal_strain", itype)) {
+						/*
+						 * maximum strain failure criterion:
+						 */
+						E = 0.5 * (Fincr[i] * Fincr[i].transpose() - eye);
+						IsotropicMaxStrainDamage(E, sigmaFinal, SafeLookup("failure_max_principal_strain", itype), dt,
+								signal_vel0[itype], radius[i], damage[i], sigma_damaged);
+					}
+
+					if (CheckKeywordPresent("failure_max_plastic_strain", itype)) {
+
+						if (eff_plastic_strain[i] >= SafeLookup("failure_max_plastic_strain", itype)) {
+							damage[i] = 1.0;
+							eff_plastic_strain[i] = SafeLookup("failure_max_plastic_strain", itype);
+						}
+					}
+
+					if (CheckKeywordPresent("failure_JC_d1", itype)) {
+
+						if (plastic_strain_increment > 0.0) {
+							if (damage[i] < 1.0) {
+								double jc_failure_strain = JohnsonCookFailureStrain(pFinal, sigmaFinal_dev,
+										SafeLookup("failure_JC_d1", itype), SafeLookup("failure_JC_d2", itype),
+										SafeLookup("failure_JC_d3", itype), SafeLookup("failure_JC_d4", itype),
+										SafeLookup("failure_JC_epdot0", itype), eff_plastic_strain_rate[i]);
+
+								//cout << "plastic strain increment is " << plastic_strain_increment << "  jc fs is " << jc_failure_strain << endl;
+								if (eff_plastic_strain[i] / jc_failure_strain > 1.0) {
+									damage[i] = 1.0;
+								}
+							}
+
+						}
+					}
+				} // end if damage[i] < 1.0
+
+				if (damage[i] >= 1.0) {
+					sigma_damaged = pFinal * eye;
 				}
 
 				/*
@@ -1653,7 +1691,7 @@ void PairTlsph::coeff(int narg, char **arg) {
 			}
 		} // end polynomial eos
 
-		else if (strcmp(arg[ioffset], "*FAILURE_MAX_PLASTIC_SRTRAIN") == 0) {
+		else if (strcmp(arg[ioffset], "*FAILURE_MAX_PLASTIC_STRAIN") == 0) {
 
 			/*
 			 * maximum plastic strain failure criterion
@@ -1672,12 +1710,12 @@ void PairTlsph::coeff(int narg, char **arg) {
 			}
 
 			if (iNextKwd < 0) {
-				sprintf(str, "no *KEYWORD terminates *FAILURE_MAX_PLASTIC_SRTRAIN");
+				sprintf(str, "no *KEYWORD terminates *FAILURE_MAX_PLASTIC_STRAIN");
 				error->all(FLERR, str);
 			}
 
 			if (iNextKwd - ioffset != 1 + 1) {
-				sprintf(str, "expected 1 arguments following *FAILURE_MAX_PLASTIC_SRTRAIN but got %d\n", iNextKwd - ioffset - 1);
+				sprintf(str, "expected 1 arguments following *FAILURE_MAX_PLASTIC_STRAIN but got %d\n", iNextKwd - ioffset - 1);
 				error->all(FLERR, str);
 			}
 
@@ -1725,8 +1763,46 @@ void PairTlsph::coeff(int narg, char **arg) {
 						SafeLookup("failure_max_principal_strain", itype));
 			}
 		} // end maximum principal strain failure criterion
+		else if (strcmp(arg[ioffset], "*FAILURE_JOHNSON_COOK") == 0) {
 
-		else if (strcmp(arg[ioffset], "*FAILURE_MAX_PRINCIPAL_STRESS") == 0) {
+			printf("reading *FAILURE_JOHNSON_COOK\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *FAILURE_JOHNSON_COOK");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 5 + 1) {
+				sprintf(str, "expected 5 arguments following *FAILURE_JOHNSON_COOK but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("failure_JC_d1", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+			matProp2[std::make_pair("failure_JC_d2", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
+			matProp2[std::make_pair("failure_JC_d3", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+			matProp2[std::make_pair("failure_JC_d4", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
+			matProp2[std::make_pair("failure_JC_epdot0", itype)] = force->numeric(FLERR, arg[ioffset + 5]);
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "Johnson-Cook failure criterion");
+				printf("%60s : %g\n", "parameter d1", SafeLookup("failure_JC_d1", itype));
+				printf("%60s : %g\n", "parameter d2", SafeLookup("failure_JC_d2", itype));
+				printf("%60s : %g\n", "parameter d3", SafeLookup("failure_JC_d3", itype));
+				printf("%60s : %g\n", "parameter d4", SafeLookup("failure_JC_d4", itype));
+				printf("%60s : %g\n", "reference plastic strain rate", SafeLookup("failure_JC_epdot0", itype));
+			}
+
+		} else if (strcmp(arg[ioffset], "*FAILURE_MAX_PRINCIPAL_STRESS") == 0) {
 
 			/*
 			 * maximum principal stress failure criterion
@@ -1967,7 +2043,7 @@ void PairTlsph::unpack_forward_comm(int n, int first, double *buf) {
 	}
 }
 
-void PairTlsph::kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
+void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
 
 	/*
 	 * Spiky kernel
@@ -1982,6 +2058,23 @@ void PairTlsph::kernel_and_derivative(const double h, const double r, double &wf
 		double hr = h - r; // [m]
 		wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
 		wf = -0.333333333333e0 * hr * wfd; // [m/m^4] ==> [1/m^3] correct for W in 3D
+	}
+
+}
+
+void PairTlsph::barbara_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
+
+	/*
+	 * Barbara kernel
+	 */
+
+	if (domain->dimension == 2) {
+		double arg = (1.570796327 * (r + h)) / h;
+		double hsq = h * h;
+		wf = (1.680351548 * (cos(arg) + 1.)) / hsq;
+		wfd = -2.639490040 * sin(arg) / (hsq * h);
+	} else {
+		error->one(FLERR, "not implemented yet");
 	}
 
 }
@@ -2160,6 +2253,21 @@ void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrai
 	}
 }
 
+double PairTlsph::JohnsonCookFailureStrain(double p, Matrix3d Sdev, double d1, double d2, double d3, double d4, double epdot0,
+		double epdot) {
+
+	double vm = sqrt(3. / 2.) * Sdev.norm(); // von-Mises equivalent stress
+	double epdot_ratio = epdot / epdot0;
+	epdot_ratio = MAX(epdot_ratio, 1.0);
+	double result = d1 + d2 * exp(d3 * vm / p); // * (1.0 + d4 * log(epdot_ratio)); // rest left out for now
+	if (result > 0.0) {
+		return result;
+	} else {
+		return 1.0e22;
+	}
+
+}
+
 /* ----------------------------------------------------------------------
  compute effectiveP-wave speed
  determined by longitudinal modulus
@@ -2175,23 +2283,22 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 
 	M0 = SafeLookup("m_modulus", itype);
 
-	if (dt * d_iso > 1.0e-1) {
-		K3 = 3.0 * p_rate / (dt * d_iso);
+	if (dt * d_iso > 1.0e-6) {
+		K3 = 3.0 * p_rate / d_iso;
 	} else {
 		K3 = 3.0 * M0;
 	}
 
 	if (domain->dimension == 3) {
-		mu2 = sigma_dev_rate(0, 1) / (dt * d_dev(0, 1)) + sigma_dev_rate(0, 2) / (dt * d_dev(0, 2))
-				+ sigma_dev_rate(1, 2) / (dt * d_dev(1, 2));
+		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1)) + sigma_dev_rate(0, 2) / (d_dev(0, 2)) + sigma_dev_rate(1, 2) / (d_dev(1, 2));
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1) + d_dev(0, 2) * d_dev(0, 2) + d_dev(1, 2) * d_dev(1, 2);
 	} else {
-		mu2 = sigma_dev_rate(0, 1) / (dt * d_dev(0, 1));
+		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1));
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1);
 	}
 
 	if (dt * dt * shear_rate_sq < 1.0e-8) {
-		mu2 = 0.5 * (3.0 * M0 - K3);
+		mu2 = 0.5 * (3.0 * M0 - K3); // Formel stimmt
 	}
 
 	M = (K3 + 2.0 * mu2) / 3.0; // effective dilational modulus, see Pronto 2d eqn 3.4.8
@@ -2252,7 +2359,7 @@ void PairTlsph::SmoothField() {
 		h = 2.0 * radius[i];
 		r0 = 0.0;
 
-		kernel_and_derivative(h, r0, wf, wfd);
+		spiky_kernel_and_derivative(h, r0, wf, wfd);
 		average_stress[i] = wf * vfrac[i] * stress;
 		norm[i] = wf * vfrac[i];
 	}
@@ -2309,7 +2416,7 @@ void PairTlsph::SmoothField() {
 				stress(2, 2) = tlsph_stress[j][5];
 
 				// kernel function
-				kernel_and_derivative(h, r0, wf, wfd);
+				spiky_kernel_and_derivative(h, r0, wf, wfd);
 
 				average_stress[i] += wf * volj * stress;
 				norm[i] += volj * wf;
@@ -2437,7 +2544,7 @@ void PairTlsph::SmoothFieldXSPH() {
 				stress_j(2, 2) = tlsph_stress[j][5];
 
 				// kernel function
-				kernel_and_derivative(h, r0, wf, wfd);
+				spiky_kernel_and_derivative(h, r0, wf, wfd);
 
 				stress_difference[i] += wf * volj * (stress_j - stress_i);
 				norm[i] += volj * wf;

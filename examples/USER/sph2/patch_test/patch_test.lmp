@@ -28,7 +28,7 @@ set             group all diameter ${h}
 
 pair_style      tlsph
 #                           rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  5.0 1.0 &
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.05  0.0  0.0 1.0 &
                 *LINEAR_DEFGRAD &
                 *END
 
@@ -39,6 +39,9 @@ compute         contact_radius all sph2/contact_radius
 compute         eint all sph2/internal_energy
 compute         toteint all reduce sum c_eint
 variable        et equal ke+c_toteint
+variable        patom atom -0.5*(c_S[1]+c_S[2])
+compute         totpres all reduce ave v_patom
+
 
 
 dump            dump_id all custom 100 dump.LAMMPS id type x y z diameter fx fy z &
@@ -60,7 +63,8 @@ variable           time equal dt*elapsed
 variable           ke equal ke
 variable           te equal etotal
 variable           ie equal c_toteint
-fix                fd_curve all print 5 "${time} ${ke} ${ie} ${te}" file time_ke.dat screen no
+variable           p equal c_totpres
+fix                fd_curve all print 5 "${time} ${ke} ${ie} ${te} ${p}" file time_ke.dat screen no
 #
 ## time integration
 timestep        ${dt}

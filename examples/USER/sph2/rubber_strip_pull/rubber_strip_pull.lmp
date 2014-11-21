@@ -1,6 +1,6 @@
 variable        l0 equal 1.0/15
 variable        rho equal 1
-variable        h equal 2.01*${l0}
+variable        h equal 3.01*${l0}
 variable        E equal 1.0 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
 variable        G equal ${E}/(2*(1.0+${nu}))
@@ -21,7 +21,7 @@ dimension       2
 boundary        s s p
 atom_style      tlsph
 neighbor        ${skin} bin
-neigh_modify    every 1 delay 0 check yes
+neigh_modify    once yes #every 1 delay 0 check yes
 newton          off
 comm_modify     vel yes
 
@@ -46,7 +46,7 @@ group           free subtract all top bot
 
 pair_style      tlsph
 #                           rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  0.0 1.0 &
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.06  0.0  100.0 1.0 &
                 *LINEAR_STRENGTH &
 		*EOS_LINEAR &
                 *END
@@ -75,19 +75,19 @@ run             2
 
 timestep        ${dt}
 fix             dtfix all sph2/tlsph_dt_reset 5 0.1
+variable        stress equal (f_botfix[2]-f_topfix[2])/2.0
+variable        strain equal (2.0*${vel}*f_dtfix[1])/2.0
 thermo 100
-thermo_style    custom step ke dt f_dtfix[1] time
+thermo_style    custom step ke dt f_dtfix[1] v_strain
 velocity        top set 0.0  ${vel} 0.0 sum no units box
 velocity        bot set 0.0 -${vel} 0.0 sum no units box
 fix             topfix top setforce 0 0 0
 fix             botfix bot setforce 0 0 0
 fix             integration_fix all  sph2/integrate_tlsph 1.5e3 -1 update
-variable        stress equal (f_botfix[2]-f_topfix[2])/2.0
-variable        strain equal (2.0*${vel}*f_dtfix[1])/2.0
-variable        theo_stress equal ${E}*v_strain
-fix             stress_curve all print 10 "${strain} ${stress} ${theo_stress}" file stress_strain.dat screen no
+
+fix             stress_curve all print 10 "${strain} ${stress}" file stress_strain.dat screen no
 
 
-run             10000
+run             20000
 
 
