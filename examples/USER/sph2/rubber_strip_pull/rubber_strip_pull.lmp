@@ -21,7 +21,7 @@ dimension       2
 boundary        s s p
 atom_style      tlsph
 neighbor        ${skin} bin
-neigh_modify    once yes #every 1 delay 0 check yes
+neigh_modify    every 1 delay 0 check yes
 newton          off
 comm_modify     vel yes
 
@@ -46,7 +46,7 @@ group           free subtract all top bot
 
 pair_style      tlsph
 #                           rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.06  0.0  100.0 1.0 &
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.06  0.0  -100.0 1.0 &
                 *LINEAR_STRENGTH &
 		*EOS_LINEAR &
                 *END

@@ -592,7 +592,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				// call kernel and kernel gradient with current separation
 				//barbara_kernel_and_derivative(h, r, wf, wfd);
 				delVdotDelR = dx.dot(dv);
-				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
+				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h); // m * m/s * m / m*m ==> units m/s
 				//if (delVdotDelR < 0.0) {
 
 				visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // this has units of pressure
@@ -609,6 +609,26 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
 				hg_err = gamma.norm() / r0;
 				hourglass_error[i] += volj * wf * hg_err;
+
+				/*
+				 * friction-like hourglass formulation
+				 */
+
+//				hg_mag = hg_coeff[itype] * hg_err; // hg_mag has no dimensions
+//				hg_mag *= voli * volj * wf * youngsmodulus[itype] / h; // hg_mag has dimensions [J/m] == [N]
+//				f_hg = hg_mag * gamma / (gamma.norm() + 0.1 * h);
+
+//				if (gamma.dot(dv) != 0.0) {
+//					hg_mag = hg_coeff[itype] * hg_err * gamma.dot(dv) / (gamma.norm() * dv.norm()); // hg_mag has no dimensions
+//					hg_mag *= voli * volj * wf * youngsmodulus[itype] / h; // hg_mag has dimensions [J/m] == [N]
+//					if (dv.norm() > 1.0e-16) {
+//						f_hg = hg_mag * dv / dv.norm();
+//					} else {
+//						f_hg.setZero();
+//					}
+//				} else {
+//					f_hg.setZero();
+//				}
 
 				/* SPH-like formulation */
 

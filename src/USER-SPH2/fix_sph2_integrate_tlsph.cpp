@@ -109,9 +109,9 @@ void FixSph2IntegrateTlsph::init() {
 		if (mask[i] & groupbit) {
 
 			// re-set x0 coordinates
-			x0[i][0] = x[i][0];
-			x0[i][1] = x[i][1];
-			x0[i][2] = x[i][2];
+//			x0[i][0] = x[i][0];
+//			x0[i][1] = x[i][1];
+//			x0[i][2] = x[i][2];
 
 		}
 	}

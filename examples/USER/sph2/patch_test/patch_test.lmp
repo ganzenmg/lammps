@@ -28,7 +28,7 @@ set             group all diameter ${h}
 
 pair_style      tlsph
 #                           rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.05  0.0  0.0 1.0 &
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  -100.0 1.0 &
                 *LINEAR_DEFGRAD &
                 *END
 
@@ -41,7 +41,11 @@ compute         toteint all reduce sum c_eint
 variable        et equal ke+c_toteint
 variable        patom atom -0.5*(c_S[1]+c_S[2])
 compute         totpres all reduce ave v_patom
+compute         com all com
 
+variable        mx atom mass*vx
+variable        my atom mass*vy
+compute         totmx all reduce sum v_mx
 
 
 dump            dump_id all custom 100 dump.LAMMPS id type x y z diameter fx fy z &
@@ -52,7 +56,17 @@ dump            dump_id all custom 100 dump.LAMMPS id type x y z diameter fx fy 
 dump_modify     dump_id first yes
 
 # initial run
-run             2
+thermo_style custom step c_com[1] c_com[2] c_com[3]
+run             0
+fix             rota_fix all move rotate 0.50000256   0.50000436            0 0 0 1 15
+run             1
+unfix           rota_fix
+
+variable        ax equal angmom(all,x)
+variable        ay equal angmom(all,y)
+variable        az equal angmom(all,z)
+
+
 
 # deform box and run a few time steps
 #change_box      all x scale 2.0 y scale 0.75 remap units box
@@ -72,7 +86,7 @@ timestep        ${dt}
 fix             integration_fix all sph2/integrate_tlsph 1.5e3 -1
 #
 thermo          50
-thermo_style    custom step ke pe c_toteint v_et dt time
+thermo_style    custom step ke pe v_et c_totmx dt time v_ax v_ay v_az
 
 run             4000
 #
