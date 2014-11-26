@@ -265,6 +265,8 @@ void PairULSPH::PreCompute() {
 				smoothVel[i].setZero();
 			}
 
+			L[i] *= K[i];
+
 			//printf("rho = %g\n", rho[i]);
 		} // end check if particle is SPH-type
 	} // end loop over i = 0 to nlocal
