@@ -6,7 +6,7 @@ variable        h equal 3.01*${l0}
 variable        E equal 70.0 # Young's modulus
 variable        sigy equal 0.7 # yield stress
 variable        nu equal 0.3 # Poisson ratio
-variable        hg equal 25.0*${sigy}/${E} # for TLSPH; for UTLSPH use 0.5
+variable        hg equal 0
 # ----
 variable        c0 equal sqrt(${E}/${rho})
 variable        dt equal 0.5*0.125*${l0}/${c0}
@@ -44,28 +44,33 @@ set             group all diameter ${h}
 variable        vol_one equal ${l0}^2
 set             group all volume ${vol_one}
 variable        mass_one equal ${vol_one}*${rho}
-set             group all mass ${mass_one}
 #set             group all contact_radius ${l0}
+set             group all density ${rho}
 
 pair_style      tlsph
-#                   mat. model EOS    c0    E    nu    hg    visc sigy
-pair_coeff      * * linearplastic     linear ${c0} ${E} ${nu} ${hg} 0.0 ${sigy}
+#                           rh0    E    nu    Q1    Q2   hg    Cp
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  10.0 1.0 &
+                *LINEAR_PLASTICITY ${sigy} &
+		*EOS_LINEAR &
+                *END
 
-compute         F all tlsph/defgrad
-compute         E all tlsph/strain
-compute         P all tlsph/eff_plastic_strain
-compute         S all tlsph/stress
-compute         nn all tlsph/num_neighs
-compute         contact_radius all tlsph/contact_radius
-
+compute         E all sph2/tlsph_strain
+compute         S all sph2/tlsph_stress
+compute         nn all sph2/tlsph_num_neighs
+compute         contact_radius all sph2/contact_radius
+compute         eint all sph2/internal_energy
+compute         toteint all reduce sum c_eint
+variable        et equal ke+c_toteint
+compute         P all sph2/plastic_strain
+compute         err all sph2/hourglass_error
 
 thermo          100
 thermo_style    custom step ke
- 
-dump            dump_id all custom 100 dump.LAMMPS id type x y z &
-                c_E[1] c_E[2] c_E[3] c_E[4] &
-                c_S[1] c_S[2] c_S[3] c_S[4] &
-                 c_F[5] fx fy vx vy c_P c_nn
+dump            dump_id all custom 100 dump.LAMMPS id type x y z diameter fx fy z &
+		c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
+                vx vy vz c_eint proc &
+                c_contact_radius c_nn mol mass c_P c_err
 dump_modify     dump_id first yes
 
 #
@@ -77,23 +82,11 @@ print           "running for ${nrun} timesteps"
 ##
 #fix             momentum_fix all momentum 100 linear 1 0 0
 velocity        bot set 0.0 0.0 0.0 sum no units box
-fix              11 bot setforce NULL 0 0
-fix              1 all tlsph/integrate -1
+fix             11 bot setforce NULL 0 0
+fix             integration_fix all sph2/integrate_tlsph 1.5e3 -1
 #
 #fix             bot_wall all wall/reflect ylo EDGE
 #
 ##
 run             4000
 
-dump            dump_id2 all custom 1 last.dump id type x y z &
-                c_E[1] c_E[2] c_E[3] c_E[4] &
-                c_S[1] c_S[2] c_S[3] c_S[4] &
-                 c_F[5] fx fy vx vy c_P c_nn
-dump_modify     dump_id2 first yes
-run 0
-
-###
-##fix             lclamp_fix lclamp move linear 0 NULL NULL units box
-##fix             rclamp_fix rclamp move linear 0 NULL NULL units box
-##run             ${nrun}
-###

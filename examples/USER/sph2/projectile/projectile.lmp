@@ -30,22 +30,16 @@ group           target type 2
 velocity        projectile set ${vel} 0.0 0.0 sum no units box
 
 pair_style      hybrid/overlay tlsph sph2/hertz
-#                         strength EOS                          rh0        E     nu     Q1   Q2   hg  Cp
 
-#pair_coeff      1 1 tlsph linear              linear            7800.0e-9  70   0.3    1.0  0.0  10  910 &
-#0 0 0 0 0 0 0 0 0 0  &
-#0 0 0.1 0 0 0 0 0 0 0 
-#pair_coeff      2 2 tlsph linear              linear            2700.0e-9  70   0.3    0.1  0.0  10  910 &
-#0 0 0 0 0 0 0 0 0 0  &
-#0 0 0.1 0 0 0 0 0 0 0 
+pair_coeff      1 1 tlsph *COMMON 7800.0e-9 70 0.3 0.00  0.0  10.0 1.0 &
+                *LINEAR_PLASTICITY 0.3 &
+		*EOS_LINEAR &
+		*END
+pair_coeff      2 2 tlsph *COMMON 2700.0e-9 70 0.3 0.00  0.0  10.0 1.0 &
+                *LINEAR_PLASTICITY 0.3 &
+		*EOS_LINEAR &
+		*END
 
-pair_coeff      1 1 tlsph johnson_cook        polynomial_eos    7800.0e-9  70   0.3    1.0  0.0  10  910 &
-                          0 74.2 60.5 36.5 1.96 0 0 0 0 0 &  
-                          0 0 0.3241 0.1138 0.42 0.002 1.0e-3 298 893 1.34
-
-pair_coeff      2 2 tlsph johnson_cook        polynomial_eos    2700.0e-9  70   0.3    0.1  0.0  10  910 &
-                          0 74.2 60.5 36.5 1.96 0 0 0 0 0 &  
-                          0 0 0.3241 0.1138 0.42 0.002 1.0e-3 298 893 1.34
 pair_coeff      1 2 sph2/hertz ${contact_stiffness}
 
 

@@ -39,13 +39,11 @@ public:
     void updateReferenceConfiguration();
     int pack_forward_comm(int, int *, double *, int, int *);
     void unpack_forward_comm(int, int, double *);
-    void smooth_fields();
 
 protected:
     double dtv, dtf, vlimit, vlimitsq;
     int mass_require;
     bool updateReferenceConfigurationFlag, xsphFlag;
-    int smoothPeriod;
     int nRefConfigUpdates;
 
     class Pair *pair;

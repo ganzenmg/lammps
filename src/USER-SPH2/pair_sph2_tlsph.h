@@ -41,8 +41,6 @@ public:
 	double init_one(int, int);
 	void init_style();
 	void init_list(int, class NeighList *);
-	void write_restart(FILE *);
-	void read_restart(FILE *);
 	void write_restart_settings(FILE *) {
 	}
 	void read_restart_settings(FILE *) {
@@ -53,7 +51,8 @@ public:
 	void *extract(const char *, int &);
 	int pack_forward_comm(int, int *, double *, int, int *);
 	void unpack_forward_comm(int, int, double *);
-	void kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
+	void spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
+	void barbara_kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
 	Matrix3d pseudo_inverse_SVD(Matrix3d);
 	void PolDec(Matrix3d &, Matrix3d *, Matrix3d *);
 	void AssembleStress();
@@ -64,6 +63,9 @@ public:
 	void ComputeForces(int eflag, int vflag);
 	double TestMatricesEqual(Matrix3d, Matrix3d, double);
 	double effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev, Matrix3d sigma_dev_rate, double damage);
+
+	void SmoothField();
+	void SmoothFieldXSPH();
 
 	/*
 	 * strength models
@@ -81,7 +83,7 @@ public:
 	 * EOS models
 	 */
 	void LinearEOS(double lambda, double pInitial, double d, double dt, double &pFinal, double &p_rate);
-	void LinearCutoffEOS(double &, double &, double &, double &, double &, double &, double &);
+	//void LinearCutoffEOS(double &, double &, double &, double &, double &, double &, double &);
 	void ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma,
 			double pInitial, double dt, double &pFinal, double &p_rate);
 	void polynomialEOS(double rho, double rho0, double e, double C0, double C1, double C2, double C3, double C4, double C5,
@@ -94,6 +96,8 @@ public:
 			double &damage, Matrix3d &S_damaged);
 	void IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStress, double dt, double soundspeed, double characteristicLength,
 				double &damage, Matrix3d &S_damaged);
+	double JohnsonCookFailureStrain(double p, Matrix3d Sdev, double d1, double d2, double d3, double d4, double epdot0,
+			double epdot);
 
 protected:
 	void allocate();
@@ -101,15 +105,15 @@ protected:
 	/*
 	 * per-type arrays
 	 */
-	double *youngsmodulus, *poissonr, *lmbda0, *mu0, *signal_vel0, *rho0;
+	double *youngsmodulus, *signal_vel0, *rho0;
 	int *strengthModel, *eos;
 	double *onerad_dynamic, *onerad_frozen, *maxrad_dynamic, *maxrad_frozen;
 
 	/*
 	 * per type pair arrays
 	 */
-	double **Q1, **Q2;
-	double **hg_coeff;
+	double *Q1, *Q2;
+	double *hg_coeff;
 
 
 	/*
@@ -125,6 +129,7 @@ protected:
 	Vector3d *smoothVel;
 	Matrix3d *CauchyStress;
 	double *detF, *p_wave_speed, *shepardWeight;
+	double *hourglass_error;
 	bool *shearFailureFlag;
 	int *numNeighsRefConfig;
 
@@ -135,18 +140,25 @@ protected:
 	int updateFlag;
 
 	enum {
-		LINEAR, LINEAR_PLASTIC, NONE, LINEAR_DEFGRAD, LINEAR_CUTOFF, SHOCK_EOS, JOHNSON_COOK,
-		POLYNOMIAL_EOS
+		LINEAR_DEFGRAD, LINEAR_STRENGTH, LINEAR_PLASTICITY, STRENGTH_JOHNSON_COOK,
+		EOS_LINEAR, EOS_SHOCK, EOS_POLYNOMIAL,
+		NONE
 	};
 
-	map< std::string, std::map< int, double > > commonProps;
-	map< std::string, std::map< int, double > > strengthProps;
-	map< std::string, std::map< int, double > > EOSProps;
+	//map< std::string, std::map< int, double > > matProp;
+	typedef std::map<std::pair<std::string, int>, double> Dict;
+
+	Dict matProp2;
+	typedef Dict::const_iterator It;
 
 	int ifix_tlsph;
 	int not_first;
 
 	class FixSph2IntegrateTlsph *fix_tlsph_time_integration;
+
+private:
+	double SafeLookup(std::string str, int itype);
+	bool CheckKeywordPresent(std::string str, int itype);
 };
 
 }

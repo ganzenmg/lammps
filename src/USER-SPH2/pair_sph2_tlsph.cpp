@@ -59,11 +59,9 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 
 	onerad_dynamic = onerad_frozen = maxrad_dynamic = maxrad_frozen = NULL;
 
-	poissonr = NULL;
 	hg_coeff = NULL;
 	Q1 = Q2 = NULL;
 	strengthModel = eos = NULL;
-	lmbda0 = mu0 = NULL;
 	signal_vel0 = NULL; // signal velocity basedon on p-wave speed, used for artificial viscosity
 	rho0 = NULL;
 
@@ -76,6 +74,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 	numNeighsRefConfig = NULL;
 	shepardWeight = NULL;
 	CauchyStress = NULL;
+	hourglass_error = NULL;
 
 	updateFlag = 0;
 	not_first = 0;
@@ -90,14 +89,11 @@ PairTlsph::~PairTlsph() {
 		memory->destroy(setflag);
 		memory->destroy(cutsq);
 		memory->destroy(youngsmodulus);
-		memory->destroy(poissonr);
 		memory->destroy(hg_coeff);
 		memory->destroy(Q1);
 		memory->destroy(Q2);
 		memory->destroy(strengthModel);
 		memory->destroy(eos);
-		memory->destroy(lmbda0);
-		memory->destroy(mu0);
 		memory->destroy(signal_vel0);
 		memory->destroy(rho0);
 
@@ -121,6 +117,7 @@ PairTlsph::~PairTlsph() {
 		delete[] numNeighsRefConfig;
 		delete[] shepardWeight;
 		delete[] CauchyStress;
+		delete[] hourglass_error;
 	}
 }
 
@@ -161,6 +158,7 @@ void PairTlsph::PreCompute() {
 		shepardWeight[i] = 0.0;
 		numNeighsRefConfig[i] = 0;
 		smoothVel[i].setZero();
+		hourglass_error[i] = 0.0;
 
 //		x0i << x0[i][0], x0[i][1], x0[i][2];
 //		xi << x[i][0], x[i][1], x[i][2];
@@ -243,7 +241,7 @@ void PairTlsph::PreCompute() {
 				du = xj - x0j - (xi - x0i);
 
 				// kernel function
-				kernel_and_derivative(h, r0, wf, wfd);
+				spiky_kernel_and_derivative(h, r0, wf, wfd);
 
 				// uncorrected kernel gradient
 				g = (wfd / r0) * dx0;
@@ -263,7 +261,7 @@ void PairTlsph::PreCompute() {
 //				}
 
 				Ftmp = du * g.transpose(); // only use displacement here, turns out to be numerically more stable
-				//Ftmp = dx * g.transpose();
+						//Ftmp = dx * g.transpose();
 				Fdottmp = dv * g.transpose();
 
 				K[i] += volj * Ktmp;
@@ -302,7 +300,6 @@ void PairTlsph::PreCompute() {
 
 			if (mol[i] > 0) {
 
-
 				if (domain->dimension == 2) {
 					K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
 					K[i](2, 2) = 1.0; // make inverse of K well defined even when it is rank-deficient (3d matrix, only 2d information)
@@ -318,7 +315,7 @@ void PairTlsph::PreCompute() {
 				/*
 				 * we need to be able to recover from a potentially planar (2d) configuration of particles
 				 */
-				if ((domain->dimension == 2)) {
+				if (domain->dimension == 2) {
 					Fincr[i](2, 2) = 1.0;
 				}
 
@@ -426,7 +423,13 @@ void PairTlsph::compute(int eflag, int vflag) {
 		shepardWeight = new double[nmax]; // memory usage: 1 double; total 109 doubles
 		delete[] CauchyStress;
 		CauchyStress = new Matrix3d[nmax]; // memory usage: 9 doubles; total 118 doubles
+		delete[] hourglass_error;
+		hourglass_error = new double[nmax];
 	}
+
+//	if (update->ntimestep % 1 == 0) {
+//	SmoothField();
+//	}
 
 	PairTlsph::PreCompute();
 	PairTlsph::AssembleStress();
@@ -457,7 +460,10 @@ void PairTlsph::compute(int eflag, int vflag) {
 //		fix_tlsph_time_integration = (FixSph2IntegrateTlsph *) modify->fix[ifix_tlsph];
 //		fix_tlsph_time_integration->pair = this;
 //	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> 48613b0e57faac9d4c1a36f0f776f34cc3f8b547
 }
 
 void PairTlsph::ComputeForces(int eflag, int vflag) {
@@ -470,14 +476,14 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	double *de = atom->de;
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
-	double *damage = atom->damage;
-	double *eff_plastic_strain = atom->eff_plastic_strain;
+	double *plastic_strain = atom->eff_plastic_strain;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
-	int i, j, ii, jj, jnum, itype, jtype, iDim, inum;
+	int i, j, ii, jj, jnum, itype, iDim, inum;
 	double r, hg_mag, wf, wfd, h, r0, r0Sq, voli, volj;
-	double delVdotDelR, visc_magnitude, deltaE, mu_ij, c_ij, rho_ij;
-	double delta, hr;
+	double delVdotDelR, visc_magnitude, deltaE, mu_ij, hg_err;
+	double delta;
+	char str[128];
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
 	Vector3d fi, fj, dx0, dx, dv, f_stress, f_hg, dxp_i, dxp_j, gamma, g, gamma_i, gamma_j;
@@ -534,7 +540,11 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				continue;
 			}
 
-			jtype = type[j];
+			if (type[j] != itype) {
+				sprintf(str, "particle pair is not of same type!");
+				error->all(FLERR, str);
+				;
+			}
 
 			// check that distance between i and j (in the reference config) is less than cutoff
 			dx0(0) = x0[j][0] - x0[i][0];
@@ -557,7 +567,6 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					vj(iDim) = v[j][iDim];
 				}
 
-				jtype = type[j];
 				volj = vfrac[j];
 
 				// distance vectors in current and reference configuration, velocity difference
@@ -566,7 +575,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				// derivative of kernel function and reference distance
 				// kernel function
-				kernel_and_derivative(h, r0, wf, wfd);
+				spiky_kernel_and_derivative(h, r0, wf, wfd);
 				//printf("wf = %f, wfd = %f\n", wf, wfd);
 
 				// current distance
@@ -582,46 +591,86 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				f_stress = voli * volj * (PK1[i] + PK1[j]) * g;
 
 				/*
+				 * artificial viscosity
+				 */
+
+				// because hourglass control and artificial viscosity are evaluated using the current coordinates,
+				// call kernel and kernel gradient with current separation
+				//barbara_kernel_and_derivative(h, r, wf, wfd);
+				delVdotDelR = dx.dot(dv);
+				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h); // m * m/s * m / m*m ==> units m/s
+				//if (delVdotDelR < 0.0) {
+
+				visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // this has units of pressure
+				//printf("visc_magnitude = %f, c_ij=%f, mu_ij=%f\n", visc_magnitude, c_ij, mu_ij);
+				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h);
+				//} else {
+				//	f_visc.setZero();
+				//}
+
+				/*
 				 * hourglass deviation of particles i and j
 				 */
 
 				gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
+				hg_err = gamma.norm() / r0;
+				hourglass_error[i] += volj * wf * hg_err;
+
+				/*
+				 * friction-like hourglass formulation
+				 */
+
+//				hg_mag = hg_coeff[itype] * hg_err; // hg_mag has no dimensions
+//				hg_mag *= voli * volj * wf * youngsmodulus[itype] / h; // hg_mag has dimensions [J/m] == [N]
+//				f_hg = hg_mag * gamma / (gamma.norm() + 0.1 * h);
+
+//				if (gamma.dot(dv) != 0.0) {
+//					hg_mag = hg_coeff[itype] * hg_err * gamma.dot(dv) / (gamma.norm() * dv.norm()); // hg_mag has no dimensions
+//					hg_mag *= voli * volj * wf * youngsmodulus[itype] / h; // hg_mag has dimensions [J/m] == [N]
+//					if (dv.norm() > 1.0e-16) {
+//						f_hg = hg_mag * dv / dv.norm();
+//					} else {
+//						f_hg.setZero();
+//					}
+//				} else {
+//					f_hg.setZero();
+//				}
 
 				/* SPH-like formulation */
 
-				delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
-				hg_mag = -hg_coeff[itype][jtype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
-				hg_mag *= voli * volj * wf * (youngsmodulus[itype] + youngsmodulus[jtype]); // hg_mag has dimensions [J*m^(-1)] = [N]
+				//if (hg_coeff[itype] > 0.0) {
+				if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-3) {
 
-				/* scale hourglass correction to enable plastic flow */
-				//if ( MAX(eff_plastic_strain[i], eff_plastic_strain[j]) > 1.0e-2) {
-				//	hg_mag = 0.1 * hg_mag;
+					/*
+					 * viscous hourglass formulation
+					 */
+
+					delta = gamma.dot(dx);
+					if (delVdotDelR * delta < 0.0) {
+						hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
+					} else {
+						hg_mag = 0.9 * hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
+					}
+					f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
+
+				} else {
+					//} else if (hg_coeff[itype] < 0.0) {
+
+					/*
+					 * stiffness hourglass formulation
+					 */
+
+					delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
+					hg_mag = hg_coeff[itype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
+					hg_mag *= -voli * volj * wf * youngsmodulus[itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
+					f_hg = (hg_mag / r) * dx;
+					//printf("delta = %g, hg_mag = %g, coeff=%g, wf=%g, vi=%g, vj=%g, Ei=%f, Ej-%f\n",delta, hg_mag, hg_coeff[itype][jtype], wf, voli, volj,
+					//		youngsmodulus[itype], youngsmodulus[jtype]);
+
+				}
+				//else {
+				//	f_hg.setZero();
 				//}
-				f_hg = (hg_mag / (r + 0.1 * h)) * dx;
-
-				/*
-				 * maximum (symmetric damage factor)
-				 */
-				//damage_factor = MAX(damage[i], damage[j]);
-				/*
-				 * artificial viscosity with linear and quadratic terms
-				 * note that artificial viscosity is enhanced if particles are damaged
-				 * note that quadratic term in viscosity is not useful at all apparently
-				 */
-
-				delVdotDelR = dx.dot(dv);
-				//hr = h - r; // [m]
-				//wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
-
-				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h);
-				c_ij = 0.5 * (signal_vel0[itype] + signal_vel0[jtype]);
-				//printf("c_ij = %f\n", c_ij);
-				rho_ij = 0.5 * (rho0[itype] + rho0[jtype]);
-				//visc_magnitude = (-(Q1[itype][jtype] + damage_factor) * c_ij * mu_ij
-				//		+ (Q2[itype][jtype] + 2.0 * damage_factor) * mu_ij * mu_ij) / rho_ij;
-				visc_magnitude = -(Q1[itype][jtype]) * c_ij * mu_ij / rho_ij; // this has units of pressure
-				//printf("visc_magnitude = %f, c_ij=%f, mu_ij=%f\n", visc_magnitude, c_ij, mu_ij);
-				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h);
 
 				// sum stress, viscous, and hourglass forces
 				//cout << "fstress: " << f_stress << endl;
@@ -641,6 +690,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					f[j][1] -= sumForces(1);
 					f[j][2] -= sumForces(2);
 					de[j] += deltaE;
+					hourglass_error[j] += voli * wf * hg_err;
 				}
 
 				// tally atomistic stress tensor
@@ -661,6 +711,13 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 			}
 
+		}
+
+	}
+
+	for (i = 0; i < nlocal; i++) {
+		if (shepardWeight[i] != 0.0) {
+			hourglass_error[i] /= shepardWeight[i];
 		}
 	}
 
@@ -740,29 +797,6 @@ void PairTlsph::LinearEOS(double lambda, double pInitial, double d, double dt, d
 	p_rate = lambda * d;
 
 	pFinal = pInitial + dt * p_rate; // increment pressure using pressure rate
-
-}
-
-/* ----------------------------------------------------------------------
- linear EOS for use with linear elasticity
- This EOS cuts off pressure at a given limit
- input: initial pressure pInitial, isotropic part of the strain rate d, time-step dt, maxPressure
- output: final pressure pFinal, pressure rate p_rate
- ------------------------------------------------------------------------- */
-void PairTlsph::LinearCutoffEOS(double &lambda, double &maxPressure, double &pInitial, double &d, double &dt, double &pFinal,
-		double &p_rate) {
-
-	/*
-	 * pressure rate
-	 */
-	p_rate = lambda * d;
-
-	pFinal = pInitial + dt * p_rate; // increment pressure using pressure rate
-
-	if (pFinal < maxPressure) {
-		pFinal = maxPressure;
-		p_rate = (pFinal - pInitial) / dt;
-	}
 
 }
 
@@ -984,13 +1018,14 @@ void PairTlsph::AssembleStress() {
 	int i, itype;
 	int nlocal = atom->nlocal;
 	double dt = update->dt;
-	double bulkmodulus, M, p_wave_speed, mass_specific_energy, vol_specific_energy, rho;
+	double M, p_wave_speed, mass_specific_energy, vol_specific_energy, rho;
 	Matrix3d sigma_rate, eye, sigmaInitial, sigmaFinal, T, Jaumann_rate, sigma_rate_check;
 	Matrix3d d_dev, sigmaInitial_dev, sigmaFinal_dev, sigma_dev_rate, E, sigma_damaged;
 	Vector3d x0i, xi, xp;
 
 	eye.setIdentity();
 	dtCFL = 1.0e22;
+	pFinal = 0.0;
 
 	for (i = 0; i < nlocal; i++) {
 
@@ -1026,39 +1061,24 @@ void PairTlsph::AssembleStress() {
 
 				//printf("eos = %d\n", eos[itype]);
 				switch (eos[itype]) {
-				case LINEAR:
-					bulkmodulus = lmbda0[itype] + 2.0 * mu0[itype] / 3.0;
-					//printf("bulk modulus is %f\n", bulkmodulus);
-					LinearEOS(bulkmodulus, pInitial, d_iso, dt, pFinal, p_rate);
-					break;
-				case LINEAR_CUTOFF:
-					bulkmodulus = lmbda0[itype] + 2.0 * mu0[itype] / 3.0;
-					LinearCutoffEOS(bulkmodulus, EOSProps["cutoff_pressure"][itype], pInitial, d_iso, dt, pFinal, p_rate);
+				case EOS_LINEAR:
+					LinearEOS(SafeLookup("bulk_modulus", itype), pInitial, d_iso, dt, pFinal, p_rate);
 					break;
 				case NONE:
 					pFinal = 0.0;
 					p_rate = 0.0;
 					break;
-				case SHOCK_EOS:
-					// check that required parameters are known
-					if (EOSProps.count("c0") != 1) {
-						error->one(FLERR, "c0 for shock EOS is missing in EOS property map");
-					}
-					if (EOSProps.count("S_Hugoniot") != 1) {
-						error->one(FLERR, "S_Hugoniot for shock EOS is missing in EOS property map");
-					}
-					if (EOSProps.count("Gamma_Grueneisen") != 1) {
-						error->one(FLERR, "Gamma_Grueneisen for shock EOS is missing in EOS property map");
-					}
-
+				case EOS_SHOCK:
 					//  rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
-					ShockEOS(rho, rho0[itype], mass_specific_energy, 0.0, EOSProps["c0"][itype], EOSProps["S_Hugoniot"][itype],
-							EOSProps["Gamma_Grueneisen"][itype], pInitial, dt, pFinal, p_rate);
+					ShockEOS(rho, rho0[itype], mass_specific_energy, 0.0, SafeLookup("eos_shock_c0", itype),
+							SafeLookup("eos_shock_s", itype), SafeLookup("eos_shock_gamma", itype), pInitial, dt, pFinal, p_rate);
 					break;
-				case POLYNOMIAL_EOS:
-					polynomialEOS(rho, rho0[itype], vol_specific_energy, EOSProps["C0"][itype], EOSProps["C1"][itype],
-							EOSProps["C2"][itype], EOSProps["C3"][itype], EOSProps["C4"][itype], EOSProps["C5"][itype],
-							EOSProps["C6"][itype], pInitial, dt, pFinal, p_rate);
+				case EOS_POLYNOMIAL:
+					polynomialEOS(rho, rho0[itype], vol_specific_energy, SafeLookup("eos_polynomial_c0", itype),
+							SafeLookup("eos_polynomial_c1", itype), SafeLookup("eos_polynomial_c2", itype),
+							SafeLookup("eos_polynomial_c3", itype), SafeLookup("eos_polynomial_c4", itype),
+							SafeLookup("eos_polynomial_c5", itype), SafeLookup("eos_polynomial_c6", itype), pInitial, dt, pFinal,
+							p_rate);
 
 					break;
 
@@ -1071,98 +1091,117 @@ void PairTlsph::AssembleStress() {
 				 * material strength
 				 */
 
-				switch (strengthModel[itype]) {
-				case LINEAR:
-					//printf("mu0 is %f\n", mu0[itype]);
-					LinearStrength(mu0[itype], sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
-					break;
-				case LINEAR_DEFGRAD:
-					LinearStrengthDefgrad(lmbda0[itype], mu0[itype], Fincr[i], &sigmaFinal_dev);
-					eff_plastic_strain[i] = 0.0;
-					p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
-					sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
-					R[i].setIdentity();
-					break;
-				case LINEAR_PLASTIC:
-					// check that required parameters are known
-					if (strengthProps.count("yield_stress0") != 1) {
-						error->one(FLERR, "yield stress for linear plasticity is missing in strength property map");
+				if (damage[i] < 1.0) {
+
+					switch (strengthModel[itype]) {
+					case LINEAR_STRENGTH:
+						//printf("mu0 is %f\n", mu0[itype]);
+						LinearStrength(SafeLookup("lame_mu", itype), sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
+						break;
+					case LINEAR_DEFGRAD:
+						LinearStrengthDefgrad(SafeLookup("lame_lambda", itype), SafeLookup("lame_mu", itype), Fincr[i],
+								&sigmaFinal_dev);
+						eff_plastic_strain[i] = 0.0;
+						p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
+						sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
+						R[i].setIdentity();
+						break;
+					case LINEAR_PLASTICITY:
+						LinearPlasticStrength(SafeLookup("lame_mu", itype), SafeLookup("yield_stress0", itype), sigmaInitial_dev,
+								d_dev, dt, &sigmaFinal_dev, &sigma_dev_rate, &plastic_strain_increment);
+						eff_plastic_strain[i] += plastic_strain_increment;
+
+						eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
+						eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
+						break;
+					case STRENGTH_JOHNSON_COOK:
+						JohnsonCookStrength(SafeLookup("lame_mu", itype), SafeLookup("heat_capacity", itype), mass_specific_energy,
+								SafeLookup("JC_A", itype), SafeLookup("JC_B", itype), SafeLookup("JC_a", itype),
+								SafeLookup("JC_C", itype), SafeLookup("JC_epdot0", itype), SafeLookup("JC_T0", itype),
+								SafeLookup("JC_Tmelt", itype), SafeLookup("JC_M", itype), dt, eff_plastic_strain[i],
+								eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev, sigmaFinal_dev, sigma_dev_rate,
+								plastic_strain_increment);
+
+						eff_plastic_strain[i] += plastic_strain_increment;
+
+						eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
+						eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
+
+						break;
+					case NONE:
+						sigmaFinal_dev.setZero();
+						sigma_dev_rate.setZero();
+						break;
+					default:
+						error->one(FLERR, "unknown strength model.");
+						break;
 					}
-
-					LinearPlasticStrength(mu0[itype], strengthProps["yield_stress0"][itype], sigmaInitial_dev, d_dev, dt,
-							&sigmaFinal_dev, &sigma_dev_rate, &plastic_strain_increment);
-					eff_plastic_strain[i] += plastic_strain_increment;
-
-					eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
-					eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
-					break;
-				case JOHNSON_COOK:
-//					strengthProps["JC_A"][i] = materialCoeffs_one[12];
-//								strengthProps["JC_B"][i] = materialCoeffs_one[13];
-//								strengthProps["JC_a"][i] = materialCoeffs_one[14];
-//								strengthProps["JC_C"][i] = materialCoeffs_one[15];
-//								strengthProps["JC_epdot0"][i] = materialCoeffs_one[16];
-//								strengthProps["JC_T0"][i] = materialCoeffs_one[17];
-//								strengthProps["JC_Tmelt"][i] = materialCoeffs_one[18];
-
-					JohnsonCookStrength(mu0[itype], commonProps["heat_capacity"][itype], mass_specific_energy,
-							strengthProps["JC_A"][itype], strengthProps["JC_B"][itype], strengthProps["JC_a"][itype],
-							strengthProps["JC_C"][itype], strengthProps["JC_epdot0"][itype], strengthProps["JC_T0"][itype],
-							strengthProps["JC_Tmelt"][itype], strengthProps["JC_M"][itype], dt, eff_plastic_strain[i],
-							eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev, sigmaFinal_dev, sigma_dev_rate,
-							plastic_strain_increment);
-
-					eff_plastic_strain[i] += plastic_strain_increment;
-
-					eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
-					eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
-
-					break;
-				case NONE:
-					sigmaFinal_dev.setZero();
-					sigma_dev_rate.setZero();
-					break;
-				default:
-					error->one(FLERR, "unknown strength model.");
-					break;
+				} else {
+					sigmaFinal_dev.setZero(); // damage[i] >= 1, therefore it cannot carry shear stress
 				}
-
-				if (eff_plastic_strain[i] > 1.0) {
-					shearFailureFlag[i] = true;
-				}
-				eff_plastic_strain[i] = MIN(eff_plastic_strain[i], 2.0);
 
 				/*
 				 *  assemble total stress from pressure and deviatoric stress
 				 */
-				sigmaFinal = pFinal * eye + sigmaFinal_dev;
+				sigmaFinal = pFinal * eye + sigmaFinal_dev; // this is the stress that is kept
+
+				/*
+				 * this is the stress which is used for the force computation in this timestep.
+				 * It is degraded by the damage / failure models below.
+				 */
+				sigma_damaged = sigmaFinal;
 
 				/*
 				 *  failure criteria
 				 */
-				if (strengthProps["max_tensile_stress"][itype] != 0.0) {
-					/*
-					 * maximum stress failure criterion:
-					 */
-					IsotropicMaxStressDamage(sigmaFinal, strengthProps["max_tensile_stress"][itype], dt, signal_vel0[itype],
-							radius[i], damage[i], sigma_damaged);
-				} else if (strengthProps["max_tensile_strain"][itype] != 0.0) {
-					/*
-					 * maximum strain failure criterion:
-					 */
-					E = 0.5 * (Fincr[i] * Fincr[i].transpose() - eye);
-					IsotropicMaxStrainDamage(E, sigmaFinal, strengthProps["max_tensile_strain"][itype], dt, signal_vel0[itype],
-							radius[i], damage[i], sigma_damaged);
-				} else {
-					sigma_damaged = sigmaFinal;
-				}
 
-				if (shearFailureFlag[i]) {
-					if (pFinal < 0.0) {
-						sigma_damaged = pFinal * eye;
-					} else {
-						sigma_damaged	.setZero();
+				if (damage[i] < 1.0) {
+
+					if (CheckKeywordPresent("failure_max_principal_stress", itype)) {
+						/*
+						 * maximum stress failure criterion:
+						 */
+						IsotropicMaxStressDamage(sigmaFinal, SafeLookup("failure_max_principal_stress", itype), dt,
+								signal_vel0[itype], radius[i], damage[i], sigma_damaged);
 					}
+					if (CheckKeywordPresent("failure_max_principal_strain", itype)) {
+						/*
+						 * maximum strain failure criterion:
+						 */
+						E = 0.5 * (Fincr[i] * Fincr[i].transpose() - eye);
+						IsotropicMaxStrainDamage(E, sigmaFinal, SafeLookup("failure_max_principal_strain", itype), dt,
+								signal_vel0[itype], radius[i], damage[i], sigma_damaged);
+					}
+
+					if (CheckKeywordPresent("failure_max_plastic_strain", itype)) {
+
+						if (eff_plastic_strain[i] >= SafeLookup("failure_max_plastic_strain", itype)) {
+							damage[i] = 1.0;
+							eff_plastic_strain[i] = SafeLookup("failure_max_plastic_strain", itype);
+						}
+					}
+
+					if (CheckKeywordPresent("failure_JC_d1", itype)) {
+
+						if (plastic_strain_increment > 0.0) {
+							if (damage[i] < 1.0) {
+								double jc_failure_strain = JohnsonCookFailureStrain(pFinal, sigmaFinal_dev,
+										SafeLookup("failure_JC_d1", itype), SafeLookup("failure_JC_d2", itype),
+										SafeLookup("failure_JC_d3", itype), SafeLookup("failure_JC_d4", itype),
+										SafeLookup("failure_JC_epdot0", itype), eff_plastic_strain_rate[i]);
+
+								//cout << "plastic strain increment is " << plastic_strain_increment << "  jc fs is " << jc_failure_strain << endl;
+								if (eff_plastic_strain[i] / jc_failure_strain > 1.0) {
+									damage[i] = 1.0;
+								}
+							}
+
+						}
+					}
+				} // end if damage[i] < 1.0
+
+				if (damage[i] >= 1.0) {
+					sigma_damaged = pFinal * eye;
 				}
 
 				/*
@@ -1264,14 +1303,11 @@ void PairTlsph::allocate() {
 			setflag[i][j] = 0;
 
 	memory->create(youngsmodulus, n + 1, "pair:youngsmodulus");
-	memory->create(poissonr, n + 1, "pair:poissonratio");
-	memory->create(hg_coeff, n + 1, n + 1, "pair:hg_magnitude");
-	memory->create(Q1, n + 1, n + 1, "pair:q1");
-	memory->create(Q2, n + 1, n + 1, "pair:q2");
+	memory->create(hg_coeff, n + 1, "pair:hg_magnitude");
+	memory->create(Q1, n + 1, "pair:q1");
+	memory->create(Q2, n + 1, "pair:q2");
 	memory->create(strengthModel, n + 1, "pair:strengthmodel");
 	memory->create(eos, n + 1, "pair:eosmodel");
-	memory->create(lmbda0, n + 1, "pair:lmbda0");
-	memory->create(mu0, n + 1, "pair:mu0");
 	memory->create(signal_vel0, n + 1, "pair:signal_vel0");
 	memory->create(rho0, n + 1, "pair:rho0");
 
@@ -1297,220 +1333,557 @@ void PairTlsph::settings(int narg, char **arg) {
  ------------------------------------------------------------------------- */
 
 void PairTlsph::coeff(int narg, char **arg) {
+	int ioffset, iarg, iNextKwd, itype;
+	char str[128];
+	std::string s, t;
 
-	if (narg != 31) {
-		char str[128];
-		sprintf(str, "number of arguments for pair tlsph is %d but 31 are required!", narg);
+	if (narg < 3) {
+		sprintf(str, "number of arguments for pair tlsph is too small!");
 		error->all(FLERR, str);
 	}
 	if (!allocated)
 		allocate();
 
-	int ilo, ihi, jlo, jhi, k;
-	force->bounds(arg[0], atom->ntypes, ilo, ihi);
-	force->bounds(arg[1], atom->ntypes, jlo, jhi);
+	/*
+	 * check that TLSPH parameters are given only in i,i form
+	 */
+	if (force->inumeric(FLERR, arg[0]) != force->inumeric(FLERR, arg[1])) {
+		sprintf(str, "TLSPH coefficients can only be specified between particles of same type!");
+		error->all(FLERR, str);
+	}
+	itype = force->inumeric(FLERR, arg[0]);
 
-	int mat_one = NONE;
-	if (strcmp(arg[2], "linear") == 0) {
-		mat_one = LINEAR;
-	} else if (strcmp(arg[2], "linearplastic") == 0) {
-		mat_one = LINEAR_PLASTIC;
-	} else if (strcmp(arg[2], "linear_defgrad") == 0) {
-		mat_one = LINEAR_DEFGRAD;
-	} else if (strcmp(arg[2], "johnson_cook") == 0) {
-		mat_one = JOHNSON_COOK;
-	} else if (strcmp(arg[2], "none") == 0) {
-		mat_one = NONE;
+	if (comm->me == 0)
+		printf("\n******************SPH2 / TLSPH PROPERTIES OF PARTICLE TYPE %d **************************\n", itype);
+
+	/*
+	 * read parameters which are common -- regardless of material / eos model
+	 */
+
+	ioffset = 2;
+	if (strcmp(arg[ioffset], "*COMMON") != 0) {
+		sprintf(str, "common keyword missing!");
+		error->all(FLERR, str);
 	} else {
-		error->all(FLERR, "unknown material strength model selected");
+		printf("common keyword found\n");
 	}
 
-	int eos_one = NONE;
-	if (strcmp(arg[3], "linear") == 0) {
-		eos_one = LINEAR;
-	} else if (strcmp(arg[3], "linear_cutoff") == 0) {
-		eos_one = LINEAR_CUTOFF;
-	} else if (strcmp(arg[3], "shock_eos") == 0) {
-		eos_one = SHOCK_EOS;
-	} else if (strcmp(arg[3], "polynomial_eos") == 0) {
-		eos_one = POLYNOMIAL_EOS;
-	} else if (strcmp(arg[3], "none") == 0) {
-		eos_one = NONE;
-	} else {
-		error->all(FLERR, "unknown EOS model selected");
+	t = string("*");
+	iNextKwd = -1;
+	for (iarg = ioffset + 1; iarg < narg; iarg++) {
+		s = string(arg[iarg]);
+		if (s.compare(0, t.length(), t) == 0) {
+			iNextKwd = iarg;
+			break;
+		}
+	}
+
+	printf("keyword following *COMMON is %s\n", arg[iNextKwd]);
+
+	if (iNextKwd < 0) {
+		sprintf(str, "no *KEYWORD terminates *COMMON");
+		error->all(FLERR, str);
+	}
+
+	if (iNextKwd - ioffset != 7 + 1) {
+		sprintf(str, "expected 7 arguments following *COMMON but got %d\n", iNextKwd - ioffset - 1);
+		error->all(FLERR, str);
+	}
+
+	matProp2[std::make_pair("rho_ref", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+	matProp2[std::make_pair("youngs_modulus", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
+	matProp2[std::make_pair("poisson_ratio", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+	matProp2[std::make_pair("viscosity_q1", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
+	matProp2[std::make_pair("viscosity_q2", itype)] = force->numeric(FLERR, arg[ioffset + 5]);
+	matProp2[std::make_pair("hourglass_amp", itype)] = force->numeric(FLERR, arg[ioffset + 6]);
+	matProp2[std::make_pair("heat_capacity", itype)] = force->numeric(FLERR, arg[ioffset + 7]);
+
+	matProp2[std::make_pair("lame_lambda", itype)] = SafeLookup("poisson_ratio", itype)
+			/ ((1.0 + SafeLookup("poisson_ratio", itype) * (1.0 - 2.0 * SafeLookup("poisson_ratio", itype))));
+	matProp2[std::make_pair("lame_mu", itype)] = SafeLookup("youngs_modulus", itype)
+			/ (2.0 * (1.0 + SafeLookup("poisson_ratio", itype)));
+	matProp2[std::make_pair("signal_vel", itype)] = sqrt(
+			(SafeLookup("lame_lambda", itype) + 2.0 * SafeLookup("lame_mu", itype)) / SafeLookup("rho_ref", itype));
+	matProp2[std::make_pair("bulk_modulus", itype)] = SafeLookup("lame_lambda", itype) + 2.0 * SafeLookup("lame_mu", itype) / 3.0;
+	matProp2[std::make_pair("m_modulus", itype)] = SafeLookup("lame_lambda", itype) + 2.0 * SafeLookup("lame_mu", itype);
+
+	if (comm->me == 0) {
+		printf("\n material unspecific properties for SPH2/TLSPH definition of particle type %d:\n", itype);
+		printf("%40s : %g\n", "reference density", SafeLookup("rho_ref", itype));
+		printf("%40s : %g\n", "Young's modulus", SafeLookup("youngs_modulus", itype));
+		printf("%40s : %g\n", "Poisson ratio", SafeLookup("poisson_ratio", itype));
+		printf("%40s : %g\n", "linear viscosity coefficient", SafeLookup("viscosity_q1", itype));
+		printf("%40s : %g\n", "quadratic viscosity coefficient", SafeLookup("viscosity_q2", itype));
+		printf("%40s : %g\n", "hourglass control coefficient", SafeLookup("hourglass_amp", itype));
+		printf("%40s : %g\n", "heat capacity [energy / (mass * temperature)]", SafeLookup("heat_capacity", itype));
+		printf("%40s : %g\n", "Lame constant lambda", SafeLookup("lame_lambda", itype));
+		printf("%40s : %g\n", "shear modulus", SafeLookup("lame_mu", itype));
+		printf("%40s : %g\n", "bulk modulus", SafeLookup("bulk_modulus", itype));
+		printf("%40s : %g\n", "signal velocity", SafeLookup("signal_vel", itype));
+
 	}
 
 	/*
-	 * read in common data defined for all material & EOS models:
-	 */
-	double rho0_one = atof(arg[4]);
-	double youngsmodulus_one = atof(arg[5]);
-	double poissonr_one = atof(arg[6]);
-	double q1_one = atof(arg[7]);
-	double q2_one = atof(arg[8]);
-	double hg_one = atof(arg[9]);
-	double cp_one = atof(arg[10]); // heat capacity
-
-	/*
-	 * read in EOS ans strength parameters
-	 */
-	double *materialCoeffs_one = new double[20];
-	for (k = 0; k < 20; k++) {
-		materialCoeffs_one[k] = atof(arg[11 + k]);
-	}
-
-	/*
-	 * check stress and strain failure criteria
+	 * read following material cards
 	 */
 
-	int count = 0;
-	for (int i = ilo; i <= ihi; i++) {
+	printf("next kwd is %s\n", arg[iNextKwd]);
+	eos[itype] = NONE;
+	strengthModel[itype] = NONE;
 
-		if (comm->me == 0)
-			printf("\n******************SPH2 / TLSPH PROPERTIES OF PARTICLE TYPE %d **************************\n", i);
-
-		/*
-		 * assign properties which are defined for all material & eos models
-		 */
-		strengthModel[i] = mat_one;
-		eos[i] = eos_one;
-		lmbda0[i] = youngsmodulus_one * poissonr_one / ((1.0 + poissonr_one) * (1.0 - 2.0 * poissonr_one));
-		rho0[i] = rho0_one;
-		mu0[i] = youngsmodulus_one / (2.0 * (1.0 + poissonr_one));
-		signal_vel0[i] = sqrt((lmbda0[i] + 2.0 * mu0[i]) / rho0[i]);
-		commonProps["heat_capacity"][i] = cp_one;
-
-		EOSProps["bulk_modulus"][i] = lmbda0[i] + 2.0 * mu0[i] / 3.0;
-
-		if (comm->me == 0) {
-			printf("\n material unspecific properties for SPH2/TLSPH definition of particle type %d:\n", i);
-			printf("%40s : %g\n", "Young's modulus", youngsmodulus_one);
-			printf("%40s : %g\n", "Poisson ratio", poissonr_one);
-			printf("%40s : %g\n", "Lame constants lambda", lmbda0[i]);
-			printf("%40s : %g\n", "shear modulus", mu0[i]);
-			printf("%40s : %g\n", "reference density", rho0[i]);
-			printf("%40s : %g\n", "signal velocity", signal_vel0[i]);
-			printf("%40s : %g\n", "linear viscosity coefficient", q1_one);
-			printf("%40s : %g\n", "quadratic viscosity coefficient", q2_one);
-			printf("%40s : %g\n", "heat capacity [energy / (mass * temperature)]", commonProps["heat_capacity"][i]);
+	while (true) {
+		if (strcmp(arg[iNextKwd], "*END") == 0) {
+			sprintf(str, "found *END");
+			error->message(FLERR, str);
+			break;
 		}
 
 		/*
-		 * assign pairwise defined quantities which are defined for all material & eos models
+		 * Linear Elasticity model based on deformation gradient
 		 */
-		for (int j = MAX(jlo, i); j <= jhi; j++) {
-			hg_coeff[i][j] = hg_one;
-			Q1[i][j] = q1_one;
-			Q2[i][j] = q2_one;
-			setflag[i][j] = 1;
-			count++;
-		}
+		ioffset = iNextKwd;
+		if (strcmp(arg[ioffset], "*LINEAR_DEFGRAD") == 0) {
+			strengthModel[itype] = LINEAR_DEFGRAD;
 
-		/*
-		 * assign data specific to EOS model
-		 */
-		if (comm->me == 0)
-			printf("\nEOS specific properties for SPH2/TLSPH definition of particle type %d:\n", i);
+			printf("reading *LINEAR_DEFGRAD\n");
 
-		if (eos[i] == LINEAR) {
-			if (comm->me == 0)
-				printf("%60s\n", "linear EOS");
-		} else if (eos[i] == LINEAR_CUTOFF) {
-			if (comm->me == 0)
-				printf("%60s\n", "linear EOS");
-			EOSProps["pressure_cutoff"][i] = materialCoeffs_one[0];
-			if (comm->me == 0)
-				printf("%60s : %g\n", "pressure cutoff for linear EOS", EOSProps["pressure_cutoff"][i]);
-		} else if (eos[i] == SHOCK_EOS) {
-			if (comm->me == 0)
-				printf("\n%60s\n", "shock EOS");
-			EOSProps["c0"][i] = materialCoeffs_one[0];
-			EOSProps["S_Hugoniot"][i] = materialCoeffs_one[1];
-			EOSProps["Gamma_Grueneisen"][i] = materialCoeffs_one[2];
-			if (comm->me == 0) {
-				printf("%60s : %g\n", "reference speed of sound", EOSProps["c0"][i]);
-				printf("%60s : %g\n", "Hugoniot parameter S", EOSProps["S_Hugoniot"][i]);
-				printf("%60s : %g\n", "Grueneisen Gamma", EOSProps["Gamma_Grueneisen"][i]);
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
 			}
-		} else if (eos[i] == POLYNOMIAL_EOS) {
-			if (comm->me == 0)
-				printf("\n%60s\n", "polynomial EOS");
-			EOSProps["C0"][i] = materialCoeffs_one[0];
-			EOSProps["C1"][i] = materialCoeffs_one[1];
-			EOSProps["C2"][i] = materialCoeffs_one[2];
-			EOSProps["C3"][i] = materialCoeffs_one[3];
-			EOSProps["C4"][i] = materialCoeffs_one[4];
-			EOSProps["C5"][i] = materialCoeffs_one[5];
-			EOSProps["C6"][i] = materialCoeffs_one[6];
-			if (comm->me == 0) {
-				printf("%60s : %g\n", "coefficient 0", EOSProps["C0"][i]);
-				printf("%60s : %g\n", "coefficient 1", EOSProps["C1"][i]);
-				printf("%60s : %g\n", "coefficient 2", EOSProps["C2"][i]);
-				printf("%60s : %g\n", "coefficient 3", EOSProps["C3"][i]);
-				printf("%60s : %g\n", "coefficient 4", EOSProps["C4"][i]);
-				printf("%60s : %g\n", "coefficient 5", EOSProps["C5"][i]);
-				printf("%60s : %g\n", "coefficient 6", EOSProps["C6"][i]);
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *LINEAR_DEFGRAD");
+				error->all(FLERR, str);
 			}
-		}
 
-		/*
-		 * assign data specific to Strength model
-		 */
-		if (comm->me == 0)
-			printf("\nStrength specific properties for SPH2/TLSPH definition of particle type %d:\n", i);
-		if (materialCoeffs_one[10] * materialCoeffs_one[11] != 0.0) {
-			error->all(FLERR,
-					"both maximum strain or stress damage models are set. only one damage model is allowed to be active.");
-		}
-
-		strengthProps["max_tensile_strain"][i] = materialCoeffs_one[10];
-		strengthProps["max_tensile_stress"][i] = materialCoeffs_one[11];
-		if (comm->me == 0) {
-			printf("%40s : %g\n", "maximum tensile strain (not active if zero)", strengthProps["max_tensile_strain"][i]);
-			printf("%40s : %g\n", "maximum tensile stress (not active if zero)", strengthProps["max_tensile_stress"][i]);
-		}
-
-		if (strengthModel[i] == LINEAR) {
-			// nothing to be done here
-		} else if (strengthModel[i] == LINEAR_PLASTIC) {
-			strengthProps["yield_stress0"][i] = materialCoeffs_one[12];
-			if (comm->me == 0) {
-				printf("\n%40s\n", "linear plastic material strength model");
-				printf("%40s : %g\n", "initial plastic yield stress", strengthProps["yield_stress0"][i]);
+			if (iNextKwd - ioffset != 1) {
+				sprintf(str, "expected 0 arguments following *LINEAR_DEFGRAD but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
 			}
-		} else if (strengthModel[i] == JOHNSON_COOK) {
-			strengthProps["JC_A"][i] = materialCoeffs_one[12];
-			strengthProps["JC_B"][i] = materialCoeffs_one[13];
-			strengthProps["JC_a"][i] = materialCoeffs_one[14];
-			strengthProps["JC_C"][i] = materialCoeffs_one[15];
-			strengthProps["JC_epdot0"][i] = materialCoeffs_one[16];
-			strengthProps["JC_T0"][i] = materialCoeffs_one[17];
-			strengthProps["JC_Tmelt"][i] = materialCoeffs_one[18];
-			strengthProps["JC_M"][i] = materialCoeffs_one[19];
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "Linear Elasticity model based on deformation gradient");
+			}
+		} else if (strcmp(arg[ioffset], "*LINEAR_STRENGTH") == 0) {
+
+			/*
+			 * Linear Elasticity strength only model based on strain rate
+			 */
+
+			strengthModel[itype] = LINEAR_STRENGTH;
+			printf("reading *LINEAR_STRENGTH\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *LINEAR_STRENGTH");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 1) {
+				sprintf(str, "expected 0 arguments following *LINEAR_STRENGTH but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "Linear Elasticity strength based on strain rate");
+			}
+		} // end Linear Elasticity strength only model based on strain rate
+
+		else if (strcmp(arg[ioffset], "*LINEAR_PLASTICITY") == 0) {
+
+			/*
+			 * Linear Elastic / perfectly plastic strength only model based on strain rate
+			 */
+
+			strengthModel[itype] = LINEAR_PLASTICITY;
+			printf("reading *LINEAR_PLASTICITY\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *LINEAR_PLASTICITY");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 1 + 1) {
+				sprintf(str, "expected 1 arguments following *LINEAR_PLASTICITY but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("yield_stress0", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "Linear elastic / perfectly plastic strength based on strain rate");
+				printf("%60s : %g\n", "Young's modulus", SafeLookup("youngs_modulus", itype));
+				printf("%60s : %g\n", "Poisson ratio", SafeLookup("poisson_ratio", itype));
+				printf("%60s : %g\n", "shear modulus", SafeLookup("lame_mu", itype));
+				printf("%60s : %g\n", "constant yield stress", SafeLookup("yield_stress0", itype));
+			}
+		} // end Linear Elastic / perfectly plastic strength only model based on strain rate
+
+		else if (strcmp(arg[ioffset], "*JOHNSON_COOK") == 0) {
+
+			/*
+			 * JOHNSON - COOK
+			 */
+
+			strengthModel[itype] = STRENGTH_JOHNSON_COOK;
+			printf("reading *JOHNSON_COOK\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *JOHNSON_COOK");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 8 + 1) {
+				sprintf(str, "expected 8 arguments following *JOHNSON_COOK but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("JC_A", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+			matProp2[std::make_pair("JC_B", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
+			matProp2[std::make_pair("JC_a", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+			matProp2[std::make_pair("JC_C", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
+			matProp2[std::make_pair("JC_epdot0", itype)] = force->numeric(FLERR, arg[ioffset + 5]);
+			matProp2[std::make_pair("JC_T0", itype)] = force->numeric(FLERR, arg[ioffset + 6]);
+			matProp2[std::make_pair("JC_Tmelt", itype)] = force->numeric(FLERR, arg[ioffset + 7]);
+			matProp2[std::make_pair("JC_M", itype)] = force->numeric(FLERR, arg[ioffset + 8]);
 
 			if (comm->me == 0) {
 				printf("\n%60s\n", "Johnson Cook material strength model");
-				printf("%60s : %g\n", "A: initial yield stress", strengthProps["JC_A"][i]);
-				printf("%60s : %g\n", "B : proportionality factor for plastic strain dependency", strengthProps["JC_B"][i]);
-				printf("%60s : %g\n", "a : exponent for plastic strain dependency", strengthProps["JC_a"][i]);
+				printf("%60s : %g\n", "A: initial yield stress", SafeLookup("JC_A", itype));
+				printf("%60s : %g\n", "B : proportionality factor for plastic strain dependency", SafeLookup("JC_B", itype));
+				printf("%60s : %g\n", "a : exponent for plastic strain dependency", SafeLookup("JC_a", itype));
 				printf("%60s : %g\n", "C : proportionality factor for logarithmic plastic strain rate dependency",
-						strengthProps["JC_C"][i]);
+						SafeLookup("JC_C", itype));
 				printf("%60s : %g\n", "epdot0 : dimensionality factor for plastic strain rate dependency",
-						strengthProps["JC_epdot0"][i]);
-				printf("%60s : %g\n", "T0 : reference (room) temperature", strengthProps["JC_T0"][i]);
-				printf("%60s : %g\n", "Tmelt : melting temperature", strengthProps["JC_Tmelt"][i]);
-				printf("%60s : %g\n", "M : exponent for temperature dependency", strengthProps["JC_M"][i]);
+						SafeLookup("JC_epdot0", itype));
+				printf("%60s : %g\n", "T0 : reference (room) temperature", SafeLookup("JC_T0", itype));
+				printf("%60s : %g\n", "Tmelt : melting temperature", SafeLookup("JC_Tmelt", itype));
+				printf("%60s : %g\n", "M : exponent for temperature dependency", SafeLookup("JC_M", itype));
 			}
+
+		} else if (strcmp(arg[ioffset], "*EOS_LINEAR") == 0) {
+
+			/*
+			 * linear eos
+			 */
+
+			eos[itype] = EOS_LINEAR;
+			printf("reading *EOS_LINEAR\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *EOS_LINEAR");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 1) {
+				sprintf(str, "expected 0 arguments following *EOS_LINEAR but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "linear EOS based on strain rate");
+				printf("%60s : %g\n", "bulk modulus", SafeLookup("bulk_modulus", itype));
+			}
+		} // end linear eos
+		else if (strcmp(arg[ioffset], "*EOS_SHOCK") == 0) {
+
+			/*
+			 * shock eos
+			 */
+
+			eos[itype] = EOS_SHOCK;
+			printf("reading *EOS_SHOCK\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *EOS_SHOCK");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 3 + 1) {
+				sprintf(str, "expected 3 arguments following *EOS_SHOCK but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("eos_shock_c0", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+			matProp2[std::make_pair("eos_shock_s", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
+			matProp2[std::make_pair("eos_shock_gamma", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+			if (comm->me == 0) {
+				printf("\n%60s\n", "shock EOS based on strain rate");
+				printf("%60s : %g\n", "reference speed of sound", SafeLookup("eos_shock_c0", itype));
+				printf("%60s : %g\n", "Hugoniot parameter S", SafeLookup("eos_shock_s", itype));
+				printf("%60s : %g\n", "Grueneisen Gamma", SafeLookup("eos_shock_gamma", itype));
+			}
+		} // end shock eos
+
+		else if (strcmp(arg[ioffset], "*EOS_POLYNOMIAL") == 0) {
+			/*
+			 * polynomial eos
+			 */
+
+			eos[itype] = EOS_POLYNOMIAL;
+			printf("reading *EOS_POLYNOMIAL\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *EOS_POLYNOMIAL");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 7 + 1) {
+				sprintf(str, "expected 7 arguments following *EOS_POLYNOMIAL but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("eos_polynomial_c0", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+			matProp2[std::make_pair("eos_polynomial_c1", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
+			matProp2[std::make_pair("eos_polynomial_c2", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+			matProp2[std::make_pair("eos_polynomial_c3", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
+			matProp2[std::make_pair("eos_polynomial_c4", itype)] = force->numeric(FLERR, arg[ioffset + 5]);
+			matProp2[std::make_pair("eos_polynomial_c5", itype)] = force->numeric(FLERR, arg[ioffset + 6]);
+			matProp2[std::make_pair("eos_polynomial_c6", itype)] = force->numeric(FLERR, arg[ioffset + 7]);
+			if (comm->me == 0) {
+				printf("\n%60s\n", "polynomial EOS based on strain rate");
+				printf("%60s : %g\n", "parameter c0", SafeLookup("eos_polynomial_c0", itype));
+				printf("%60s : %g\n", "parameter c1", SafeLookup("eos_polynomial_c1", itype));
+				printf("%60s : %g\n", "parameter c2", SafeLookup("eos_polynomial_c2", itype));
+				printf("%60s : %g\n", "parameter c3", SafeLookup("eos_polynomial_c3", itype));
+				printf("%60s : %g\n", "parameter c4", SafeLookup("eos_polynomial_c4", itype));
+				printf("%60s : %g\n", "parameter c5", SafeLookup("eos_polynomial_c5", itype));
+				printf("%60s : %g\n", "parameter c6", SafeLookup("eos_polynomial_c6", itype));
+			}
+		} // end polynomial eos
+
+		else if (strcmp(arg[ioffset], "*FAILURE_MAX_PLASTIC_STRAIN") == 0) {
+
+			/*
+			 * maximum plastic strain failure criterion
+			 */
+
+			printf("reading *FAILURE_MAX_PLASTIC_SRTRAIN\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *FAILURE_MAX_PLASTIC_STRAIN");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 1 + 1) {
+				sprintf(str, "expected 1 arguments following *FAILURE_MAX_PLASTIC_STRAIN but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("failure_max_plastic_strain", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "maximum plastic strain failure criterion");
+				printf("%60s : %g\n", "failure occurs when plastic strain reaches limit",
+						SafeLookup("failure_max_plastic_strain", itype));
+			}
+		} // end maximum plastic strain failure criterion
+		else if (strcmp(arg[ioffset], "*FAILURE_MAX_PRINCIPAL_STRAIN") == 0) {
+
+			/*
+			 * maximum principal strain failure criterion
+			 */
+
+			printf("reading *FAILURE_MAX_PRINCIPAL_STRAIN\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *FAILURE_MAX_PRINCIPAL_STRAIN");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 1 + 1) {
+				sprintf(str, "expected 1 arguments following *FAILURE_MAX_PRINCIPAL_STRAIN but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("failure_max_principal_strain", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "maximum principal strain failure criterion");
+				printf("%60s : %g\n", "failure occurs when principal strain reaches limit",
+						SafeLookup("failure_max_principal_strain", itype));
+			}
+		} // end maximum principal strain failure criterion
+		else if (strcmp(arg[ioffset], "*FAILURE_JOHNSON_COOK") == 0) {
+
+			printf("reading *FAILURE_JOHNSON_COOK\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *FAILURE_JOHNSON_COOK");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 5 + 1) {
+				sprintf(str, "expected 5 arguments following *FAILURE_JOHNSON_COOK but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("failure_JC_d1", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+			matProp2[std::make_pair("failure_JC_d2", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
+			matProp2[std::make_pair("failure_JC_d3", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+			matProp2[std::make_pair("failure_JC_d4", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
+			matProp2[std::make_pair("failure_JC_epdot0", itype)] = force->numeric(FLERR, arg[ioffset + 5]);
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "Johnson-Cook failure criterion");
+				printf("%60s : %g\n", "parameter d1", SafeLookup("failure_JC_d1", itype));
+				printf("%60s : %g\n", "parameter d2", SafeLookup("failure_JC_d2", itype));
+				printf("%60s : %g\n", "parameter d3", SafeLookup("failure_JC_d3", itype));
+				printf("%60s : %g\n", "parameter d4", SafeLookup("failure_JC_d4", itype));
+				printf("%60s : %g\n", "reference plastic strain rate", SafeLookup("failure_JC_epdot0", itype));
+			}
+
+		} else if (strcmp(arg[ioffset], "*FAILURE_MAX_PRINCIPAL_STRESS") == 0) {
+
+			/*
+			 * maximum principal stress failure criterion
+			 */
+
+			printf("reading *FAILURE_MAX_PRINCIPAL_STRESS\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *FAILURE_MAX_PRINCIPAL_STRESS");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 1 + 1) {
+				sprintf(str, "expected 1 arguments following *FAILURE_MAX_PRINCIPAL_STRESS but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("failure_max_principal_stress", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "maximum principal stress failure criterion");
+				printf("%60s : %g\n", "failure occurs when principal stress reaches limit",
+						SafeLookup("failure_max_principal_stress", itype));
+			}
+		} // end maximum principal stress failure criterion
+		else {
+			sprintf(str, "unknown *KEYWORD: %s", arg[ioffset]);
+			error->all(FLERR, str);
 		}
 
-		if (comm->me == 0)
-			printf("***************************************************************************************\n");
 	}
 
-	if (count == 0)
-		error->all(FLERR, "Incorrect args for pair coefficients");
+	/*
+	 * copy data which is looked up in inner pairwise loops from slow maps to fast arrays
+	 */
 
-	delete[] materialCoeffs_one;
+	hg_coeff[itype] = SafeLookup("hourglass_amp", itype);
+	Q1[itype] = SafeLookup("viscosity_q1", itype);
+	Q2[itype] = SafeLookup("viscosity_q2", itype);
+	youngsmodulus[itype] = SafeLookup("youngs_modulus", itype);
+	signal_vel0[itype] = SafeLookup("signal_vel", itype);
+	rho0[itype] = SafeLookup("rho_ref", itype);
+
+	setflag[itype][itype] = 1;
+
 }
 
 /* ----------------------------------------------------------------------
@@ -1524,10 +1897,6 @@ double PairTlsph::init_one(int i, int j) {
 
 	if (setflag[i][j] == 0)
 		error->all(FLERR, "All pair coeffs are not set");
-
-	hg_coeff[j][i] = hg_coeff[i][j];
-	Q1[j][i] = Q1[i][j];
-	Q2[j][i] = Q2[i][j];
 
 // cutoff = sum of max I,J radii for
 // dynamic/dynamic & dynamic/frozen interactions, but not frozen/frozen
@@ -1582,58 +1951,6 @@ void PairTlsph::init_list(int id, NeighList *ptr) {
 }
 
 /* ----------------------------------------------------------------------
- proc 0 writes to restart file
- ------------------------------------------------------------------------- */
-
-void PairTlsph::write_restart(FILE *fp) {
-	int i, j;
-	for (i = 1; i <= atom->ntypes; i++) {
-		fwrite(&youngsmodulus[i], sizeof(double), 1, fp);
-		fwrite(&poissonr[i], sizeof(double), 1, fp);
-		for (j = i; j <= atom->ntypes; j++) {
-			fwrite(&setflag[i][j], sizeof(int), 1, fp);
-			if (setflag[i][j]) {
-				fwrite(&Q1[i][j], sizeof(double), 1, fp);
-			}
-		}
-	}
-}
-
-/* ----------------------------------------------------------------------
- proc 0 reads from restart file, bcasts
- ------------------------------------------------------------------------- */
-
-void PairTlsph::read_restart(FILE *fp) {
-	allocate();
-
-	int i, j;
-	int me = comm->me;
-	for (i = 1; i <= atom->ntypes; i++) {
-		if (me == 0) {
-			fread(&youngsmodulus[i], sizeof(double), 1, fp);
-			fread(&poissonr[i], sizeof(double), 1, fp);
-		}
-
-		MPI_Bcast(&youngsmodulus[i], 1, MPI_DOUBLE, 0, world);
-		MPI_Bcast(&poissonr[i], 1, MPI_DOUBLE, 0, world);
-
-		for (j = i; j <= atom->ntypes; j++) {
-			if (me == 0) {
-				fread(&setflag[i][j], sizeof(int), 1, fp);
-			}
-			MPI_Bcast(&setflag[i][j], 1, MPI_INT, 0, world);
-
-			if (setflag[i][j]) {
-				if (me == 0) {
-					fread(&Q1[i][j], sizeof(double), 1, fp);
-				}
-				MPI_Bcast(&Q1[i][j], 1, MPI_DOUBLE, 0, world);
-			}
-		}
-	}
-}
-
-/* ----------------------------------------------------------------------
  memory usage of local atom-based arrays
  ------------------------------------------------------------------------- */
 
@@ -1670,6 +1987,8 @@ void *PairTlsph::extract(const char *str, int &i) {
 		return (void *) &dtCFL;
 	} else if (strcmp(str, "sph2/tlsph/dtRelative_ptr") == 0) {
 		return (void *) &dtRelative;
+	} else if (strcmp(str, "sph2/tlsph/hourglass_error_ptr") == 0) {
+		return (void *) hourglass_error;
 	}
 
 	return NULL;
@@ -1681,7 +2000,7 @@ int PairTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 	int i, j, m;
 	int *mol = atom->molecule;
 
-	//printf("in PairTlsph::pack_forward_comm\n");
+//printf("in PairTlsph::pack_forward_comm\n");
 
 	m = 0;
 	for (i = 0; i < n; i++) {
@@ -1719,7 +2038,7 @@ void PairTlsph::unpack_forward_comm(int n, int first, double *buf) {
 	int i, m, last;
 	int *mol = atom->molecule;
 
-	//printf("in PairTlsph::unpack_forward_comm\n");
+//printf("in PairTlsph::unpack_forward_comm\n");
 
 	m = 0;
 	last = first + n;
@@ -1750,7 +2069,7 @@ void PairTlsph::unpack_forward_comm(int n, int first, double *buf) {
 	}
 }
 
-void PairTlsph::kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
+void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
 
 	/*
 	 * Spiky kernel
@@ -1765,6 +2084,23 @@ void PairTlsph::kernel_and_derivative(const double h, const double r, double &wf
 		double hr = h - r; // [m]
 		wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
 		wf = -0.333333333333e0 * hr * wfd; // [m/m^4] ==> [1/m^3] correct for W in 3D
+	}
+
+}
+
+void PairTlsph::barbara_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
+
+	/*
+	 * Barbara kernel
+	 */
+
+	if (domain->dimension == 2) {
+		double arg = (1.570796327 * (r + h)) / h;
+		double hsq = h * h;
+		wf = (1.680351548 * (cos(arg) + 1.)) / hsq;
+		wfd = -2.639490040 * sin(arg) / (hsq * h);
+	} else {
+		error->one(FLERR, "not implemented yet");
 	}
 
 }
@@ -1943,6 +2279,21 @@ void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrai
 	}
 }
 
+double PairTlsph::JohnsonCookFailureStrain(double p, Matrix3d Sdev, double d1, double d2, double d3, double d4, double epdot0,
+		double epdot) {
+
+	double vm = sqrt(3. / 2.) * Sdev.norm(); // von-Mises equivalent stress
+	double epdot_ratio = epdot / epdot0;
+	epdot_ratio = MAX(epdot_ratio, 1.0);
+	double result = d1 + d2 * exp(d3 * vm / p); // * (1.0 + d4 * log(epdot_ratio)); // rest left out for now
+	if (result > 0.0) {
+		return result;
+	} else {
+		return 1.0e22;
+	}
+
+}
+
 /* ----------------------------------------------------------------------
  compute effectiveP-wave speed
  determined by longitudinal modulus
@@ -1954,30 +2305,32 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 	double mu2; // 2 times the effective shear modulus, see Pronto 2d eq. 3.4.7
 	double shear_rate_sq;
 	double M; //effective longitudinal modulus
+	double M0; // initial longitudinal modulus
 
-	if (dt * d_iso > 1.0e-1) {
-		K3 = 3.0 * p_rate / (dt * d_iso);
+	M0 = SafeLookup("m_modulus", itype);
+
+	if (dt * d_iso > 1.0e-6) {
+		K3 = 3.0 * p_rate / d_iso;
 	} else {
-		K3 = 3.0 * lmbda0[itype] + 2.0 * mu0[itype];
+		K3 = 3.0 * M0;
 	}
 
 	if (domain->dimension == 3) {
-		mu2 = sigma_dev_rate(0, 1) / (dt * d_dev(0, 1)) + sigma_dev_rate(0, 2) / (dt * d_dev(0, 2))
-				+ sigma_dev_rate(1, 2) / (dt * d_dev(1, 2));
+		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1)) + sigma_dev_rate(0, 2) / (d_dev(0, 2)) + sigma_dev_rate(1, 2) / (d_dev(1, 2));
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1) + d_dev(0, 2) * d_dev(0, 2) + d_dev(1, 2) * d_dev(1, 2);
 	} else {
-		mu2 = sigma_dev_rate(0, 1) / (dt * d_dev(0, 1));
+		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1));
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1);
 	}
 
 	if (dt * dt * shear_rate_sq < 1.0e-8) {
-		mu2 = 0.5 * (3.0 * (lmbda0[itype] + 2.0 * mu0[itype]) - K3);
+		mu2 = 0.5 * (3.0 * M0 - K3); // Formel stimmt
 	}
 
 	M = (K3 + 2.0 * mu2) / 3.0; // effective dilational modulus, see Pronto 2d eqn 3.4.8
 
-	if (M < lmbda0[itype] + 2.0 * mu0[itype]) { // do not allow effective dilatational modulus to decrease beyond its initial value
-		M = lmbda0[itype] + 2.0 * mu0[itype];
+	if (M < M0) { // do not allow effective dilatational modulus to decrease beyond its initial value
+		M = M0;
 	}
 
 	/*
@@ -1986,9 +2339,289 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 	 */
 
 	if (damage > 0.99) {
-		M = lmbda0[itype] + 2.0 * mu0[itype]; //
+		M = M0; //
 	}
 
 	return M;
 
+}
+
+/* ----------------------------------------------------------------------
+ smooth stress field
+ ------------------------------------------------------------------------- */
+
+void PairTlsph::SmoothField() {
+	int *mol = atom->molecule;
+	double *vfrac = atom->vfrac;
+	double *radius = atom->radius;
+	double **x0 = atom->x0;
+	double **tlsph_stress = atom->tlsph_stress;
+	int *ilist, *jlist, *numneigh;
+	int **firstneigh;
+	int nlocal = atom->nlocal;
+	int inum, jnum, ii, jj, i, j;
+	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
+	Vector3d dx0;
+	Matrix3d stress;
+	Matrix3d *average_stress;
+	double *norm;
+	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
+	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+
+// allocate storage
+	average_stress = new Matrix3d[nlocal];
+	norm = new double[nlocal];
+
+// zero accumulators
+	stress.setZero();
+	for (i = 0; i < nlocal; i++) {
+		stress(0, 0) = tlsph_stress[i][0];
+		stress(0, 1) = tlsph_stress[i][1];
+		stress(0, 2) = tlsph_stress[i][2];
+		stress(1, 1) = tlsph_stress[i][3];
+		stress(1, 2) = tlsph_stress[i][4];
+		stress(2, 2) = tlsph_stress[i][5];
+
+		h = 2.0 * radius[i];
+		r0 = 0.0;
+
+		spiky_kernel_and_derivative(h, r0, wf, wfd);
+		average_stress[i] = wf * vfrac[i] * stress;
+		norm[i] = wf * vfrac[i];
+	}
+
+// set up neighbor list variables
+	inum = list->inum;
+	ilist = list->ilist;
+	numneigh = list->numneigh;
+	firstneigh = list->firstneigh;
+
+	for (ii = 0; ii < inum; ii++) {
+		i = ilist[ii];
+
+		if (mol[i] < 0) { // valid SPH particle have mol > 0
+			continue;
+		}
+
+		jlist = firstneigh[i];
+		jnum = numneigh[i];
+		irad = radius[i];
+		voli = vfrac[i];
+		x0i << x0[i][0], x0[i][1], x0[i][2];
+
+		for (jj = 0; jj < jnum; jj++) {
+			j = jlist[jj];
+			j &= NEIGHMASK;
+
+			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
+				continue;
+			}
+
+			if (mol[i] != mol[j]) {
+				continue;
+			}
+
+			x0j << x0[j][0], x0[j][1], x0[j][2];
+			dx0 = x0j - x0i;
+
+			if (periodic)
+				domain->minimum_image(dx0(0), dx0(1), dx0(2));
+
+			r0Sq = dx0.squaredNorm();
+			h = irad + radius[j];
+			if (r0Sq < h * h) {
+
+				r0 = sqrt(r0Sq);
+				volj = vfrac[j];
+
+				stress(0, 0) = tlsph_stress[j][0];
+				stress(0, 1) = tlsph_stress[j][1];
+				stress(0, 2) = tlsph_stress[j][2];
+				stress(1, 1) = tlsph_stress[j][3];
+				stress(1, 2) = tlsph_stress[j][4];
+				stress(2, 2) = tlsph_stress[j][5];
+
+				// kernel function
+				spiky_kernel_and_derivative(h, r0, wf, wfd);
+
+				average_stress[i] += wf * volj * stress;
+				norm[i] += volj * wf;
+
+				if (j < nlocal) {
+
+					stress(0, 0) = tlsph_stress[i][0];
+					stress(0, 1) = tlsph_stress[i][1];
+					stress(0, 2) = tlsph_stress[i][2];
+					stress(1, 1) = tlsph_stress[i][3];
+					stress(1, 2) = tlsph_stress[i][4];
+					stress(2, 2) = tlsph_stress[i][5];
+
+					average_stress[j] += wf * voli * stress;
+					norm[j] += voli * wf;
+				}
+
+			} // end if check distance
+		} // end loop over j
+	} // end loop over i
+
+	for (i = 0; i < nlocal; i++) {
+		stress = average_stress[i] / norm[i];
+
+		tlsph_stress[i][0] = stress(0, 0);
+		tlsph_stress[i][1] = stress(0, 1);
+		tlsph_stress[i][2] = stress(0, 2);
+		tlsph_stress[i][3] = stress(1, 1);
+		tlsph_stress[i][4] = stress(1, 2);
+		tlsph_stress[i][5] = stress(2, 2);
+
+	}
+
+}
+
+/* ----------------------------------------------------------------------
+ XSPH-like smoothing of stress field
+ ------------------------------------------------------------------------- */
+
+void PairTlsph::SmoothFieldXSPH() {
+	int *mol = atom->molecule;
+	double *vfrac = atom->vfrac;
+	double *radius = atom->radius;
+	double **x0 = atom->x0;
+	double **tlsph_stress = atom->tlsph_stress;
+	int *ilist, *jlist, *numneigh;
+	int **firstneigh;
+	int nlocal = atom->nlocal;
+	int inum, jnum, ii, jj, i, j;
+	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
+	Vector3d dx0;
+	Matrix3d stress_i, stress_j;
+	Matrix3d *stress_difference;
+	double *norm;
+	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
+	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+
+// allocate storage
+	stress_difference = new Matrix3d[nlocal];
+	norm = new double[nlocal];
+
+// zero accumulators
+	stress_i.setZero();
+	for (i = 0; i < nlocal; i++) {
+		stress_difference[i].setZero();
+		norm[i] = 0.0;
+	}
+
+// set up neighbor list variables
+	inum = list->inum;
+	ilist = list->ilist;
+	numneigh = list->numneigh;
+	firstneigh = list->firstneigh;
+
+	for (ii = 0; ii < inum; ii++) {
+		i = ilist[ii];
+
+		if (mol[i] < 0) { // valid SPH particle have mol > 0
+			continue;
+		}
+
+		jlist = firstneigh[i];
+		jnum = numneigh[i];
+		irad = radius[i];
+		voli = vfrac[i];
+		x0i << x0[i][0], x0[i][1], x0[i][2];
+
+		stress_i(0, 0) = tlsph_stress[i][0];
+		stress_i(0, 1) = tlsph_stress[i][1];
+		stress_i(0, 2) = tlsph_stress[i][2];
+		stress_i(1, 1) = tlsph_stress[i][3];
+		stress_i(1, 2) = tlsph_stress[i][4];
+		stress_i(2, 2) = tlsph_stress[i][5];
+
+		for (jj = 0; jj < jnum; jj++) {
+			j = jlist[jj];
+			j &= NEIGHMASK;
+
+			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
+				continue;
+			}
+
+			if (mol[i] != mol[j]) {
+				continue;
+			}
+
+			x0j << x0[j][0], x0[j][1], x0[j][2];
+			dx0 = x0j - x0i;
+
+			if (periodic)
+				domain->minimum_image(dx0(0), dx0(1), dx0(2));
+
+			r0Sq = dx0.squaredNorm();
+			h = irad + radius[j];
+			if (r0Sq < h * h) {
+
+				r0 = sqrt(r0Sq);
+				volj = vfrac[j];
+
+				stress_j(0, 0) = tlsph_stress[j][0];
+				stress_j(0, 1) = tlsph_stress[j][1];
+				stress_j(0, 2) = tlsph_stress[j][2];
+				stress_j(1, 1) = tlsph_stress[j][3];
+				stress_j(1, 2) = tlsph_stress[j][4];
+				stress_j(2, 2) = tlsph_stress[j][5];
+
+				// kernel function
+				spiky_kernel_and_derivative(h, r0, wf, wfd);
+
+				stress_difference[i] += wf * volj * (stress_j - stress_i);
+				norm[i] += volj * wf;
+
+				if (j < nlocal) {
+
+					stress_difference[j] += wf * voli * (stress_i - stress_j);
+					norm[j] += voli * wf;
+				}
+
+			} // end if check distance
+		} // end loop over j
+	} // end loop over i
+
+	for (i = 0; i < nlocal; i++) {
+
+		tlsph_stress[i][0] += stress_difference[i](0, 0) / norm[i];
+		tlsph_stress[i][1] += stress_difference[i](0, 1) / norm[i];
+		tlsph_stress[i][2] += stress_difference[i](0, 2) / norm[i];
+		tlsph_stress[i][3] += stress_difference[i](1, 1) / norm[i];
+		tlsph_stress[i][4] += stress_difference[i](1, 2) / norm[i];
+		tlsph_stress[i][5] += stress_difference[i](2, 2) / norm[i];
+
+	}
+
+}
+
+double PairTlsph::SafeLookup(std::string str, int itype) {
+	//cout << "string passed to lookup: " << str << endl;
+	char msg[128];
+	if (matProp2.count(std::make_pair(str, itype)) == 1) {
+		//cout << "returning look up value %d " << matProp2[std::make_pair(str, itype)] << endl;
+		return matProp2[std::make_pair(str, itype)];
+	} else {
+		//sprintf(msg, "failed to lookup indentifier [%s] for particle type %d", str, itype);
+		error->all(FLERR, msg);
+	}
+	return 1.0;
+}
+
+bool PairTlsph::CheckKeywordPresent(std::string str, int itype) {
+	int count = matProp2.count(std::make_pair(str, itype));
+	if (count == 0) {
+		return false;
+	} else if (count == 1) {
+		return true;
+	} else {
+		char msg[128];
+		cout << "keyword: " << str << endl;
+		sprintf(msg, "ambiguous count for keyword: %d times present\n", count);
+		error->all(FLERR, msg);
+	}
+	return false;
 }

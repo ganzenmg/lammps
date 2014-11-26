@@ -1,0 +1,93 @@
+variable        l0 equal 1.0/15
+variable        rho equal 1
+variable        h equal 3.01*${l0}
+variable        E equal 1.0 # Young's modulus
+variable        nu equal 0.3 # Poisson ratio
+variable        G equal ${E}/(2*(1.0+${nu}))
+# ----
+variable        vol_one equal ${l0}^2
+variable        mass_one equal ${vol_one}*${rho}
+variable        c0 equal sqrt(${E}/${rho})
+variable        dt equal 0.5*0.125*${l0}/${c0}
+print           "sound speed is ${c0}, CFL timestep is ${dt}, G=${G}"
+variable        crad equal 0.5*${l0} # short-range contact radius
+variable        skin equal 0.5*${l0} # Verlet list range
+variable        ghostcut equal 7.5*${h}
+variable        vel equal 0.005*${c0}
+variable        contact_stiffness equal 100*${E}
+
+units		si
+dimension       2
+boundary        s s p
+atom_style      tlsph
+neighbor        ${skin} bin
+neigh_modify    every 1 delay 0 check yes
+newton          off
+comm_modify     vel yes
+
+# system extents
+lattice         sq ${l0}
+region          box block -1 1 -1 1 -0.01 0.01 units box
+create_box      1 box
+create_atoms    1 box
+set             group all mass ${mass_one}
+set             group all volume ${vol_one}
+set             group all contact_radius ${crad}
+set             group all diameter ${h}
+set             group all mol 1
+
+# boundary regions
+region          top block EDGE EDGE 0.99 EDGE  EDGE EDGE units box
+region          bot block EDGE EDGE EDGE -0.99 EDGE EDGE units box
+group           top region top
+group           bot region bot
+
+group           free subtract all top bot
+
+pair_style      tlsph
+#                           rh0    E    nu    Q1    Q2   hg    Cp
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.06  0.0  -100.0 1.0 &
+                *LINEAR_STRENGTH &
+		*EOS_LINEAR &
+                *END
+
+compute         E all sph2/tlsph_strain
+compute         S all sph2/tlsph_stress
+compute         nn all sph2/tlsph_num_neighs
+compute         contact_radius all sph2/contact_radius
+compute         eint all sph2/internal_energy
+compute         toteint all reduce sum c_eint
+variable        et equal ke+c_toteint
+compute         P all sph2/plastic_strain
+compute         err all sph2/hourglass_error
+
+thermo          100
+thermo_style    custom step ke
+dump            dump_id all custom 100 dump.LAMMPS id type x y z diameter fx fy fz &
+		c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
+                vx vy vz c_eint proc &
+                c_contact_radius c_nn mol mass c_P c_err
+dump_modify     dump_id first yes
+
+# initial run
+run             2
+
+timestep        ${dt}
+fix             dtfix all sph2/tlsph_dt_reset 5 0.1
+variable        stress equal (f_botfix[2]-f_topfix[2])/2.0
+variable        strain equal (2.0*${vel}*f_dtfix[1])/2.0
+thermo 100
+thermo_style    custom step ke dt f_dtfix[1] v_strain
+velocity        top set 0.0  ${vel} 0.0 sum no units box
+velocity        bot set 0.0 -${vel} 0.0 sum no units box
+fix             topfix top setforce 0 0 0
+fix             botfix bot setforce 0 0 0
+fix             integration_fix all  sph2/integrate_tlsph 1.5e3 -1 update
+
+fix             stress_curve all print 10 "${strain} ${stress}" file stress_strain.dat screen no
+
+
+run             20000
+
+

@@ -136,6 +136,7 @@ void AtomVecSph2::grow_reset() {
 	radius = atom->radius;
 	rmass = atom->rmass;
 
+	molecule = atom->molecule;
 	vfrac = atom->vfrac;
 	x0 = atom->x0;
 	contact_radius = atom->contact_radius;
@@ -149,6 +150,7 @@ void AtomVecSph2::grow_reset() {
 	rho = atom->rho;
 	drho = atom->drho;
 	damage = atom->damage;
+	vest = atom->vest;
 }
 
 /* ----------------------------------------------------------------------
@@ -756,9 +758,9 @@ int AtomVecSph2::pack_exchange(int i, double *buf) {
 
 	buf[m++] = damage[i];
 
-	if (atom->nextra_grow)
-		for (int iextra = 0; iextra < atom->nextra_grow; iextra++)
-			m += modify->fix[atom->extra_grow[iextra]]->pack_exchange(i, &buf[m]);
+//	if (atom->nextra_grow)
+//		for (int iextra = 0; iextra < atom->nextra_grow; iextra++)
+//			m += modify->fix[atom->extra_grow[iextra]]->pack_exchange(i, &buf[m]);
 
 	buf[0] = m;
 	return m;
@@ -811,9 +813,9 @@ int AtomVecSph2::unpack_exchange(double *buf) {
 
 	damage[nlocal] = buf[m++]; //40
 
-	if (atom->nextra_grow)
-		for (int iextra = 0; iextra < atom->nextra_grow; iextra++)
-			m += modify->fix[atom->extra_grow[iextra]]->unpack_exchange(nlocal, &buf[m]);
+//	if (atom->nextra_grow)
+//		for (int iextra = 0; iextra < atom->nextra_grow; iextra++)
+//			m += modify->fix[atom->extra_grow[iextra]]->unpack_exchange(nlocal, &buf[m]);
 
 	atom->nlocal++;
 	return m;
