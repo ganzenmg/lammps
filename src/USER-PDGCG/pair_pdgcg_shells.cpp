@@ -121,6 +121,10 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 	int *npartner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->npartner;
 	double *vinter = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->vinter;
 	tagint *tag = atom->tag;
+	tagint ***trianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairs;
+	int *nTrianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->nTrianglePairs;
+
+	int t, i1, i2, i3, i4, tnum;
 
 	evdwl = 0.0;
 	if (eflag || vflag)
@@ -142,7 +146,7 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 	numneigh = list->numneigh;
 	firstneigh = list->firstneigh;
 
-	if (false) {
+	if (true) {
 
 		for (ii = 0; ii < inum; ii++) {
 			i = ilist[ii];
@@ -181,10 +185,10 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 				delx0 = x0[j][0] - x0[i][0];
 				dely0 = x0[j][1] - x0[i][1];
 				delz0 = x0[j][2] - x0[i][2];
-				r0cut = sqrt(delx0 * delx0 + dely0 * dely0 + delz0 * delz0);
+				r0cut = radius_factor * sqrt(delx0 * delx0 + dely0 * dely0 + delz0 * delz0);
 
 				rcut = radius_factor * (radiusSR[i] + radiusSR[j]);
-				//rcut = MIN(rcut, r0cut);
+				rcut = MIN(rcut, r0cut);
 
 				if (rsq < rcut * rcut) {
 
@@ -285,14 +289,16 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 				jtype = type[j];
 				delta = radius[i] + radius[j];
 				r = sqrt(rsq);
-				dr = r - (r0[i][jj] + plastic_stretch[i][jj]);
+				//dr = r - (r0[i][jj] + plastic_stretch[i][jj]);
+				dr = r - r0[i][jj];
 
 				// avoid roundoff errors
 				if (fabs(dr) < 2.2204e-016)
 					dr = 0.0;
 
 				// bond stretch
-				stretch = dr / (r0[i][jj] + plastic_stretch[i][jj]); // total stretch
+				//stretch = dr / (r0[i][jj] + plastic_stretch[i][jj]); // total stretch
+				stretch = dr / r0[i][jj];
 
 //				if (stretch > syield[itype][jtype]) {
 //					double increment = se - syield[itype][jtype];
@@ -332,6 +338,22 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 					partner[i][jj] = 0;
 					nBroken += 1;
 					e[i] += 0.5 * evdwl;
+					printf("breaking bond\n");
+
+					// iterate over all tris connected to i -- if both i and j are part of the triangle pairs, delete that triangle pair.
+					tnum = nTrianglePairs[i];
+
+					for (t = 0; t < tnum; t++) {
+						i3 = atom->map(trianglePairs[i][t][0]); // should be i
+						i4 = atom->map(trianglePairs[i][t][1]);
+						i1 = atom->map(trianglePairs[i][t][2]);
+						i2 = atom->map(trianglePairs[i][t][3]);
+
+						if ((i4 == j) || (i1 == j) || (i2 == j)) {
+							trianglePairs[i][t][0] = -1;
+						}
+
+					}
 
 //					printf("nlocal=%d, i=%d, j=%d\n", nlocal, i, j);
 ////
@@ -404,6 +426,11 @@ void PairPDGCGShells::bending_forces() {
 		tnum = nTrianglePairs[i];
 
 		for (t = 0; t < tnum; t++) {
+
+			// check if triangle pair has not been deleted
+			if (trianglePairs[i][t][0] < 0) {
+				continue;
+			}
 
 			i3 = atom->map(trianglePairs[i][t][0]);
 			i4 = atom->map(trianglePairs[i][t][1]);

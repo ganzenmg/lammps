@@ -36,6 +36,9 @@ class ComputePDGCGDamage : public Compute {
   int nmax;
   double *damage;
   int ifix_peri;
+  int pair_type;
+
+  enum {NODES, SHELL};
 };
 
 }

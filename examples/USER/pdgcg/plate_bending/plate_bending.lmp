@@ -6,7 +6,7 @@ variable        K equal 1 # Young's modulus
 variable        Ebend equal 10.0
 variable        nu equal 0.33
 variable        t equal 0.2 # shell thickness
-variable        smax equal 100
+variable        smax equal 1.0e-3
 variable        syield equal 100
 variable        G0 equal -1
 variable        visc equal 0.0
@@ -48,6 +48,7 @@ group           integrate_group subtract all clamp dispGrp
 pair_style      pdgcg/shells
 pair_coeff      * * ${K} ${kbend} ${smax} ${G0} ${visc} ${syield}
 
+compute         d all pdgcg/damage
 compute         eint all sph2/internal_energy
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
@@ -61,7 +62,7 @@ variable        stiff_expt equal c_sumF/(v_d+1.0e-8)
 
  
 dump            dump_id all custom 100 dump.LAMMPS id type x y z &
-                fx fy fz vx vy vz 
+                fx fy fz vx vy vz c_d
 dump_modify     dump_id first yes
 
 #

@@ -460,10 +460,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 //		fix_tlsph_time_integration = (FixSph2IntegrateTlsph *) modify->fix[ifix_tlsph];
 //		fix_tlsph_time_integration->pair = this;
 //	}
-<<<<<<< HEAD
-
-=======
->>>>>>> 48613b0e57faac9d4c1a36f0f776f34cc3f8b547
 }
 
 void PairTlsph::ComputeForces(int eflag, int vflag) {
@@ -639,23 +635,24 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				/* SPH-like formulation */
 
 				//if (hg_coeff[itype] > 0.0) {
-				if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-3) {
+				//if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-3) {
 
 					/*
 					 * viscous hourglass formulation
 					 */
 
-					delta = gamma.dot(dx);
-					if (delVdotDelR * delta < 0.0) {
-						hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
-					} else {
-						hg_mag = 0.9 * hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
-					}
-					f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
+//					delta = gamma.dot(dx);
+//					if (delVdotDelR * delta < 0.0) {
+//						hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
+//					} else {
+//						//hg_mag = 0.9 * hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
+//						hg_mag = 0.0;
+//					}
+//					f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
 
-				} else {
-					//} else if (hg_coeff[itype] < 0.0) {
-
+//				} else {
+//					//} else if (hg_coeff[itype] < 0.0) {
+//
 					/*
 					 * stiffness hourglass formulation
 					 */
@@ -664,10 +661,10 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					hg_mag = hg_coeff[itype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
 					hg_mag *= -voli * volj * wf * youngsmodulus[itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
 					f_hg = (hg_mag / r) * dx;
-					//printf("delta = %g, hg_mag = %g, coeff=%g, wf=%g, vi=%g, vj=%g, Ei=%f, Ej-%f\n",delta, hg_mag, hg_coeff[itype][jtype], wf, voli, volj,
-					//		youngsmodulus[itype], youngsmodulus[jtype]);
-
-				}
+//					//printf("delta = %g, hg_mag = %g, coeff=%g, wf=%g, vi=%g, vj=%g, Ei=%f, Ej-%f\n",delta, hg_mag, hg_coeff[itype][jtype], wf, voli, volj,
+//					//		youngsmodulus[itype], youngsmodulus[jtype]);
+//
+//				}
 				//else {
 				//	f_hg.setZero();
 				//}
