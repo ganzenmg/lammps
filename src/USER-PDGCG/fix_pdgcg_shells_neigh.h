@@ -73,7 +73,7 @@ protected:
 	int maxTrianglePairs;
 	int *nTrianglePairs;       // number of triangles pairs per atom
 	tagint ***trianglePairs;       // triangle pair definiton
-	double ***trianglePairCoeffs;
+	double **trianglePairAngle0;
 
 	class NeighList *list;
 };

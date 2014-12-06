@@ -92,307 +92,17 @@ PairPDGCGShells::~PairPDGCGShells() {
 /* ---------------------------------------------------------------------- */
 
 void PairPDGCGShells::compute(int eflag, int vflag) {
-	int i, j, ii, jj, inum, jnum, itype, jtype;
-	double xtmp, ytmp, ztmp, delx, dely, delz;
-	double rsq, r, dr, evdwl, fpair, fbond;
-	int *ilist, *jlist, *numneigh, **firstneigh;
-	double delta, stretch, ivol, jvol;
-	double vxtmp, vytmp, vztmp, delvelx, delvely, delvelz, delVdotDelR, fvisc, rcut, c0;
-	double c;
-	double r0cut, delx0, dely0, delz0;
-	double r_geom, radius_factor;
-	// ---------------------------------------------------------------------------------
-	double **f = atom->f;
-	double **x = atom->x;
-	double **x0 = atom->x0;
-	int *type = atom->type;
-	double *rmass = atom->rmass;
-	double *e = atom->e;
-	double **v = atom->v;
-	double *vfrac = atom->vfrac;
-	double *radius = atom->radius;
-	double *radiusSR = atom->contact_radius;
-	int *molecule = atom->molecule;
-	int nlocal = atom->nlocal;
-	int newton_pair = force->newton_pair;
-	double **r0 = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->r0;
-	double **plastic_stretch = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->r1;
-	tagint **partner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->partner;
-	int *npartner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->npartner;
-	double *vinter = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->vinter;
-	tagint *tag = atom->tag;
-	tagint ***trianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairs;
-	int *nTrianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->nTrianglePairs;
-
-	int t, i1, i2, i3, i4, tnum;
-
-	evdwl = 0.0;
 	if (eflag || vflag)
 		ev_setup(eflag, vflag);
 	else
 		evflag = vflag_fdotr = 0;
 
-	ncall += 1;
-	if (ncall < 2) {
-		// return on first timestep because no bonds are defined.
-		return;
-	}
-
 	/* ----------------------- PERIDYNAMIC SHORT RANGE FORCES --------------------- */
 
-	// neighbor list variables -- note that we use a granular neighbor list
-	inum = list->inum;
-	ilist = list->ilist;
-	numneigh = list->numneigh;
-	firstneigh = list->firstneigh;
-
-	if (true) {
-
-		for (ii = 0; ii < inum; ii++) {
-			i = ilist[ii];
-			xtmp = x[i][0];
-			ytmp = x[i][1];
-			ztmp = x[i][2];
-			vxtmp = v[i][0];
-			vytmp = v[i][1];
-			vztmp = v[i][2];
-			itype = type[i];
-			ivol = vfrac[i];
-			jlist = firstneigh[i];
-			jnum = numneigh[i];
-
-			for (jj = 0; jj < jnum; jj++) {
-				j = jlist[jj];
-				j &= NEIGHMASK;
-
-				jtype = type[j];
-				delx = xtmp - x[j][0];
-				dely = ytmp - x[j][1];
-				delz = ztmp - x[j][2];
-				rsq = delx * delx + dely * dely + delz * delz;
-
-				/* We only let this pair of particles interact via short-range if their peridynamic bond is broken.
-				 * The reduced cutoff radius below ensures this.
-				 * If particles were not bonded initially (molecule[i] != molecule[j]), no reduction is performed
-				 */
-				if (molecule[i] == molecule[j]) {
-					radius_factor = 1.0 - smax[itype][jtype];
-				} else {
-					radius_factor = 1.0;
-				}
-
-				// initial distance in reference config
-				delx0 = x0[j][0] - x0[i][0];
-				dely0 = x0[j][1] - x0[i][1];
-				delz0 = x0[j][2] - x0[i][2];
-				r0cut = radius_factor * sqrt(delx0 * delx0 + dely0 * dely0 + delz0 * delz0);
-
-				rcut = radius_factor * (radiusSR[i] + radiusSR[j]);
-				rcut = MIN(rcut, r0cut);
-
-				if (rsq < rcut * rcut) {
-
-					// Hertzian short-range forces
-					r = sqrt(rsq);
-					delta = rcut - r; // overlap distance
-					r_geom = radius_factor * radius_factor * radiusSR[i] * radiusSR[j] / rcut;
-					if (domain->dimension == 3) {
-						//assuming poisson ratio = 1/4 for 3d
-						fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom) / r;
-						evdwl = r * fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
-					} else {
-						//assuming poisson ratio = 1/3 for 2d -- one factor of delta missing compared to 3d
-						fpair = 0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom) / r;
-						evdwl = r * fpair * 0.6666666666667e0 * delta;
-					}
-
-					if (evflag) {
-						ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, delx, dely, delz);
-					}
-
-					// artificial viscosity -- alpha is dimensionless
-					delvelx = vxtmp - v[j][0];
-					delvely = vytmp - v[j][1];
-					delvelz = vztmp - v[j][2];
-					delVdotDelR = delx * delvelx + dely * delvely + delz * delvelz;
-
-					jvol = vfrac[j];
-					c0 = sqrt(bulkmodulus[itype][jtype] / (0.5 * (rmass[i] / ivol + rmass[j] / jvol))); // soundspeed
-					fvisc = -alpha[itype][jtype] * c0 * 0.5 * (rmass[i] + rmass[j]) * delVdotDelR / (rsq * r);
-
-					fpair = fpair + fvisc;
-
-					f[i][0] += delx * fpair;
-					f[i][1] += dely * fpair;
-					f[i][2] += delz * fpair;
-
-					if (newton_pair || j < nlocal) {
-						f[j][0] -= delx * fpair;
-						f[j][1] -= dely * fpair;
-						f[j][2] -= delz * fpair;
-					}
-
-				}
-			}
-		}
-	}
-
+	contact_forces();
 	/* ----------------------- PERIDYNAMIC BOND FORCES --------------------- */
 
-	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
-
-	for (i = 0; i < nlocal; i++) {
-
-		if (molecule[i] == 1000) {
-
-			xtmp = x[i][0];
-			ytmp = x[i][1];
-			ztmp = x[i][2];
-			vxtmp = v[i][0];
-			vytmp = v[i][1];
-			vztmp = v[i][2];
-			itype = type[i];
-			jnum = npartner[i];
-
-			for (jj = 0; jj < jnum; jj++) {
-
-				if (partner[i][jj] == 0)
-					continue;
-				j = atom->map(partner[i][jj]);
-
-				// check if lost a partner without first breaking bond
-				if (j < 0) {
-					partner[i][jj] = 0;
-					continue;
-				}
-
-				if (molecule[i] != molecule[j]) {
-					printf("ERROR: molecule[i] != molecule[j] :: itype=%d, imol=%d, jtype=%d, jmol=%d\n\n", itype, molecule[i],
-							jtype, molecule[j]);
-					error->all(FLERR, "molecule[i] != molecule[j]");
-				}
-
-				// initial distance in reference config
-				delx0 = x0[j][0] - x0[i][0];
-				dely0 = x0[j][1] - x0[i][1];
-				delz0 = x0[j][2] - x0[i][2];
-				double this_r0 = sqrt(delx0 * delx0 + dely0 * dely0 + delz0 * delz0);
-
-				delx = xtmp - x[j][0];
-				dely = ytmp - x[j][1];
-				delz = ztmp - x[j][2];
-
-				if (periodic)
-					domain->minimum_image(delx, dely, delz); // we need this periodic check because j can be non-ghosted
-
-				rsq = delx * delx + dely * dely + delz * delz;
-				jtype = type[j];
-				delta = radius[i] + radius[j];
-				r = sqrt(rsq);
-				//dr = r - (r0[i][jj] + plastic_stretch[i][jj]);
-				dr = r - r0[i][jj];
-
-				// avoid roundoff errors
-				if (fabs(dr) < 2.2204e-016)
-					dr = 0.0;
-
-				// bond stretch
-				//stretch = dr / (r0[i][jj] + plastic_stretch[i][jj]); // total stretch
-				stretch = dr / r0[i][jj];
-
-//				if (stretch > syield[itype][jtype]) {
-//					double increment = se - syield[itype][jtype];
-//					plastic_stretch[i][jj] += increment;
-//					//printf("increment is %f, p is now %f\n", increment, plastic_stretch[i][jj]);
-//					//se = syield[itype][jtype]; // elastic part of stretch
-//				} else {
-//					se = stretch;
-//				}
-
-				c = 4.5 * bulkmodulus[itype][jtype] * (1.0 / vinter[i] + 1.0 / vinter[j]);
-
-				// force computation -- note we divide by a factor of r
-				evdwl = 0.5 * c * stretch * stretch * vfrac[i] * vfrac[j];
-				//printf("evdwl = %f\n", evdwl);
-				fbond = -c * vfrac[i] * vfrac[j] * stretch / r0[i][jj];
-				if (r > 0.0)
-					fbond = fbond / r;
-				else
-					fbond = 0.0;
-
-				// project force -- missing factor of r is recovered here as delx, dely ... are not unit vectors
-				f[i][0] += delx * fbond;
-				f[i][1] += dely * fbond;
-				f[i][2] += delz * fbond;
-
-				if (evflag) {
-					// since I-J is double counted, set newton off & use 1/2 factor and I,I
-					ev_tally(i, i, nlocal, 0, 0.5 * evdwl, 0.0, 0.5 * fbond, delx, dely, delz);
-					//printf("broken evdwl=%f, norm = %f %f\n", evdwl, vinter[i], vinter[j]);
-				}
-
-				// bond-based plasticity
-
-//			if (smax[itype][jtype] > 0.0) { // maximum-stretch based failure
-				if ((r - r0[i][jj]) / r0[i][jj] > smax[itype][jtype]) {
-					partner[i][jj] = 0;
-					nBroken += 1;
-					e[i] += 0.5 * evdwl;
-					printf("breaking bond\n");
-
-					// iterate over all tris connected to i -- if both i and j are part of the triangle pairs, delete that triangle pair.
-					tnum = nTrianglePairs[i];
-
-					for (t = 0; t < tnum; t++) {
-						i3 = atom->map(trianglePairs[i][t][0]); // should be i
-						i4 = atom->map(trianglePairs[i][t][1]);
-						i1 = atom->map(trianglePairs[i][t][2]);
-						i2 = atom->map(trianglePairs[i][t][3]);
-
-						if ((i4 == j) || (i1 == j) || (i2 == j)) {
-							trianglePairs[i][t][0] = -1;
-						}
-
-					}
-
-//					printf("nlocal=%d, i=%d, j=%d\n", nlocal, i, j);
-////
-//					printf("broken evdwl=%f, k=%f, v=%f %f, norm = %f %f, s=%f, r0=%f, r=%f\n", evdwl, bulkmodulus[itype][jtype],
-//							vfrac[i], vfrac[j], vinter[i], vinter[j], stretch, r0[i][jj], r);
-//				printf("velocity i: %f %f %f \n", v[i][0], v[i][1], v[i][2]);
-//				printf("velocity j: %f %f %f \n", v[j][0], v[j][1], v[j][2]);
-//				printf("position i: %f %f %f \n", x[i][0], x[i][1], x[i][2]);
-//				printf("position j: %f %f %f \n", x[j][0], x[j][1], x[j][2]);
-//				printf("position 0 i: %f %f %f \n", x0[i][0], x0[i][1], x0[i][2]);
-//				printf("position 0 j: %f %f %f \n", x0[j][0], x0[j][1], x0[j][2]);
-//
-//					printf("itype=%d, imol=%d, jtype=%d, jmol=%d\n\n", itype, molecule[i], jtype, molecule[j]);
-//					printf("-----------------------------------------------------------------------------\n");
-					//error->one(FLERR, "STOP");
-					//<
-				}
-//			} else {
-//				printf("smax[%d][%d] = %f\n", itype, jtype, smax[itype][jtype]);
-//				printf("broken evdwl=%f, k=%f, v=%f %f, norm = %f %f, s=%f, r0=%f\n", evdwl, bulkmodulus[itype][jtype], vfrac[i],
-//						vfrac[j], vinter[i], vinter[j], stretch, r0[i][jj]);
-//				printf("itype=%d, imol=%d, jtype=%d, jmol=%d\n\n", itype, molecule[i], jtype, molecule[j]);
-//
-//				error->all(FLERR, "G0-bnased fracture not implemented for 3d");
-//				double this_smax = sqrt(3.0 * G0[itype][jtype] / (2.0 * c * delta * delta * delta)); // factor 2 beacuse we are creating 2 fracture surfaces
-//				//printf("G0=%g, smax=%g\n", G0[itype][jtype], this_smax);
-//				if (stretch > this_smax) {
-//					partner[i][jj] = 0;
-//					nBroken += 1;
-//					//printf("c = %g, delta=%g\n", c, delta);
-//					//printf("G0-based failure: G0=%g, smax = %g\n", G0[itype][jtype], this_smax);
-//				}
-//
-//			}
-
-			}
-		} //end if (molecule[i] == 1000)
-
-	}
+	bond_forces();
 
 	/* ----------------------- SHELL BENDING FORCES --------------------- */
 
@@ -407,14 +117,14 @@ void PairPDGCGShells::bending_forces() {
 	// ---------------------------------------------------------------------------------
 	double **f = atom->f;
 	double **x = atom->x;
-	double **v = atom->v;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
+	tagint *tag = atom->tag;
 	tagint ***trianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairs;
 	int *nTrianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->nTrianglePairs;
-	double ***trianglePairCoeffs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairCoeffs;
+	double **trianglePairAngle0 = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairAngle0;
 
-	int i, i1, i2, i3, i4, itype, jtype, tnum, t;
+	int i, i1, i2, i3, i4, itype, tnum, t;
 	Vector3d E, n1, n2, E_normed;
 	Vector3d x31, x41, x42, x32, N1, N2, u1, u2, u3, u4;
 	double sign, angle, angle0, E_norm;
@@ -437,15 +147,21 @@ void PairPDGCGShells::bending_forces() {
 			i1 = atom->map(trianglePairs[i][t][2]);
 			i2 = atom->map(trianglePairs[i][t][3]);
 
-			itype = type[i1]; // types are taken from non-common nodes
-			jtype = type[i2];
-
 			if (i3 != i) {
 				printf("hurz\n");
 				char str[128];
-				sprintf(str, "triangle index cn1=%d does not match up with local index=%d", i3, i);
+				sprintf(str, "triangle index cn1=%d does not match up with local index=%d; tag[i]=%d, t0=%d", i3, i, tag[i],
+						trianglePairs[i][t][0]);
 				error->one(FLERR, str);
 			}
+
+			if ((i3 < 0) || (i3 >= nlocal)) {
+				char str[128];
+				sprintf(str, "t0 is %d i3 is %d bit nlocal is %d", trianglePairs[i][t][0], i3, nlocal);
+				error->one(FLERR, str);
+			}
+
+			itype = type[i3];
 
 			// common bond from cn1 to cn2
 			E << (x[i4][0] - x[i3][0]), (x[i4][1] - x[i3][1]), (x[i4][2] - x[i3][2]);
@@ -487,26 +203,10 @@ void PairPDGCGShells::bending_forces() {
 				angle = -angle;
 			}
 
-			angle0 = trianglePairCoeffs[i][t][0];
-			force_magnitude = (angle - angle0) * kbend[itype][jtype] * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
+			angle0 = trianglePairAngle0[i][t];
+			force_magnitude = (angle - angle0) * kbend[itype][itype] * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
 
 			//printf("angle is %f\n", angle);
-
-			Vector3d force = force_magnitude * u1;
-			double fmag = force.norm();
-
-			if (fabs(force_magnitude) > 1.0e3) {
-				cout << "angle is " << angle << "   sign is " << sign << "      n1 dot n2 is " << n1.dot(n2) << endl;
-				cout << "force_magnitude is " << force_magnitude << endl;
-				cout << "E is " << E << endl;
-				cout << "u1 is " << u1 << endl;
-				cout << "u2 is " << u2 << endl;
-				cout << "u3 is " << u3 << endl;
-				cout << "u4 is " << u4 << endl;
-				cout << "N1 is " << n1 << endl;
-				cout << "N2 is " << n2 << endl << endl;
-
-			}
 
 			f[i1][0] += force_magnitude * u1(0);
 			f[i1][1] += force_magnitude * u1(1);
@@ -534,74 +234,287 @@ void PairPDGCGShells::bending_forces() {
 	}
 }
 
-void PairPDGCGShells::bending_forces_linear() {
+/* ----------------------------------------------------------------------
+ short-range forces ..
+ ------------------------------------------------------------------------- */
+
+void PairPDGCGShells::contact_forces() {
+	int i, j, ii, jj, inum, jnum, itype, jtype;
+	double xtmp, ytmp, ztmp, delx, dely, delz;
+	double rsq, r, evdwl, fpair;
+	int *ilist, *jlist, *numneigh, **firstneigh;
+	double delta, ivol, jvol;
+	double vxtmp, vytmp, vztmp, delvelx, delvely, delvelz, delVdotDelR, fvisc, rcut, c0;
+	double r0cut, delx0, dely0, delz0;
+	double r_geom, radius_factor;
 	// ---------------------------------------------------------------------------------
 	double **f = atom->f;
 	double **x = atom->x;
+	double **x0 = atom->x0;
+	int *type = atom->type;
+	double *rmass = atom->rmass;
 	double **v = atom->v;
+	double *vfrac = atom->vfrac;
+	double *radiusSR = atom->contact_radius;
+	int *molecule = atom->molecule;
 	int nlocal = atom->nlocal;
+	int newton_pair = force->newton_pair;
+
+	// neighbor list variables -- note that we use a granular neighbor list
+	inum = list->inum;
+	ilist = list->ilist;
+	numneigh = list->numneigh;
+	firstneigh = list->firstneigh;
+
+	for (ii = 0; ii < inum; ii++) {
+		i = ilist[ii];
+		xtmp = x[i][0];
+		ytmp = x[i][1];
+		ztmp = x[i][2];
+		vxtmp = v[i][0];
+		vytmp = v[i][1];
+		vztmp = v[i][2];
+		itype = type[i];
+		ivol = vfrac[i];
+		jlist = firstneigh[i];
+		jnum = numneigh[i];
+
+		for (jj = 0; jj < jnum; jj++) {
+			j = jlist[jj];
+			j &= NEIGHMASK;
+
+			jtype = type[j];
+			delx = xtmp - x[j][0];
+			dely = ytmp - x[j][1];
+			delz = ztmp - x[j][2];
+			rsq = delx * delx + dely * dely + delz * delz;
+
+			/* We only let this pair of particles interact via short-range if their peridynamic bond is broken.
+			 * The reduced cutoff radius below ensures this.
+			 * If particles were not bonded initially (molecule[i] != molecule[j]), no reduction is performed
+			 */
+			if (molecule[i] == molecule[j]) {
+				radius_factor = 1.0 - smax[itype][jtype];
+			} else {
+				radius_factor = 1.0;
+			}
+
+			// initial distance in reference config
+			delx0 = x0[j][0] - x0[i][0];
+			dely0 = x0[j][1] - x0[i][1];
+			delz0 = x0[j][2] - x0[i][2];
+			r0cut = sqrt(delx0 * delx0 + dely0 * dely0 + delz0 * delz0);
+
+			rcut = radiusSR[i] + radiusSR[j];
+			rcut = radius_factor * MIN(rcut, r0cut);
+
+			if (rsq < rcut * rcut) {
+
+				// Hertzian short-range forces
+				r = sqrt(rsq);
+				delta = rcut - r; // overlap distance
+				r_geom = radius_factor * radius_factor * radiusSR[i] * radiusSR[j] / rcut;
+				if (domain->dimension == 3) {
+					//assuming poisson ratio = 1/4 for 3d
+					fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom) / r;
+					evdwl = r * fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
+				} else {
+					//assuming poisson ratio = 1/3 for 2d -- one factor of delta missing compared to 3d
+					fpair = 0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom) / r;
+					evdwl = r * fpair * 0.6666666666667e0 * delta;
+				}
+
+				if (evflag) {
+					ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, delx, dely, delz);
+				}
+
+				// artificial viscosity -- alpha is dimensionless
+				delvelx = vxtmp - v[j][0];
+				delvely = vytmp - v[j][1];
+				delvelz = vztmp - v[j][2];
+				delVdotDelR = delx * delvelx + dely * delvely + delz * delvelz;
+
+				jvol = vfrac[j];
+				c0 = sqrt(bulkmodulus[itype][jtype] / (0.5 * (rmass[i] / ivol + rmass[j] / jvol))); // soundspeed
+				fvisc = -alpha[itype][jtype] * c0 * 0.5 * (rmass[i] + rmass[j]) * delVdotDelR / (rsq * r);
+
+				fpair = fpair + fvisc;
+
+				f[i][0] += delx * fpair;
+				f[i][1] += dely * fpair;
+				f[i][2] += delz * fpair;
+
+				if (newton_pair || j < nlocal) {
+					f[j][0] -= delx * fpair;
+					f[j][1] -= dely * fpair;
+					f[j][2] -= delz * fpair;
+				}
+
+			}
+		}
+	}
+
+}
+
+/* ----------------------------------------------------------------------
+ Peridynamic bond forces ..
+ ------------------------------------------------------------------------- */
+
+void PairPDGCGShells::bond_forces() {
+	int i, j, jj, jnum, itype, jtype;
+	double xtmp, ytmp, ztmp, delx, dely, delz;
+	double rsq, r, dr, evdwl, fbond;
+	double stretch;
+	double vxtmp, vytmp, vztmp;
+	double c;
+	double delx0, dely0, delz0;
+	double **f = atom->f;
+	double **x = atom->x;
+	double **x0 = atom->x0;
+	int *type = atom->type;
+	double *e = atom->e;
+	double **v = atom->v;
+	double *vfrac = atom->vfrac;
+	int *molecule = atom->molecule;
+	int nlocal = atom->nlocal;
+	tagint *tag = atom->tag;
+	double **r0 = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->r0;
+	tagint **partner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->partner;
+	int *npartner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->npartner;
+	double *vinter = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->vinter;
 	tagint ***trianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairs;
 	int *nTrianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->nTrianglePairs;
-	double ***trianglePairCoeffs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairCoeffs;
+	int i1, i2, i3, i4, t, tnum;
 
-	int a, b, c, d, i, tnum, t;
-	Vector3d R, Pa, Pb, Pc, Pd;
-	double force_magnitude;
+	/* ----------------------- PERIDYNAMIC BOND FORCES --------------------- */
+
+	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
 
 	for (i = 0; i < nlocal; i++) {
 
-		tnum = nTrianglePairs[i];
+		if (molecule[i] == 1000) {
 
-		for (t = 0; t < tnum; t++) {
+			xtmp = x[i][0];
+			ytmp = x[i][1];
+			ztmp = x[i][2];
+			vxtmp = v[i][0];
+			vytmp = v[i][1];
+			vztmp = v[i][2];
+			itype = type[i];
+			jnum = npartner[i];
 
-			c = atom->map(trianglePairs[i][t][0]);
-			d = atom->map(trianglePairs[i][t][1]);
-			a = atom->map(trianglePairs[i][t][2]);
-			b = atom->map(trianglePairs[i][t][3]);
+			for (jj = 0; jj < jnum; jj++) {
 
-			Pa << x[a][0], x[a][1], x[a][2];
-			Pb << x[b][0], x[b][1], x[b][2];
-			Pc << x[c][0], x[c][1], x[c][2];
-			Pd << x[d][0], x[d][1], x[d][2];
+				if (partner[i][jj] == 0)
+					continue;
+				j = atom->map(partner[i][jj]);
 
-			R = trianglePairCoeffs[i][t][0] * Pa + trianglePairCoeffs[i][t][1] * Pb + trianglePairCoeffs[i][t][2] * Pc
-					+ trianglePairCoeffs[i][t][3] * Pd;
+				// check if lost a partner without first breaking bond
+				if (j < 0) {
+					partner[i][jj] = 0;
+					continue;
+				}
 
-//			cout << "R is " << R << endl;
-//			cout << "amplitude is " << trianglePairCoeffs[i][t][4] << endl << endl;
+				if (molecule[i] != molecule[j]) {
+					printf("ERROR: molecule[i] != molecule[j] :: itype=%d, imol=%d, jtype=%d, jmol=%d\n\n", itype, molecule[i],
+							jtype, molecule[j]);
+					error->all(FLERR, "molecule[i] != molecule[j]");
+				}
 
-			force_magnitude = -trianglePairCoeffs[i][t][4] * trianglePairCoeffs[i][t][0];
-			f[a][0] += force_magnitude * R(0);
-			f[a][1] += force_magnitude * R(1);
-			f[a][2] += force_magnitude * R(2);
+				// initial distance in reference config
+				delx0 = x0[j][0] - x0[i][0];
+				dely0 = x0[j][1] - x0[i][1];
+				delz0 = x0[j][2] - x0[i][2];
 
-			//cout << "force on atom a is " << force_magnitude * R << endl;
+				delx = xtmp - x[j][0];
+				dely = ytmp - x[j][1];
+				delz = ztmp - x[j][2];
 
-			if (b < nlocal) {
-				force_magnitude = -trianglePairCoeffs[i][t][4] * trianglePairCoeffs[i][t][1];
-				//	cout << "force on atom b is " << force_magnitude * R << endl;
-				f[b][0] += force_magnitude * R(0);
-				f[b][1] += force_magnitude * R(1);
-				f[b][2] += force_magnitude * R(2);
+				if (periodic)
+					domain->minimum_image(delx, dely, delz); // we need this periodic check because j can be non-ghosted
+
+				rsq = delx * delx + dely * dely + delz * delz;
+				jtype = type[j];
+				r = sqrt(rsq);
+				dr = r - r0[i][jj];
+
+				// avoid roundoff errors
+				if (fabs(dr) < 2.2204e-016)
+					dr = 0.0;
+
+				// bond stretch
+				stretch = dr / r0[i][jj]; // total stretch
+
+//				double se;
+//				if (stretch > syield[itype][jtype]) {
+//					plastic_stretch[i][jj] = syield[itype][jtype] - stretch;
+//					se = syield[itype][jtype]; // elastic part of stretch
+//				} else {
+//					se = stretch;
+//				}
+
+				c = 9.0 * bulkmodulus[itype][jtype] * (1.0 / vinter[i] + 1.0 / vinter[j]);
+
+				// force computation -- note we divide by a factor of r
+				evdwl = 0.5 * c * stretch * stretch * vfrac[i] * vfrac[j];
+				//printf("evdwl = %f\n", evdwl);
+				fbond = -c * vfrac[i] * vfrac[j] * stretch / r0[i][jj];
+				if (r > 0.0)
+					fbond = fbond / r;
+				else
+					fbond = 0.0;
+
+				// project force -- missing factor of r is recovered here as delx, dely ... are not unit vectors
+				f[i][0] += delx * fbond;
+				f[i][1] += dely * fbond;
+				f[i][2] += delz * fbond;
+
+				if (evflag) {
+					// since I-J is double counted, set newton off & use 1/2 factor and I,I
+					ev_tally(i, i, nlocal, 0, 0.5 * evdwl, 0.0, 0.5 * fbond, delx, dely, delz);
+					//printf("broken evdwl=%f, norm = %f %f\n", evdwl, vinter[i], vinter[j]);
+				}
+
+				// bond-based plasticity
+
+				//			if (smax[itype][jtype] > 0.0) { // maximum-stretch based failure
+				if (stretch > smax[itype][jtype]) {
+					//printf("\ndeleting bond between tags %d and %d\n", tag[i], tag[j]);
+					partner[i][jj] = 0;
+					nBroken += 1;
+					e[i] += 0.5 * evdwl;
+					tagint j_tag = tag[j];
+
+					// loop over all triangle pairs attached to i and delete those which involve both i and j
+
+					tnum = nTrianglePairs[i];
+
+					for (t = 0; t < tnum; t++) {
+
+						if (trianglePairs[i][t][0] > 0) { // check if triangle pair has not already been deleted
+
+							if (trianglePairs[i][t][1] == j_tag) {
+								//printf("deleting triangle pair with index %d involving %d and %d\n", t, tag[i], j_tag);
+								trianglePairs[i][t][0] = -1;
+							}
+
+							if (trianglePairs[i][t][2] == j_tag) {
+								//printf("deleting triangle pair with index %d involving %d and %d\n", t, tag[i], j_tag);
+								trianglePairs[i][t][0] = -1;
+							}
+
+							if (trianglePairs[i][t][3] == j_tag) {
+								//printf("deleting triangle pair with index %d involving %d and %d\n", t, tag[i], j_tag);
+								trianglePairs[i][t][0] = -1;
+							}
+
+						}
+					}
+
+				}
 			}
+		} //end if (molecule[i] == 1000)
 
-			if (c < nlocal) {
-				force_magnitude = -trianglePairCoeffs[i][t][4] * trianglePairCoeffs[i][t][2];
-				//	cout << "force on atom c is " << force_magnitude * R << endl;
-				f[c][0] += force_magnitude * R(0);
-				f[c][1] += force_magnitude * R(1);
-				f[c][2] += force_magnitude * R(2);
-			}
-
-			if (d < nlocal) {
-				//	cout << "force on atom d is " << force_magnitude * R << endl << endl;
-				force_magnitude = -trianglePairCoeffs[i][t][4] * trianglePairCoeffs[i][t][3];
-				f[d][0] += force_magnitude * R(0);
-				f[d][1] += force_magnitude * R(1);
-				f[d][2] += force_magnitude * R(2);
-			}
-
-		}
 	}
 
 }

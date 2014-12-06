@@ -40,8 +40,10 @@ class PairPDGCGShells : public Pair {
   void read_restart_settings(FILE *) {}
   virtual double memory_usage();
   void *extract(const char *, int &);
+  void contact_forces();
+  void bond_forces();
   void bending_forces();
-  void bending_forces_linear();
+
 
 
  protected:

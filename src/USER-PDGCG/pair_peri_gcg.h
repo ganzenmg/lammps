@@ -13,7 +13,7 @@
 
 #ifdef PAIR_CLASS
 
-PairStyle(peri/gcg,PairPeriGCG)
+PairStyle(pdgcg,PairPeriGCG)
 
 #else
 

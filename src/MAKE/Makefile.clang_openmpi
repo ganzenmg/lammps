@@ -7,13 +7,15 @@ SHELL = /bin/sh
 # specify flags and libraries needed for your compiler
 
 CC =		mpic++
-CCFLAGS =	-O2 -Wall -W -Wno-uninitialized -Wno-unused-parameter -Wno-unused-result
+#CCFLAGS =	-Wall -Wno-unused-parameter -O2 -g -fsanitize=address -fno-omit-frame-pointer
+CCFLAGS =	-Wall -Wno-unused-parameter -O3
 SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
 LINK =		mpic++
-LINKFLAGS =	-O
-LIB =           -lstdc++
+#LINKFLAGS =	-O2 -g -fsanitize=address -fno-omit-frame-pointer
+LINKFLAGS =	-O3
+LIB =       -lstdc++
 SIZE =		size
 
 ARCHIVE =	ar

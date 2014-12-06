@@ -61,10 +61,11 @@ FixPDGCGShellsNeigh::FixPDGCGShellsNeigh(LAMMPS *lmp, int narg, char **arg) :
 	maxTrianglePairs = 1;
 	nTrianglePairs = NULL;
 	trianglePairs = NULL;
-	trianglePairCoeffs = NULL;
+	trianglePairAngle0 = NULL;
 
 	nmax = atom->nmax;
 	grow_arrays(atom->nmax);
+
 	atom->add_callback(0);
 	atom->add_callback(1);
 	atom->add_callback(2); // for border communication
@@ -72,8 +73,10 @@ FixPDGCGShellsNeigh::FixPDGCGShellsNeigh(LAMMPS *lmp, int narg, char **arg) :
 	// initialize npartner to 0 so atom migration is OK the 1st time
 
 	int nlocal = atom->nlocal;
-	for (int i = 0; i < nlocal; i++)
+	for (int i = 0; i < nlocal; i++) {
 		npartner[i] = 0;
+		nTrianglePairs[i] = 0;
+	}
 
 	// set comm sizes needed by this fix
 
@@ -96,6 +99,11 @@ FixPDGCGShellsNeigh::~FixPDGCGShellsNeigh() {
 	memory->destroy(r0);
 	memory->destroy(r1);
 	memory->destroy(vinter);
+
+	memory->destroy(nTrianglePairs);
+	memory->destroy(trianglePairs);
+	memory->destroy(trianglePairAngle0);
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -239,12 +247,14 @@ void FixPDGCGShellsNeigh::setup(int vflag) {
 	memory->destroy(npartner);
 	memory->destroy(trianglePairs);
 	memory->destroy(nTrianglePairs);
+	memory->destroy(trianglePairAngle0);
 
 	npartner = NULL;
 	partner = NULL;
 	r0 = r1 = NULL;
 	trianglePairs = NULL;
 	nTrianglePairs = NULL;
+	trianglePairAngle0 = NULL;
 	nmax = atom->nmax;
 	grow_arrays(nmax);
 
@@ -326,11 +336,6 @@ void FixPDGCGShellsNeigh::setup(int vflag) {
 		}
 	}
 
-	/*
-	 * find initial angles between adjacent triangles
-	 */
-
-	//setup_bending_triangles();
 	// communicate vinter to ghosts, needed in pair
 	comm->forward_comm_fix(this);
 
@@ -373,7 +378,7 @@ void FixPDGCGShellsNeigh::setup_bending_triangles() {
 
 	int nlocal = atom->nlocal;
 	int i, i1, i2, i3, i4;
-	int m, tnum, t;
+	int tnum, t;
 	int itype, jtype, itmp;
 	double sign, angle;
 	double N1_normSq, N2_normSq, E_normSq, E_norm;
@@ -388,9 +393,7 @@ void FixPDGCGShellsNeigh::setup_bending_triangles() {
 
 	for (i = 0; i < nmax; i++) {
 		for (t = 0; t < maxTrianglePairs; t++) {
-			for (m = 0; m < 5; m++) {
-				trianglePairCoeffs[i][t][m] = 0.0;
-			}
+			trianglePairAngle0[i][t] = 0.0;
 		}
 	}
 
@@ -455,154 +458,7 @@ void FixPDGCGShellsNeigh::setup_bending_triangles() {
 				angle = -angle;
 			}
 
-			trianglePairCoeffs[i][t][0] = angle;
-
-//			cout << "cb =" << cb << endl;
-//			cout << "b11 =" << b11 << endl;
-//			cout << "n1 =" << n1 << endl;
-//			cout << "n2 =" << n2 << endl;
-//			cout << "angle is " << trianglePairAngle0[i][t] << endl << endl;
-
-		}
-	}
-}
-
-/* ----------------------------------------------------------------------
- set up triangles for bending
-
- convention: dihedral atoms with indices 0, 1: common nodes
- dihedral atoms with indices 2, 3: non-common nodes
- ------------------------------------------------------------------------- */
-
-void FixPDGCGShellsNeigh::setup_bending_triangles_linear() {
-
-	double **x = atom->x0;
-	int *type = atom->type;
-
-	int nlocal = atom->nlocal;
-	int i, tnum, t;
-	int a, b, c, d;
-	int m, itype, jtype, itmp;
-	double sum, ha, hb, l, mu, lambda;
-
-	Vector3d cb, b11, b21, n1, n2, cb_normed;
-	Vector3d Pa, Pb, Pc, Pd;
-	Vector3d Na, Nb, Nc, Nd, L;
-
-	double **kbend = (double **) force->pair->extract("pdgcg/shells/kbend_ptr", itmp);
-	if (kbend == NULL) {
-		error->all(FLERR, "fix pdgcg/shells failed to access kbend array");
-	}
-
-	for (i = 0; i < nmax; i++) {
-		for (t = 0; t < maxTrianglePairs; t++) {
-			for (m = 0; m < 5; m++) {
-				trianglePairCoeffs[i][t][m] = 0.0;
-			}
-		}
-	}
-
-	for (i = 0; i < nlocal; i++) {
-
-		tnum = nTrianglePairs[i];
-
-		for (t = 0; t < tnum; t++) {
-
-			c = atom->map(trianglePairs[i][t][0]);
-			d = atom->map(trianglePairs[i][t][1]);
-			a = atom->map(trianglePairs[i][t][2]);
-			b = atom->map(trianglePairs[i][t][3]);
-
-			itype = type[c];
-			jtype = type[d];
-
-			Pa << x[a][0], x[a][1], x[a][2];
-			Pb << x[b][0], x[b][1], x[b][2];
-			Pc << x[c][0], x[c][1], x[c][2];
-			Pd << x[d][0], x[d][1], x[d][2];
-
-			Na = (Pa - Pc).cross(Pa - Pd);
-			Nb = (Pb - Pd).cross(Pb - Pc);
-			Nc = (Pc - Pb).cross(Pc - Pa);
-			Nd = (Pd - Pa).cross(Pd - Pb);
-
-			trianglePairCoeffs[i][t][0] = Nb.norm() / (Na.norm() + Nb.norm()); // alpha a
-			trianglePairCoeffs[i][t][1] = Na.norm() / (Na.norm() + Nb.norm()); // alpha b
-			trianglePairCoeffs[i][t][2] = -Nd.norm() / (Nc.norm() + Nd.norm()); // alpha c
-			trianglePairCoeffs[i][t][3] = -Nc.norm() / (Nc.norm() + Nd.norm()); // alpha a
-
-			sum = trianglePairCoeffs[i][t][0] + trianglePairCoeffs[i][t][1] + trianglePairCoeffs[i][t][2]
-					+ trianglePairCoeffs[i][t][3];
-			if (fabs(sum) > 1.0e-10) {
-				char str[128];
-				sprintf(str, "sum of triangle alphas = %f is not zero\n", sum);
-				error->one(FLERR, str);
-			}
-
-			L = Pd - Pc;
-			l = L.norm();
-
-			ha = ((Pa - Pc).cross(Pa - Pd)).norm() / l;
-			hb = ((Pb - Pc).cross(Pb - Pd)).norm() / l;
-
-			printf("ha =%f, hb = %f\n", ha, hb);
-
-			sum = hb / (ha + hb) - trianglePairCoeffs[i][t][0];
-			if (fabs(sum) > 1.0e-10) {
-				char str[128];
-				sprintf(str, "alpha a is not correct\n");
-				error->one(FLERR, str);
-			}
-
-			sum = ha / (ha + hb) - trianglePairCoeffs[i][t][1];
-			if (fabs(sum) > 1.0e-10) {
-				char str[128];
-				sprintf(str, "alpha b is not correct\n");
-				error->one(FLERR, str);
-			}
-
-			mu = kbend[itype][jtype];
-			lambda = (2. / 3.) * (ha + hb) * l * mu / (ha * ha * hb * hb);
-			trianglePairCoeffs[i][t][4] = lambda; // bending stiffness
-
-			printf("lambda = %f\n", lambda);
-			printf("");
-
-//			cn1 = atom->map(trianglePairs[i][t][0]);
-//			cn2 = atom->map(trianglePairs[i][t][1]);
-//			ncn1 = atom->map(trianglePairs[i][t][2]);
-//			ncn2 = atom->map(trianglePairs[i][t][3]);
-//
-//			if (cn1 != i) {
-//				char str[128];
-//				sprintf(str, "triangle index cn1=%d does not match up with local index=%d", cn1, i);
-//				error->one(FLERR, str);
-//			}
-//
-//			// common bond from cn1 to cn2
-//			cb << (x[cn2][0] - x[cn1][0]), (x[cn2][1] - x[cn1][1]), (x[cn2][2] - x[cn1][2]);
-//			cb_normed = cb / cb.norm();
-//
-//			// triangle 1: bond from cn1 to ncn1
-//			b11 << (x[ncn1][0] - x[cn1][0]), (x[ncn1][1] - x[cn1][1]), (x[ncn1][2] - x[cn1][2]);
-//
-//			// triangle 2: bond from cn1 to ncn2
-//			b21 << (x[ncn1][0] - x[cn2][0]), (x[ncn1][1] - x[cn2][1]), (x[ncn1][2] - x[cn2][2]);
-//
-//			// normal of triangle 1
-//			n1 = b11.cross(cb);
-//			n1 /= n1.norm();
-//
-//			// normal of triangle 2
-//			n2 = b21.cross(cb);
-//			n2 /= n2.norm();
-//
-//			// determine sin(phi) / 2
-//			sign = (n1.cross(n2)).dot(cb_normed);
-//			trianglePairCoeffs[i][t] = sqrt(0.5 * (1.0 - n1.dot(n2)));
-//			if (sign * trianglePairCoeffs[i][t] < 0.0) {
-//				trianglePairCoeffs[i][t] *= -1;
-//			}
+			trianglePairAngle0[i][t] = angle;
 
 //			cout << "cb =" << cb << endl;
 //			cout << "b11 =" << b11 << endl;
@@ -620,16 +476,16 @@ void FixPDGCGShellsNeigh::setup_bending_triangles_linear() {
 
 double FixPDGCGShellsNeigh::memory_usage() {
 	int nmax = atom->nmax;
-	int bytes = nmax * sizeof(int);
+	int bytes = 0;
+	bytes += nmax * sizeof(tagint); // npartner
 	bytes += nmax * maxpartner * sizeof(tagint); // partners
 	bytes += nmax * maxpartner * sizeof(double); // r0
 	bytes += nmax * maxpartner * sizeof(double); // r1
-	bytes += nmax * sizeof(double);
-	bytes += nmax * sizeof(double);
+	bytes += nmax * sizeof(double); // vinter
 
-	bytes += nmax * maxTrianglePairs * 4 * sizeof(tagint); // triangle pairs definition
-	bytes += nmax * maxTrianglePairs * sizeof(double); // triangle pairs rest angle
-	bytes += nmax * sizeof(int); // number of triangle pairs per atom
+	bytes += nmax * sizeof(int); // nTrianglePairs
+	bytes += nmax * maxTrianglePairs * 4 * sizeof(tagint); // trianglePairs
+	bytes += nmax * maxTrianglePairs * sizeof(double); // trianglePairAngle0
 	return bytes;
 }
 
@@ -644,7 +500,7 @@ void FixPDGCGShellsNeigh::grow_arrays(int nmax) {
 
 	memory->grow(nTrianglePairs, nmax, "pdgcg_shells:nTrianglePairs");
 	memory->grow(trianglePairs, nmax, maxTrianglePairs, 4, "pdgcg_shells:trianglePairs");
-	memory->grow(trianglePairCoeffs, nmax, maxTrianglePairs, 5, "pdgcg_shells:trianglePairCoeff");
+	memory->grow(trianglePairAngle0, nmax, maxTrianglePairs, "pdgcg_shells:trianglePairAngle0");
 
 	memory->grow(r0, nmax, maxpartner, "peri_neigh:r0");
 	memory->grow(r1, nmax, maxpartner, "peri_neigh:r1");
@@ -673,7 +529,7 @@ void FixPDGCGShellsNeigh::copy_arrays(int i, int j, int delflag) {
 		trianglePairs[j][m][1] = trianglePairs[i][m][1];
 		trianglePairs[j][m][2] = trianglePairs[i][m][2];
 		trianglePairs[j][m][3] = trianglePairs[i][m][3];
-		trianglePairCoeffs[j] = trianglePairCoeffs[i];
+		trianglePairAngle0[j][m] = trianglePairAngle0[i][m];
 	}
 
 }
@@ -766,11 +622,7 @@ int FixPDGCGShellsNeigh::pack_exchange(int i, double *buf) {
 		buf[m++] = trianglePairs[i][n][1];
 		buf[m++] = trianglePairs[i][n][2];
 		buf[m++] = trianglePairs[i][n][3];
-		buf[m++] = trianglePairCoeffs[i][n][0];
-		buf[m++] = trianglePairCoeffs[i][n][1];
-		buf[m++] = trianglePairCoeffs[i][n][2];
-		buf[m++] = trianglePairCoeffs[i][n][3];
-		buf[m++] = trianglePairCoeffs[i][n][4];
+		buf[m++] = trianglePairAngle0[i][n];
 	}
 
 	return m;
@@ -810,11 +662,7 @@ int FixPDGCGShellsNeigh::unpack_exchange(int nlocal, double *buf) {
 		trianglePairs[nlocal][n][1] = static_cast<int>(buf[m++]);
 		trianglePairs[nlocal][n][2] = static_cast<int>(buf[m++]);
 		trianglePairs[nlocal][n][3] = static_cast<int>(buf[m++]);
-		trianglePairCoeffs[nlocal][n][0] = buf[m++];
-		trianglePairCoeffs[nlocal][n][1] = buf[m++];
-		trianglePairCoeffs[nlocal][n][2] = buf[m++];
-		trianglePairCoeffs[nlocal][n][3] = buf[m++];
-		trianglePairCoeffs[nlocal][n][4] = buf[m++];
+		trianglePairAngle0[nlocal][n] = buf[m++];
 	}
 
 	return m;
@@ -1032,7 +880,7 @@ void FixPDGCGShellsNeigh::read_triangles(int pass) {
 
 		i = atom->map(cn1);
 
-		if (i < nlocal) {
+		if ((i < nlocal) && (i >= 0)) {
 			if (pass != 0) { // can only do this after trianglePairs array has been correctly allocated
 				trianglePairs[i][nTrianglePairs[i]][0] = cn1;
 				trianglePairs[i][nTrianglePairs[i]][1] = cn2;
@@ -1041,6 +889,7 @@ void FixPDGCGShellsNeigh::read_triangles(int pass) {
 			}
 
 			numTrianglesLocal++;
+			//printf("i=%d\n", i);
 			nTrianglePairs[i]++;
 		}
 
