@@ -1,0 +1,90 @@
+#processors      4 1 1
+variable        rho equal 2700.0e-9
+variable        h equal 0.82
+variable        E equal 10 # Young's modulus
+variable        nu equal 1./3. # Poisson ratio
+variable        K equal ${E}/(3.0*(1.0-2.0*${nu}))
+variable        sigy equal 0.7
+variable        vel equal 5
+variable        hg equal 25.0
+# ----
+variable        c0 equal sqrt(${E}/${rho})
+variable        dt equal 0.125*${h}/${c0}
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal 1.0*${h} # Verlet list range
+variable        contact_stiffness equal 1*${E}
+
+units		si
+dimension       3
+boundary        s s s
+atom_modify     map array
+atom_style      tlsph
+comm_style      tiled
+neighbor        ${skin} bin
+neigh_modify    every 1 delay 0 check no # only build neighbor list if particle has moved half the skin distance
+comm_modify     vel yes
+newton          off
+
+read_data       h4_adjusted.data
+variable        xmin equal bound(all,xmin)
+variable        xminplus equal ${xmin}+15.0
+variable        xmax equal bound(all,xmax)
+variable        xmaxminus equal ${xmax}-15.0
+region          bot block EDGE ${xminplus} EDGE EDGE EDGE EDGE units box
+region          top block ${xmaxminus} EDGE EDGE EDGE EDGE EDGE units box
+group           top region top
+group           bot region bot
+
+set             group all mol 1000
+
+velocity        top set  ${vel} 0 0 sum no units box
+velocity        bot set -${vel} 0 0 sum no units box
+
+pair_style      peri/gcg
+#                         strength EOS                 c0    E     nu   hg    sigy     max.strain  max.stress Q1   Q2
+#pair_coeff      * * linearplastic            linear ${c0} ${E} ${nu} ${hg}    ${sigy}    0.08        0.0      1.0 2.0
+#                   K      smax   g0     visc syield
+pair_coeff      * * ${K}   1.10    0     0.2     0.02
+
+
+compute         contact_radius all sph2/contact_radius
+compute         d all pdgcg/damage
+compute         eint all sph2/internal_energy
+compute         alleint all reduce sum c_eint
+#compute         sumforce BCL reduce sum fx
+variable        etot equal ke+c_alleint+pe
+
+
+balance          1.0 rcb
+#balance         1.0 shift xy 20 1.0
+
+# time integration
+timestep        ${dt}
+variable        maxdist equal ${h}
+fix             force_fix1 top setforce 0 0 0
+fix             force_fix2 bot setforce 0 0 0
+fix             integration_fix all nve
+
+variable        d equal 2*${vel}*time
+variable        f equal 0.5*(-f_force_fix1[1]+f_force_fix2[1])
+fix             1 all print 10 "$d $f" file force_displacement.dat screen no
+
+
+variable        nrun equal round((4.0/${vel})/${dt})
+print "running for ${nrun} steps"
+
+variable        dumpFreq equal round(${nrun}/1000)
+dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
+                fx fy fz vx vy vz c_eint &
+                c_contact_radius mol mass c_d
+
+dump_modify     dump_id first yes
+
+thermo          100
+thermo_style    custom step ke pe v_etot c_alleint dt f_force_fix1[1]
+#thermo_modify   lost ignore
+
+run             ${nrun}
+#
+#
+#

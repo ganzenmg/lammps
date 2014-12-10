@@ -1,0 +1,54 @@
+# test of pair style peri/gcg
+# units: mm - ms - GPa
+log log.gcg
+processors      2 1 1
+
+variable        l0 equal 1.0
+
+units		si
+dimension       2
+boundary        f f p
+atom_style      tlsph # peri
+atom_modify     map array
+neighbor        ${l0} bin
+comm_modify     vel yes cutoff 10
+newton          off
+neigh_modify    every 1 delay 0 check no
+
+region          box block 0 100 0 100 -0.1 0.1 units box
+region          particles block 0 52 49.0 50 -0.1 0.1 units box
+lattice         sq ${l0}
+create_box      1 box
+create_atoms    1 region particles
+
+set             group all mass 1.0
+set             group all volume 1.0
+set             group all diameter 1.01
+velocity        all set 1.0 0.0 0 units box
+
+pair_style     peri/gcg
+pair_coeff     * * 1 0.01 0.0 0.0
+#pair_style      peri/pmb
+#pair_coeff      * * 1.6863e22 1.01 0.0005 0.25
+
+compute         peatom all pe/atom
+#compute         eint all sph/e
+#compute         ect all reduce sum c_eint
+#variable        te equal ke+c_ect+pe
+#compute         contact_radius all sph/contact_radius
+ 
+#dump            dump_id all custom 1 dump.LAMMPS id type mol x y z &
+#                fx fy fz vx vy vz c_contact_radius c_peatom c_eint mass
+dump            dump_id all custom 1 dump.LAMMPS id type x y z &
+                fx fy fz vx vy vz c_peatom
+dump_modify     dump_id first yes
+
+#
+# time integration
+timestep        0.1
+fix             ffix all setforce 0 0 0
+fix             intfix all nve #tlsph/integrate -1
+thermo          1
+thermo_style    custom step ke pe 
+
+run            10

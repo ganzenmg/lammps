@@ -157,7 +157,7 @@ Atom::Atom(LAMMPS *lmp) : Pointers(lmp)
   rho_flag = e_flag = cv_flag = vest_flag = 0;
 
   // USER-SPH2
-  sph2_flag = 0;
+  smd_flag = 0;
   contact_radius_flag = 0;
   tlsph_fold_flag = 0;
   tlsph_stress_flag = 0;
@@ -383,7 +383,7 @@ void Atom::create_avec(const char *style, int narg, char **arg, char *suffix)
 
   rho_flag = e_flag = cv_flag = vest_flag = 0;
 
-  sph2_flag = 0;
+  smd_flag = 0;
     contact_radius_flag = 0;
     tlsph_fold_flag = 0;
     tlsph_stress_flag = 0;

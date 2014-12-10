@@ -17,6 +17,8 @@ PairStyle(pdgcg,PairPeriGCG)
 
 #else
 
+//ss
+
 #ifndef LMP_PAIR_PERI_GCG_H
 #define LMP_PAIR_PERI_GCG_H
 

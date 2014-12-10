@@ -1,0 +1,96 @@
+# 2D Peridynamic simulation; volumetric strain
+
+# *** choose material parameter here ***
+variable         l0 equal 1.0e0 # lattice spacing
+variable         h equal 1.05*${l0} # horizon based on lattic spacing, plus fudge factor
+variable         rho equal 1.0 # mass density
+variable         K equal 10.0 # bulk modulus
+variable         visc equal 0.0
+variable         smax equal 1.0
+variable         syield equal 10.0
+variable         G0 equal 0.0
+#
+# *** now derive quantities from above variables ***
+variable         vol_one equal ${l0} # volume per particle
+variable         m equal ${vol_one}*${rho} # mass per particle
+variable         skin equal 1*${l0} # Verlet skin distance
+
+newton           on
+units            si
+dimension        2
+boundary         sm f p
+atom_style       tlsph
+atom_modify      map array
+comm_modify      vel yes
+neighbor         ${skin} bin
+lattice          sq ${l0}
+# Create desired target
+region           box block 0 1000 -0.1 0.1 -0.1 0.1 units lattice
+create_box       1 box
+# Create the atoms in the simulation region
+create_atoms     1 box
+variable         tmp equal vol
+variable         vol0 equal ${tmp}
+
+pair_style      pdgcg
+pair_coeff      * * ${K} ${smax} ${G0} ${visc} ${syield}
+
+# Set particle mass & initial mass density
+set             group all diameter ${h}
+set             group all mass ${m}
+set             group all volume ${vol_one}
+set             group all contact_radius 0.1
+set             group all mol 1000
+
+# Compute damage for each particle 
+compute         peatom all pe/atom
+compute         stress all stress/atom NULL virial
+
+# dump output
+dump            D1 all custom 10 dump.LAMMPS id type x y z c_peatom c_stress[1]
+dump_modify     D1 first yes
+                
+neighbor        ${l0} bin
+
+run             0
+
+# apply initial velocity profile
+#variable        a equal 0.02
+#variable        w equal 0.01
+#variable        N equal count(all)
+#label           loop
+#variable        i loop ${N}
+#variable        x0 equal x[${i}]
+#variable        x1 equal ${x0}+${a}*exp(-${w}*${x0}^2)
+#set             atom ${i} x ${x1}
+#print           "${i} ${x0} ${x1}"
+#next            i
+#jump            sound_speed_GCG_2d.lmp loop
+
+region           left block EDGE 200 EDGE EDGE EDGE EDGE units box
+group            left region left
+velocity         left set -0.001 0 0 units box
+
+thermo_style    custom step pe ke etotal
+thermo          10
+
+fix             nve_fix all nve
+timestep        0.1
+
+# estimate number of timesteps to run
+variable        nu equal 1./3.
+variable        E equal ${K}
+variable        E2d equal ${E}/(1.0-${nu}^2)
+variable        cl equal sqrt(${E2d}/${rho})
+print           "predicted soundspeed: ${cl}"
+variable        deltat equal (bound(all,xmax)-bound(all,xmin))/${cl}
+variable        nrun equal 0.9*${deltat}/dt
+
+run             ${nrun}
+
+
+dump            D2 all custom 1 last.LAMMPS id type x y z fx fy fz &
+                c_stressatom[1] x0 y0 &
+                c_peatom
+dump_modify     D2 first yes
+run             0

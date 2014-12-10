@@ -641,7 +641,7 @@ void Set::set(int keyword)
 //        MathExtra::cross3(c2mc1,c3mc1,norm);
 //        double area = 0.5 * MathExtra::len3(norm);
 //        atom->rmass[i] = area * dvalue;
-//      } else if (atom->sph2_flag) {
+//      } else if (atom->smd_flag) {
 //    	  printf("setting mass density\n");
 //    	  atom->rmass[i] = atom->vfrac[i] * dvalue;
 //      } else atom->rmass[i] = dvalue;

@@ -1,0 +1,91 @@
+#processors      4 1 1
+variable        rho equal 2700.0e-9
+variable        h equal 5.4
+variable        E equal 10 # Young's modulus
+variable        nu equal 0.3 # Poisson ratio
+variable        sigy equal 0.7
+variable        vel equal 1.0
+variable        hg equal 25
+# ----
+variable        c0 equal sqrt(${E}/${rho})
+variable        dt equal 0.125*${h}/${c0}
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal 1.0*${h} # Verlet list range
+
+units		si
+dimension       2
+boundary        s s p
+atom_style      tlsph
+neighbor        ${skin} bin
+neigh_modify    once yes #every 10 delay 0 check yes # only build neighbor list if particle has moved half the skin distance
+comm_modify     vel yes cutoff ${h}
+newton          off
+
+read_data       refined.data
+region          BCL block 0 30 EDGE EDGE EDGE EDGE units box
+group           BCL region BCL
+region          BCR block 170 EDGE EDGE EDGE EDGE EDGE units box
+group           BCR region BCR
+
+#set             group all diameter ${h}
+#set             group all contact_radius ${crad}
+#set             group all mass ${mass_one}
+#set             group all volume ${vol_one}
+#set             group all mol 1
+
+velocity        BCL set -${vel} 0.0 0.0 sum no units box
+velocity        BCR set  ${vel} 0.0 0.0 sum no units box
+
+pair_style      tlsph
+#                   strength EOS                    c0    E     nu   hg    visc sigy     max.strain    
+pair_coeff      1 1 linearplastic            linear ${c0} ${E} ${nu} ${hg} 0.0  ${sigy} 0.15
+
+compute         F all tlsph/defgrad
+compute         E all tlsph/strain
+compute         P all tlsph/eff_plastic_strain
+compute         S all tlsph/stress
+compute         d all tlsph/damage
+compute         nn all tlsph/num_neighs
+compute         contact_radius all sph/contact_radius
+compute         eint all sph/e
+compute         alleint all reduce sum c_eint
+compute         sumforce BCL reduce sum fx
+variable        etot equal ke+c_alleint
+
+
+
+#balance         1.0 shift xy 20 1.0
+
+# time integration
+timestep        ${dt}
+variable        maxdist equal 0.0025*${h}
+fix             dtfix all dt/reset 5 NULL ${dt} ${maxdist} units box
+fix             integration_fix all tlsph/integrate 1.5e3 #update xsph
+fix             force_fix1 BCL setforce 0 0 0
+fix             force_fix2 BCR setforce 0 0 0
+
+variable        d equal 2*${vel}*time
+variable        g equal f_force_fix1[1]
+fix             output all print 10 "$d $g" file d_f_${hg}.dat screen no
+
+variable        nrun equal round((10.0/${vel})/${dt})
+print "running for ${nrun} steps"
+
+variable        dumpFreq equal round(${nrun}/100)
+dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
+                c_F[1]  c_F[2] c_F[3] c_F[4] c_F[5] c_F[6] c_F[7] c_F[8] c_F[9] c_F[10] &
+                c_E[1] c_E[2] c_E[5] &
+                c_S[1] c_S[2] c_S[4] &
+                fx fy vx vy c_P c_eint &
+                c_contact_radius c_nn mol c_d
+
+dump_modify     dump_id first yes
+
+thermo          100
+thermo_style    custom step ke pe v_etot c_alleint dt f_force_fix1[1]
+thermo_modify   lost ignore
+
+run             ${nrun}
+#
+#
+#

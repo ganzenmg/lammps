@@ -136,7 +136,7 @@ class Atom : protected Pointers {
   int tlsph_fold_flag;
   int tlsph_stress_flag;
   int x0_flag;
-  int sph2_flag;
+  int smd_flag;
   int eff_plastic_strain_flag;
   int eff_plastic_strain_rate_flag;
   int damage_flag;

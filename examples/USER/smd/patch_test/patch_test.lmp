@@ -1,0 +1,93 @@
+# peridynamic rubber rings colliding with each other
+
+variable        l0 equal 0.05
+variable        rho equal 1
+variable        h equal 3.01*${l0}
+variable        E equal 1.0 # Young's modulus
+variable        nu equal 0.3 # Poisson ratio
+variable        hg equal 1
+# ----
+variable        c0 equal sqrt(${E}/${rho})
+variable        dt equal 0.5*0.125*${l0}/${c0}
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal ${l0} # Verlet list range
+
+units		si
+dimension       2
+boundary        s s p
+atom_style      tlsph
+neighbor        ${skin} bin
+neigh_modify    once yes
+comm_modify     vel yes
+newton          off
+
+read_data       in.data
+set             group all mol 1
+velocity        all set 0.0 0.0 0.0 sum no units box
+set             group all diameter ${h}
+
+pair_style      tlsph
+#                           rh0    E    nu    Q1    Q2   hg    Cp
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  -100.0 1.0 &
+                *LINEAR_DEFGRAD &
+                *END
+
+compute         E all sph2/tlsph_strain
+compute         S all sph2/tlsph_stress
+compute         nn all sph2/tlsph_num_neighs
+compute         contact_radius all sph2/contact_radius
+compute         eint all sph2/internal_energy
+compute         toteint all reduce sum c_eint
+variable        et equal ke+c_toteint
+variable        patom atom -0.5*(c_S[1]+c_S[2])
+compute         totpres all reduce ave v_patom
+compute         com all com
+
+variable        mx atom mass*vx
+variable        my atom mass*vy
+compute         totmx all reduce sum v_mx
+
+
+dump            dump_id all custom 100 dump.LAMMPS id type x y z diameter fx fy z &
+		c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
+                vx vy vz c_eint proc &
+                c_contact_radius c_nn mol mass
+dump_modify     dump_id first yes
+
+# initial run
+thermo_style custom step c_com[1] c_com[2] c_com[3]
+run             0
+fix             rota_fix all move rotate 0.50000256   0.50000436            0 0 0 1 15
+run             1
+unfix           rota_fix
+
+variable        ax equal angmom(all,x)
+variable        ay equal angmom(all,y)
+variable        az equal angmom(all,z)
+
+
+
+# deform box and run a few time steps
+#change_box      all x scale 2.0 y scale 0.75 remap units box
+change_box      all x scale 1.1 y scale 1.1 remap units box
+run             2
+#
+variable           time equal dt*elapsed
+variable           ke equal ke
+variable           te equal etotal
+variable           ie equal c_toteint
+variable           p equal c_totpres
+fix                fd_curve all print 5 "${time} ${ke} ${ie} ${te} ${p}" file time_ke.dat screen no
+#
+## time integration
+timestep        ${dt}
+#fix             dtfix all sph2/tlsph_dt_reset 5 0.1
+fix             integration_fix all sph2/integrate_tlsph 1.5e3 -1
+#
+thermo          50
+thermo_style    custom step ke pe v_et c_totmx dt time v_ax v_ay v_az
+
+run             4000
+#
+

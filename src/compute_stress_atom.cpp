@@ -354,7 +354,7 @@ void ComputeStressAtom::compute_peratom() {
 		}
 
 	// divide by volume to obtain a proper stress tensor for SPH2 atom style
-	if (atom->sph2_flag) {
+	if (atom->smd_flag) {
 		double *vfrac = atom->vfrac;
 		for (i = 0; i < nlocal; i++)
 			if (mask[i] & groupbit) {

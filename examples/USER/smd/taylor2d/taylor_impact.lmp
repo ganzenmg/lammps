@@ -1,0 +1,92 @@
+# Taylor impact of an Aluminum bar
+
+variable        l0 equal 3.91/11
+variable        rho equal 2.700e-6
+variable        h equal 3.01*${l0}
+variable        E equal 70.0 # Young's modulus
+variable        sigy equal 0.7 # yield stress
+variable        nu equal 0.3 # Poisson ratio
+variable        hg equal 0
+# ----
+variable        c0 equal sqrt(${E}/${rho})
+variable        dt equal 0.5*0.125*${l0}/${c0}
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal 30.0 #${l0} # Verlet list range
+variable        vel equal 1.0e-2*${c0}
+variable        dmax equal 0.1
+
+units		si
+dimension       2
+boundary        s fs p
+atom_style      tlsph
+atom_modify	map array
+neighbor        ${skin} bin
+comm_modify     vel yes
+newton          off
+
+neigh_modify    once yes
+
+region          box block -0.01 5.01 -0.01 20.01 -0.1 0.1 units box
+
+variable x1 equal 5.0-${l0}
+variable y1 equal 20.0-${l0}
+region          bar block 0 ${x1} 0 ${y1} -0.1 0.1 units box
+
+create_box      1 box
+lattice         sq ${l0}
+create_atoms    1 region bar
+region          bot block EDGE EDGE 0 0.01 EDGE EDGE units box
+group           bot region bot
+
+set             group all mol 1
+velocity        all set 0.0 -300.0 0.0 sum no units box
+set             group all diameter ${h}
+variable        vol_one equal ${l0}^2
+set             group all volume ${vol_one}
+variable        mass_one equal ${vol_one}*${rho}
+#set             group all contact_radius ${l0}
+set             group all density ${rho}
+
+pair_style      tlsph
+#                           rh0    E    nu    Q1    Q2   hg    Cp
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  10.0 1.0 &
+                *LINEAR_PLASTICITY ${sigy} &
+		*EOS_LINEAR &
+                *END
+
+compute         E all sph2/tlsph_strain
+compute         S all sph2/tlsph_stress
+compute         nn all sph2/tlsph_num_neighs
+compute         contact_radius all sph2/contact_radius
+compute         eint all sph2/internal_energy
+compute         toteint all reduce sum c_eint
+variable        et equal ke+c_toteint
+compute         P all sph2/plastic_strain
+compute         err all sph2/hourglass_error
+
+thermo          100
+thermo_style    custom step ke
+dump            dump_id all custom 100 dump.LAMMPS id type x y z diameter fx fy z &
+		c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
+                vx vy vz c_eint proc &
+                c_contact_radius c_nn mol mass c_P c_err
+dump_modify     dump_id first yes
+
+#
+# time integration
+timestep        ${dt}
+variable        nrun equal ${dmax}/(${vel}*dt)
+print           "running for ${nrun} timesteps"
+##
+##
+#fix             momentum_fix all momentum 100 linear 1 0 0
+velocity        bot set 0.0 0.0 0.0 sum no units box
+fix             11 bot setforce NULL 0 0
+fix             integration_fix all sph2/integrate_tlsph 1.5e3 -1
+#
+#fix             bot_wall all wall/reflect ylo EDGE
+#
+##
+run             4000
+

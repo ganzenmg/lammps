@@ -1,0 +1,118 @@
+#processors      4 1 1
+variable        rho equal 2700.0e-9
+variable        h equal 0.06
+variable        Efibre equal 50 # Young's modulus
+variable        Eresin equal 1 # Young's modulus
+variable        nu equal 0.3 # Poisson ratio
+variable        sigy equal 0.1
+variable        vel equal 1.0
+variable        hg equal 0.0
+# ----
+variable        c0 equal sqrt(${Efibre}/${rho})
+variable        c0_resin equal sqrt(${Eresin}/${rho})
+variable        dt equal 0.125*${h}/${c0}
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal 0.05*${h} # Verlet list range
+variable         halo equal 2*${skin}
+
+units		si
+dimension       2
+boundary        p p p
+atom_style      tlsph
+neighbor        ${skin} bin
+neigh_modify    every 1 delay 0 check yes # only build neighbor list if particle has moved half the skin distance
+comm_modify     vel yes cutoff ${halo}
+newton          off
+
+read_data       out.data
+#displace_atoms  all random 0.01 0.01 0.01 1
+
+group           resin type 1
+group           fibres type 2
+
+set             group all meso_rho ${rho}
+
+
+
+
+#change_box      all triclinic 
+
+#pair_style      hybrid/overlay tlsph tlsph/ipc_hertz
+#                   strength EOS                    c0    E     nu   hg    visc sigy     max.strain    
+#pair_coeff      1 1 tlsph linearplastic linear          ${c0} ${E} ${nu} ${hg} 0.1  ${sigy} 1000 
+#pair_coeff      2 2 none
+#pair_coeff      1 2 tlsph/ipc_hertz ${E}
+
+pair_style      hybrid/overlay tlsph sph/fluid
+#                             eos  Tait exp.          c0 rho.ref shear.visc art.visc
+pair_coeff      1 1 sph/fluid tait      7.0  ${c0_resin}  ${rho}     0.0e-6      1.0
+#                   strength EOS                        c0    E     nu   hg    visc sigy     max.strain    
+pair_coeff      2 2 tlsph linearplastic linear          ${c0} ${Efibre} ${nu} 25 0.1  ${sigy} 1000 
+#                             eos  Tait exp.          c0 rho.ref shear.visc art.visc
+pair_coeff      1 2 sph/fluid tait      7.0 ${c0_resin}  ${rho}     0.0e-6      1.0
+
+compute         F all tlsph/defgrad
+compute         E all tlsph/strain
+compute         P all tlsph/eff_plastic_strain
+compute         S all tlsph/stress
+compute         d all tlsph/damage
+compute         nn all tlsph/num_neighs
+compute         eint all sph/e
+compute         rho resin sph/rho
+compute         alleint all reduce sum c_eint
+variable        etot equal ke+c_alleint
+compute         contact_radius all sph/contact_radius
+compute         fS resin sph/fluid/stress
+compute         aS all stress/atom NULL pair
+
+compute         av_shear_stress resin reduce ave c_fS[4]
+compute         av_press_stress resin reduce ave c_fS[1]
+
+compute         sxx all reduce ave c_aS[1]
+compute         sxy all reduce ave c_aS[4]
+
+#balance         1.0 shift xy 20 1.0
+
+# time integration
+
+timestep        ${dt}
+variable        maxdist equal 0.0025*${h}
+fix             dtfix all dt/reset 5 NULL ${dt} ${maxdist} units box
+
+
+variable        nrun equal round((10.0/${vel})/${dt})
+print "running for ${nrun} steps"
+
+variable        dumpFreq equal 100 #round(${nrun}/100)
+dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
+                c_F[1]  c_F[2] c_F[3] c_F[4] c_F[5] c_F[6] c_F[7] c_F[8] c_F[9] c_F[10] &
+                c_E[1] c_E[2] c_E[4] &
+                c_S[1] c_S[2] c_S[4] &
+                fx fy vx vy c_P c_eint &
+                c_contact_radius c_nn mol c_d c_rho &
+                c_fS[1] c_fS[2] c_fS[4]
+
+
+dump_modify     dump_id first yes
+
+thermo          100
+thermo_style    custom step ke pe v_etot c_alleint dt c_av_shear_stress c_av_press_stress c_sxx c_sxy
+thermo_modify   lost ignore
+
+fix             rhofix all sph_fluid/adjust_rho
+run             1000
+unfix           rhofix
+
+
+velocity        all ramp vx 5 -5 x 0 1
+velocity        all ramp vy -5 5 y 0 1
+fix             1 all deform 10 x trate 10 y volume remap v units box
+
+variable        damptime equal dt
+fix             integration_fix fibres tlsph/integrate 1.5e3
+fix             integration_fix_resin resin sph_fluid/integrate 1.5e3
+timestep        0.0e0
+run             20000
+#
+#
+#
