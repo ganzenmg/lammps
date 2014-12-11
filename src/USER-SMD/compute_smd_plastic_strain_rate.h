@@ -25,21 +25,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/plastic_strain_rate,ComputeSph2PlasticStrainRate)
+ComputeStyle(smd/plastic_strain_rate,ComputeSMDPlasticStrainRate)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_PLASTIC_STRAIN_RATE_H
-#define LMP_COMPUTE_SPH2_PLASTIC_STRAIN_RATE_H
+#ifndef LMP_COMPUTE_SMD_PLASTIC_STRAIN_RATE_H
+#define LMP_COMPUTE_SMD_PLASTIC_STRAIN_RATE_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeSph2PlasticStrainRate : public Compute {
+class ComputeSMDPlasticStrainRate : public Compute {
  public:
-  ComputeSph2PlasticStrainRate(class LAMMPS *, int, char **);
-  ~ComputeSph2PlasticStrainRate();
+  ComputeSMDPlasticStrainRate(class LAMMPS *, int, char **);
+  ~ComputeSMDPlasticStrainRate();
   void init();
   void compute_peratom();
   double memory_usage();

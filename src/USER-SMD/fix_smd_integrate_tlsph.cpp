@@ -48,7 +48,7 @@ using namespace std;
 
 /* ---------------------------------------------------------------------- */
 
-FixSph2IntegrateTlsph::FixSph2IntegrateTlsph(LAMMPS *lmp, int narg, char **arg) :
+FixSMDIntegrateTlsph::FixSMDIntegrateTlsph(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
 	if (narg < 4) {
 		printf("narg=%d\n", narg);
@@ -93,7 +93,7 @@ FixSph2IntegrateTlsph::FixSph2IntegrateTlsph(LAMMPS *lmp, int narg, char **arg) 
 
 /* ---------------------------------------------------------------------- */
 
-int FixSph2IntegrateTlsph::setmask() {
+int FixSMDIntegrateTlsph::setmask() {
 	int mask = 0;
 	mask |= INITIAL_INTEGRATE;
 	mask |= FINAL_INTEGRATE;
@@ -102,7 +102,7 @@ int FixSph2IntegrateTlsph::setmask() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2IntegrateTlsph::init() {
+void FixSMDIntegrateTlsph::init() {
 	dtv = update->dt;
 	dtf = 0.5 * update->dt * force->ftm2v;
 	vlimitsq = vlimit * vlimit;
@@ -132,7 +132,7 @@ void FixSph2IntegrateTlsph::init() {
 /* ----------------------------------------------------------------------
  ------------------------------------------------------------------------- */
 
-void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
+void FixSMDIntegrateTlsph::initial_integrate(int vflag) {
 	double dtfm, vsq, scale;
 
 	// update v and x of atoms in group
@@ -170,7 +170,7 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 					printf("updating ref config at step: %ld\n", update->ntimestep);
 				}
 
-				FixSph2IntegrateTlsph::updateReferenceConfiguration();
+				FixSMDIntegrateTlsph::updateReferenceConfiguration();
 			}
 		}
 	}
@@ -234,7 +234,7 @@ void FixSph2IntegrateTlsph::initial_integrate(int vflag) {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2IntegrateTlsph::final_integrate() {
+void FixSMDIntegrateTlsph::final_integrate() {
 	double dtfm, vsq, scale;
 
 // update v of atoms in group
@@ -276,7 +276,7 @@ void FixSph2IntegrateTlsph::final_integrate() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2IntegrateTlsph::reset_dt() {
+void FixSMDIntegrateTlsph::reset_dt() {
 	dtv = update->dt;
 	dtf = 0.5 * update->dt * force->ftm2v;
 	vlimitsq = vlimit * vlimit;
@@ -284,7 +284,7 @@ void FixSph2IntegrateTlsph::reset_dt() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
+void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 	double **defgrad0 = atom->tlsph_fold;
 	double *radius = atom->radius;
 	double *contact_radius = atom->contact_radius;
@@ -307,12 +307,12 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 
 	Matrix3d *Fincr = (Matrix3d *) force->pair->extract("smd/tlsph/Fincr_ptr", itmp);
 	if (Fincr == NULL) {
-		error->all(FLERR, "FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access Fincr array");
+		error->all(FLERR, "FixSMDIntegrateTlsph::updateReferenceConfiguration() failed to access Fincr array");
 	}
 
 	int *numNeighsRefConfig = (int *) force->pair->extract("smd/tlsph/numNeighsRefConfig_ptr", itmp);
 	if (numNeighsRefConfig == NULL) {
-		error->all(FLERR, "FixSph2IntegrateTlsph::updateReferenceConfiguration() failed to access numNeighsRefConfig array");
+		error->all(FLERR, "FixSMDIntegrateTlsph::updateReferenceConfiguration() failed to access numNeighsRefConfig array");
 	}
 
 	nRefConfigUpdates++;
@@ -381,13 +381,13 @@ void FixSph2IntegrateTlsph::updateReferenceConfiguration() {
 
 /* ---------------------------------------------------------------------- */
 
-int FixSph2IntegrateTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
+int FixSMDIntegrateTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	int i, j, m;
 	double *radius = atom->radius;
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
 
-//printf("in FixSph2IntegrateTlsph::pack_forward_comm\n");
+//printf("in FixSMDIntegrateTlsph::pack_forward_comm\n");
 	m = 0;
 	for (i = 0; i < n; i++) {
 		j = list[i];
@@ -403,13 +403,13 @@ int FixSph2IntegrateTlsph::pack_forward_comm(int n, int *list, double *buf, int 
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2IntegrateTlsph::unpack_forward_comm(int n, int first, double *buf) {
+void FixSMDIntegrateTlsph::unpack_forward_comm(int n, int first, double *buf) {
 	int i, m, last;
 	double *radius = atom->radius;
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
 
-//printf("in FixSph2IntegrateTlsph::unpack_forward_comm\n");
+//printf("in FixSMDIntegrateTlsph::unpack_forward_comm\n");
 	m = 0;
 	last = first + n;
 	for (i = first; i < last; i++) {

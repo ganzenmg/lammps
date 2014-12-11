@@ -39,7 +39,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2TLSPHStress::ComputeSph2TLSPHStress(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDTLSPHStress::ComputeSMDTLSPHStress(LAMMPS *lmp, int narg, char **arg) :
 		Compute(lmp, narg, arg) {
 	if (narg != 3)
 		error->all(FLERR, "Illegal compute smd/tlsph_stress command");
@@ -53,13 +53,13 @@ ComputeSph2TLSPHStress::ComputeSph2TLSPHStress(LAMMPS *lmp, int narg, char **arg
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2TLSPHStress::~ComputeSph2TLSPHStress() {
+ComputeSMDTLSPHStress::~ComputeSMDTLSPHStress() {
 	memory->sfree(stress_array);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2TLSPHStress::init() {
+void ComputeSMDTLSPHStress::init() {
 
 	int count = 0;
 	for (int i = 0; i < modify->ncompute; i++)
@@ -71,7 +71,7 @@ void ComputeSph2TLSPHStress::init() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2TLSPHStress::compute_peratom() {
+void ComputeSMDTLSPHStress::compute_peratom() {
 	invoked_peratom = update->ntimestep;
 	int *mol = atom->molecule;
 
@@ -106,7 +106,7 @@ void ComputeSph2TLSPHStress::compute_peratom() {
  memory usage of local atom-based array
  ------------------------------------------------------------------------- */
 
-double ComputeSph2TLSPHStress::memory_usage() {
+double ComputeSMDTLSPHStress::memory_usage() {
 	double bytes = size_peratom_cols * nmax * sizeof(double);
 	return bytes;
 }
@@ -114,7 +114,7 @@ double ComputeSph2TLSPHStress::memory_usage() {
 /*
  * deviator of a tensor
  */
-Matrix3d ComputeSph2TLSPHStress::Deviator(Matrix3d M) {
+Matrix3d ComputeSMDTLSPHStress::Deviator(Matrix3d M) {
 	Matrix3d eye;
 	eye.setIdentity();
 	eye *= M.trace() / 3.0;

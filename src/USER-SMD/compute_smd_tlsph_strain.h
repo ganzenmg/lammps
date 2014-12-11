@@ -25,21 +25,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/tlsph_strain,ComputeSph2TLSPHstrain)
+ComputeStyle(smd/tlsph_strain,ComputeSMDTLSPHstrain)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_TLSPH_STRAIN_H
-#define LMP_COMPUTE_SPH2_TLSPH_STRAIN_H
+#ifndef LMP_COMPUTE_SMD_TLSPH_STRAIN_H
+#define LMP_COMPUTE_SMD_TLSPH_STRAIN_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeSph2TLSPHstrain : public Compute {
+class ComputeSMDTLSPHstrain : public Compute {
  public:
-  ComputeSph2TLSPHstrain(class LAMMPS *, int, char **);
-  ~ComputeSph2TLSPHstrain();
+  ComputeSMDTLSPHstrain(class LAMMPS *, int, char **);
+  ~ComputeSMDTLSPHstrain();
   void init();
   void compute_peratom();
   double memory_usage();

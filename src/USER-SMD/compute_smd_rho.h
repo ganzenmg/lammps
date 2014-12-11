@@ -25,21 +25,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/rho,ComputeSph2Rho)
+ComputeStyle(smd/rho,ComputeSMDRho)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_RHO_H
-#define LMP_COMPUTE_SPH2_RHO_H
+#ifndef LMP_COMPUTE_SMD_RHO_H
+#define LMP_COMPUTE_SMD_RHO_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeSph2Rho : public Compute {
+class ComputeSMDRho : public Compute {
  public:
-  ComputeSph2Rho(class LAMMPS *, int, char **);
-  ~ComputeSph2Rho();
+  ComputeSMDRho(class LAMMPS *, int, char **);
+  ~ComputeSMDRho();
   void init();
   void compute_peratom();
   double memory_usage();

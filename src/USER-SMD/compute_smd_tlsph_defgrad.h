@@ -25,21 +25,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/tlsph_defgrad,ComputeSph2TLSPHDefgrad)
+ComputeStyle(smd/tlsph_defgrad,ComputeSMDTLSPHDefgrad)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_TLSPH_DEFGRAD_H
-#define LMP_COMPUTE_SPH2_TLSPH_DEFGRAD_H
+#ifndef LMP_COMPUTE_SMD_TLSPH_DEFGRAD_H
+#define LMP_COMPUTE_SMD_TLSPH_DEFGRAD_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeSph2TLSPHDefgrad : public Compute {
+class ComputeSMDTLSPHDefgrad : public Compute {
  public:
-  ComputeSph2TLSPHDefgrad(class LAMMPS *, int, char **);
-  ~ComputeSph2TLSPHDefgrad();
+  ComputeSMDTLSPHDefgrad(class LAMMPS *, int, char **);
+  ~ComputeSMDTLSPHDefgrad();
   void init();
   void compute_peratom();
   double memory_usage();

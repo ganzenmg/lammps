@@ -37,7 +37,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2PlasticStrain::ComputeSph2PlasticStrain(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDPlasticStrain::ComputeSMDPlasticStrain(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute smd/plastic_strain command");
@@ -52,14 +52,14 @@ ComputeSph2PlasticStrain::ComputeSph2PlasticStrain(LAMMPS *lmp, int narg, char *
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2PlasticStrain::~ComputeSph2PlasticStrain()
+ComputeSMDPlasticStrain::~ComputeSMDPlasticStrain()
 {
   memory->sfree(plastic_strain_vector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2PlasticStrain::init()
+void ComputeSMDPlasticStrain::init()
 {
 
   int count = 0;
@@ -71,7 +71,7 @@ void ComputeSph2PlasticStrain::init()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2PlasticStrain::compute_peratom()
+void ComputeSMDPlasticStrain::compute_peratom()
 {
   invoked_peratom = update->ntimestep;
 
@@ -102,7 +102,7 @@ void ComputeSph2PlasticStrain::compute_peratom()
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
 
-double ComputeSph2PlasticStrain::memory_usage()
+double ComputeSMDPlasticStrain::memory_usage()
 {
   double bytes = nmax * sizeof(double);
   return bytes;

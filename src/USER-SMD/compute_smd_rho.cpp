@@ -37,7 +37,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2Rho::ComputeSph2Rho(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDRho::ComputeSMDRho(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute smd/rho command");
@@ -52,14 +52,14 @@ ComputeSph2Rho::ComputeSph2Rho(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2Rho::~ComputeSph2Rho()
+ComputeSMDRho::~ComputeSMDRho()
 {
   memory->sfree(rhoVector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2Rho::init()
+void ComputeSMDRho::init()
 {
 
   int count = 0;
@@ -71,7 +71,7 @@ void ComputeSph2Rho::init()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2Rho::compute_peratom()
+void ComputeSMDRho::compute_peratom()
 {
   invoked_peratom = update->ntimestep;
 
@@ -102,7 +102,7 @@ void ComputeSph2Rho::compute_peratom()
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
 
-double ComputeSph2Rho::memory_usage()
+double ComputeSMDRho::memory_usage()
 {
   double bytes = nmax * sizeof(double);
   return bytes;

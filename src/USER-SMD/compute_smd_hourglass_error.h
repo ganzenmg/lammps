@@ -25,21 +25,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/hourglass_error,ComputeSph2HourglassError)
+ComputeStyle(smd/hourglass_error,ComputeSMDHourglassError)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_HOURGLASS_ERROR_H
-#define LMP_COMPUTE_SPH2_HOURGLASS_ERROR_H
+#ifndef LMP_COMPUTE_SMD_HOURGLASS_ERROR_H
+#define LMP_COMPUTE_SMD_HOURGLASS_ERROR_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeSph2HourglassError : public Compute {
+class ComputeSMDHourglassError : public Compute {
  public:
-  ComputeSph2HourglassError(class LAMMPS *, int, char **);
-  ~ComputeSph2HourglassError();
+  ComputeSMDHourglassError(class LAMMPS *, int, char **);
+  ~ComputeSMDHourglassError();
   void init();
   void compute_peratom();
   double memory_usage();

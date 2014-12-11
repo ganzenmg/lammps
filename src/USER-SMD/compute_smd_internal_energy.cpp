@@ -37,7 +37,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2InternalEnergy::ComputeSph2InternalEnergy(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDInternalEnergy::ComputeSMDInternalEnergy(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute smd/internal_energy command");
@@ -52,14 +52,14 @@ ComputeSph2InternalEnergy::ComputeSph2InternalEnergy(LAMMPS *lmp, int narg, char
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2InternalEnergy::~ComputeSph2InternalEnergy()
+ComputeSMDInternalEnergy::~ComputeSMDInternalEnergy()
 {
   memory->sfree(internal_energy_vector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2InternalEnergy::init()
+void ComputeSMDInternalEnergy::init()
 {
 
   int count = 0;
@@ -71,7 +71,7 @@ void ComputeSph2InternalEnergy::init()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2InternalEnergy::compute_peratom()
+void ComputeSMDInternalEnergy::compute_peratom()
 {
   invoked_peratom = update->ntimestep;
 
@@ -102,7 +102,7 @@ void ComputeSph2InternalEnergy::compute_peratom()
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
 
-double ComputeSph2InternalEnergy::memory_usage()
+double ComputeSMDInternalEnergy::memory_usage()
 {
   double bytes = nmax * sizeof(double);
   return bytes;

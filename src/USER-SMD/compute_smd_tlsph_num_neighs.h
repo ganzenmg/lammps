@@ -25,21 +25,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/tlsph_num_neighs,ComputeSph2TLSPHNumNeighs)
+ComputeStyle(smd/tlsph_num_neighs,ComputeSMDTLSPHNumNeighs)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_TLSPH_NUM_NEIGHS_H
-#define LMP_COMPUTE_SPH2_TLSPH_NUM_NEIGHS_H
+#ifndef LMP_COMPUTE_SMD_TLSPH_NUM_NEIGHS_H
+#define LMP_COMPUTE_SMD_TLSPH_NUM_NEIGHS_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeSph2TLSPHNumNeighs : public Compute {
+class ComputeSMDTLSPHNumNeighs : public Compute {
  public:
-  ComputeSph2TLSPHNumNeighs(class LAMMPS *, int, char **);
-  ~ComputeSph2TLSPHNumNeighs();
+  ComputeSMDTLSPHNumNeighs(class LAMMPS *, int, char **);
+  ~ComputeSMDTLSPHNumNeighs();
   void init();
   void compute_peratom();
   double memory_usage();

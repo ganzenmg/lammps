@@ -25,20 +25,20 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(smd/integrate_ulsph,FixSph2IntegrateUlsph)
+FixStyle(smd/integrate_ulsph,FixSMDIntegrateUlsph)
 
 #else
 
-#ifndef LMP_FIX_SPH2_INTEGRATE_ULSPH_H
-#define LMP_FIX_SPH2_INTEGRATE_ULSPH_H
+#ifndef LMP_FIX_SMD_INTEGRATE_ULSPH_H
+#define LMP_FIX_SMD_INTEGRATE_ULSPH_H
 
 #include "fix.h"
 
 namespace LAMMPS_NS {
 
-class FixSph2IntegrateUlsph : public Fix {
+class FixSMDIntegrateUlsph : public Fix {
  public:
-  FixSph2IntegrateUlsph(class LAMMPS *, int, char **);
+  FixSMDIntegrateUlsph(class LAMMPS *, int, char **);
   int setmask();
   virtual void init();
   virtual void initial_integrate(int);

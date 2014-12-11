@@ -44,7 +44,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2TLSPHDefgrad::ComputeSph2TLSPHDefgrad(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDTLSPHDefgrad::ComputeSMDTLSPHDefgrad(LAMMPS *lmp, int narg, char **arg) :
         Compute(lmp, narg, arg) {
     if (narg != 3)
         error->all(FLERR, "Illegal compute smd/tlsph_defgrad command");
@@ -58,13 +58,13 @@ ComputeSph2TLSPHDefgrad::ComputeSph2TLSPHDefgrad(LAMMPS *lmp, int narg, char **a
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2TLSPHDefgrad::~ComputeSph2TLSPHDefgrad() {
+ComputeSMDTLSPHDefgrad::~ComputeSMDTLSPHDefgrad() {
     memory->sfree(defgradVector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2TLSPHDefgrad::init() {
+void ComputeSMDTLSPHDefgrad::init() {
 
     int count = 0;
     for (int i = 0; i < modify->ncompute; i++)
@@ -76,7 +76,7 @@ void ComputeSph2TLSPHDefgrad::init() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2TLSPHDefgrad::compute_peratom() {
+void ComputeSMDTLSPHDefgrad::compute_peratom() {
     invoked_peratom = update->ntimestep;
 
     // grow vector array if necessary
@@ -127,7 +127,7 @@ void ComputeSph2TLSPHDefgrad::compute_peratom() {
  memory usage of local atom-based array
  ------------------------------------------------------------------------- */
 
-double ComputeSph2TLSPHDefgrad::memory_usage() {
+double ComputeSMDTLSPHDefgrad::memory_usage() {
     double bytes = size_peratom_cols * nmax * sizeof(double);
     return bytes;
 }

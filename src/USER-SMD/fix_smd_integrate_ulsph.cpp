@@ -49,7 +49,7 @@ using namespace FixConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixSph2IntegrateUlsph::FixSph2IntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
+FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
         Fix(lmp, narg, arg) {
 
     if ((atom->e_flag != 1) || (atom->rho_flag != 1))
@@ -81,7 +81,7 @@ FixSph2IntegrateUlsph::FixSph2IntegrateUlsph(LAMMPS *lmp, int narg, char **arg) 
 
 /* ---------------------------------------------------------------------- */
 
-int FixSph2IntegrateUlsph::setmask() {
+int FixSMDIntegrateUlsph::setmask() {
     int mask = 0;
     mask |= INITIAL_INTEGRATE;
     mask |= FINAL_INTEGRATE;
@@ -90,7 +90,7 @@ int FixSph2IntegrateUlsph::setmask() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2IntegrateUlsph::init() {
+void FixSMDIntegrateUlsph::init() {
     dtv = update->dt;
     dtf = 0.5 * update->dt * force->ftm2v;
     vlimitsq = vlimit * vlimit;
@@ -100,7 +100,7 @@ void FixSph2IntegrateUlsph::init() {
  allow for both per-type and per-atom mass
  ------------------------------------------------------------------------- */
 
-void FixSph2IntegrateUlsph::initial_integrate(int vflag) {
+void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
     // update v and x and rho and e of atoms in group
 
     double **x = atom->x;
@@ -175,7 +175,7 @@ void FixSph2IntegrateUlsph::initial_integrate(int vflag) {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2IntegrateUlsph::final_integrate() {
+void FixSMDIntegrateUlsph::final_integrate() {
 
     // update v, rho, and e of atoms in group
 
@@ -219,7 +219,7 @@ void FixSph2IntegrateUlsph::final_integrate() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2IntegrateUlsph::reset_dt() {
+void FixSMDIntegrateUlsph::reset_dt() {
     dtv = update->dt;
     dtf = 0.5 * update->dt * force->ftm2v;
 }

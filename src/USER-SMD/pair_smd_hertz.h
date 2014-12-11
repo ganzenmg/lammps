@@ -29,8 +29,8 @@ PairStyle(smd/hertz,PairHertz)
 
 #else
 
-#ifndef LMP_SPH2_HERTZ_H
-#define LMP_SPH2_HERTZ_H
+#ifndef LMP_SMD_HERTZ_H
+#define LMP_SMD_HERTZ_H
 
 #include "pair.h"
 

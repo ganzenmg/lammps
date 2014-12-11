@@ -38,7 +38,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2TLSPHNumNeighs::ComputeSph2TLSPHNumNeighs(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDTLSPHNumNeighs::ComputeSMDTLSPHNumNeighs(LAMMPS *lmp, int narg, char **arg) :
         Compute(lmp, narg, arg) {
     if (narg != 3)
         error->all(FLERR, "Illegal compute smd/tlsph_num_neighs command");
@@ -52,13 +52,13 @@ ComputeSph2TLSPHNumNeighs::ComputeSph2TLSPHNumNeighs(LAMMPS *lmp, int narg, char
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2TLSPHNumNeighs::~ComputeSph2TLSPHNumNeighs() {
+ComputeSMDTLSPHNumNeighs::~ComputeSMDTLSPHNumNeighs() {
     memory->destroy(numNeighsRefConfigOutput);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2TLSPHNumNeighs::init() {
+void ComputeSMDTLSPHNumNeighs::init() {
     int count = 0;
     for (int i = 0; i < modify->ncompute; i++)
         if (strcmp(modify->compute[i]->style, "smd/tlsph_num_neighs") == 0)
@@ -69,7 +69,7 @@ void ComputeSph2TLSPHNumNeighs::init() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2TLSPHNumNeighs::compute_peratom() {
+void ComputeSMDTLSPHNumNeighs::compute_peratom() {
     invoked_peratom = update->ntimestep;
 
     if (atom->nlocal > nmax) {
@@ -101,7 +101,7 @@ void ComputeSph2TLSPHNumNeighs::compute_peratom() {
  memory usage of local atom-based array
  ------------------------------------------------------------------------- */
 
-double ComputeSph2TLSPHNumNeighs::memory_usage() {
+double ComputeSMDTLSPHNumNeighs::memory_usage() {
     double bytes = nmax * sizeof(double);
     return bytes;
 }

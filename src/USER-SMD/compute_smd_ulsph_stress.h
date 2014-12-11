@@ -25,12 +25,12 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/ulsph_stress, ComputeSph2ULSPHStress)
+ComputeStyle(smd/ulsph_stress, ComputeSMDULSPHStress)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_ULSPH_STRESS_H
-#define LMP_COMPUTE_SPH2_ULSPH_STRESS_H
+#ifndef LMP_COMPUTE_SMD_ULSPH_STRESS_H
+#define LMP_COMPUTE_SMD_ULSPH_STRESS_H
 
 #include "compute.h"
 #include <Eigen/Eigen>
@@ -38,10 +38,10 @@ using namespace Eigen;
 
 namespace LAMMPS_NS {
 
-class ComputeSph2ULSPHStress : public Compute {
+class ComputeSMDULSPHStress : public Compute {
  public:
-  ComputeSph2ULSPHStress(class LAMMPS *, int, char **);
-  ~ComputeSph2ULSPHStress();
+  ComputeSMDULSPHStress(class LAMMPS *, int, char **);
+  ~ComputeSMDULSPHStress();
   void init();
   void compute_peratom();
   double memory_usage();

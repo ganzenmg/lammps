@@ -48,7 +48,7 @@ using namespace FixConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixSph2TlsphDtReset::FixSph2TlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
+FixSMDTlsphDtReset::FixSMDTlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
 	if (narg != 5)
 		error->all(FLERR, "Illegal fix tlsph/dt/reset command");
@@ -76,7 +76,7 @@ FixSph2TlsphDtReset::FixSph2TlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-int FixSph2TlsphDtReset::setmask() {
+int FixSMDTlsphDtReset::setmask() {
 	int mask = 0;
 	mask |= INITIAL_INTEGRATE;
 	mask |= END_OF_STEP;
@@ -85,19 +85,19 @@ int FixSph2TlsphDtReset::setmask() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2TlsphDtReset::init() {
+void FixSMDTlsphDtReset::init() {
 	dt = update->dt;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2TlsphDtReset::setup(int vflag) {
+void FixSMDTlsphDtReset::setup(int vflag) {
 	end_of_step();
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2TlsphDtReset::initial_integrate(int vflag) {
+void FixSMDTlsphDtReset::initial_integrate(int vflag) {
 	// calculate elapsed time based on previous reset timestep
 
 	t_elapsed = t_laststep + (update->ntimestep - laststep) * update->dt;
@@ -105,7 +105,7 @@ void FixSph2TlsphDtReset::initial_integrate(int vflag) {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSph2TlsphDtReset::end_of_step() {
+void FixSMDTlsphDtReset::end_of_step() {
 	double dtmin = BIG;
 
 	/*
@@ -144,13 +144,13 @@ void FixSph2TlsphDtReset::end_of_step() {
 
 /* ---------------------------------------------------------------------- */
 
-double FixSph2TlsphDtReset::compute_scalar() {
+double FixSMDTlsphDtReset::compute_scalar() {
 	return update->dt;
 }
 
 /* ---------------------------------------------------------------------- */
 
-double FixSph2TlsphDtReset::compute_vector(int n) {
+double FixSMDTlsphDtReset::compute_vector(int n) {
 	if (n == 0)
 		return t_elapsed;
 	return (double) laststep;

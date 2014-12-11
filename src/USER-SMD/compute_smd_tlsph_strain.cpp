@@ -44,7 +44,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2TLSPHstrain::ComputeSph2TLSPHstrain(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDTLSPHstrain::ComputeSMDTLSPHstrain(LAMMPS *lmp, int narg, char **arg) :
 		Compute(lmp, narg, arg) {
 	if (narg != 3)
 		error->all(FLERR, "Illegal compute smd/tlsph_strain command");
@@ -58,13 +58,13 @@ ComputeSph2TLSPHstrain::ComputeSph2TLSPHstrain(LAMMPS *lmp, int narg, char **arg
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2TLSPHstrain::~ComputeSph2TLSPHstrain() {
+ComputeSMDTLSPHstrain::~ComputeSMDTLSPHstrain() {
 	memory->sfree(strainVector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2TLSPHstrain::init() {
+void ComputeSMDTLSPHstrain::init() {
 
 	int count = 0;
 	for (int i = 0; i < modify->ncompute; i++)
@@ -76,7 +76,7 @@ void ComputeSph2TLSPHstrain::init() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2TLSPHstrain::compute_peratom() {
+void ComputeSMDTLSPHstrain::compute_peratom() {
 	double **defgrad0 = atom->tlsph_fold;
 
 	invoked_peratom = update->ntimestep;
@@ -139,7 +139,7 @@ void ComputeSph2TLSPHstrain::compute_peratom() {
  memory usage of local atom-based array
  ------------------------------------------------------------------------- */
 
-double ComputeSph2TLSPHstrain::memory_usage() {
+double ComputeSMDTLSPHstrain::memory_usage() {
 	double bytes = size_peratom_cols * nmax * sizeof(double);
 	return bytes;
 }

@@ -25,23 +25,23 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(smd/integrate_tlsph,FixSph2IntegrateTlsph)
+FixStyle(smd/integrate_tlsph,FixSMDIntegrateTlsph)
 
 #else
 
-#ifndef LMP_FIX_SPH2_INTEGRATE_TLSPH_H
-#define LMP_FIX_SPH2_INTEGRATE_TLSPH_H
+#ifndef LMP_FIX_SMD_INTEGRATE_TLSPH_H
+#define LMP_FIX_SMD_INTEGRATE_TLSPH_H
 
 #include "fix.h"
 
 namespace LAMMPS_NS {
 
-class FixSph2IntegrateTlsph: public Fix {
+class FixSMDIntegrateTlsph: public Fix {
 	friend class Neighbor;
 	friend class PairTlsph;
 public:
-    FixSph2IntegrateTlsph(class LAMMPS *, int, char **);
-    virtual ~FixSph2IntegrateTlsph() {
+    FixSMDIntegrateTlsph(class LAMMPS *, int, char **);
+    virtual ~FixSMDIntegrateTlsph() {
     }
     int setmask();
     virtual void init();

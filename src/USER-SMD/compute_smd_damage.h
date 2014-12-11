@@ -25,21 +25,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/damage,ComputeSph2Damage)
+ComputeStyle(smd/damage,ComputeSMDDamage)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_DAMAGE_H
-#define LMP_COMPUTE_SPH2_DAMAGE_H
+#ifndef LMP_COMPUTE_SMD_DAMAGE_H
+#define LMP_COMPUTE_SMD_DAMAGE_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeSph2Damage : public Compute {
+class ComputeSMDDamage : public Compute {
  public:
-  ComputeSph2Damage(class LAMMPS *, int, char **);
-  ~ComputeSph2Damage();
+  ComputeSMDDamage(class LAMMPS *, int, char **);
+  ~ComputeSMDDamage();
   void init();
   void compute_peratom();
   double memory_usage();

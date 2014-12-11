@@ -37,7 +37,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2Damage::ComputeSph2Damage(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDDamage::ComputeSMDDamage(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute smd/damage command");
@@ -52,14 +52,14 @@ ComputeSph2Damage::ComputeSph2Damage(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2Damage::~ComputeSph2Damage()
+ComputeSMDDamage::~ComputeSMDDamage()
 {
   memory->sfree(damage_vector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2Damage::init()
+void ComputeSMDDamage::init()
 {
 
   int count = 0;
@@ -71,7 +71,7 @@ void ComputeSph2Damage::init()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2Damage::compute_peratom()
+void ComputeSMDDamage::compute_peratom()
 {
   invoked_peratom = update->ntimestep;
 
@@ -102,7 +102,7 @@ void ComputeSph2Damage::compute_peratom()
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
 
-double ComputeSph2Damage::memory_usage()
+double ComputeSMDDamage::memory_usage()
 {
   double bytes = nmax * sizeof(double);
   return bytes;

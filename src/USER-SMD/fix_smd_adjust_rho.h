@@ -29,8 +29,8 @@ FixStyle(smd/adjust_rho,FixSphFluidAdjustRho)
 
 #else
 
-#ifndef LMP_FIX_SPH2_ADJUST_RHO_H
-#define LMP_FIX_SPH2_ADJUST_RHO_H
+#ifndef LMP_FIX_SMD_ADJUST_RHO_H
+#define LMP_FIX_SMD_ADJUST_RHO_H
 
 #include "fix.h"
 

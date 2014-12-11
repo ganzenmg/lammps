@@ -25,12 +25,12 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/ulsph_strain_rate,ComputeSph2ULSPHStrainRate)
+ComputeStyle(smd/ulsph_strain_rate,ComputeSMDULSPHStrainRate)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_ULSPH_STRAIN_RATE_H
-#define LMP_COMPUTE_SPH2_ULSPH_STRAIN_RATE_H
+#ifndef LMP_COMPUTE_SMD_ULSPH_STRAIN_RATE_H
+#define LMP_COMPUTE_SMD_ULSPH_STRAIN_RATE_H
 
 #include "compute.h"
 #include <Eigen/Eigen>
@@ -38,10 +38,10 @@ using namespace Eigen;
 
 namespace LAMMPS_NS {
 
-class ComputeSph2ULSPHStrainRate : public Compute {
+class ComputeSMDULSPHStrainRate : public Compute {
  public:
-  ComputeSph2ULSPHStrainRate(class LAMMPS *, int, char **);
-  ~ComputeSph2ULSPHStrainRate();
+  ComputeSMDULSPHStrainRate(class LAMMPS *, int, char **);
+  ~ComputeSMDULSPHStrainRate();
   void init();
   void compute_peratom();
   double memory_usage();

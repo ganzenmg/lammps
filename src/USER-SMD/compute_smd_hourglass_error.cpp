@@ -38,7 +38,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2HourglassError::ComputeSph2HourglassError(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDHourglassError::ComputeSMDHourglassError(LAMMPS *lmp, int narg, char **arg) :
 		Compute(lmp, narg, arg) {
 	if (narg != 3)
 		error->all(FLERR, "Illegal compute smd/hourglass_error command");
@@ -54,13 +54,13 @@ ComputeSph2HourglassError::ComputeSph2HourglassError(LAMMPS *lmp, int narg, char
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2HourglassError::~ComputeSph2HourglassError() {
+ComputeSMDHourglassError::~ComputeSMDHourglassError() {
 	memory->sfree(hourglass_error_vector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2HourglassError::init() {
+void ComputeSMDHourglassError::init() {
 
 	int count = 0;
 	for (int i = 0; i < modify->ncompute; i++)
@@ -72,7 +72,7 @@ void ComputeSph2HourglassError::init() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2HourglassError::compute_peratom() {
+void ComputeSMDHourglassError::compute_peratom() {
 	invoked_peratom = update->ntimestep;
 
 	// grow rhoVector array if necessary
@@ -106,7 +106,7 @@ void ComputeSph2HourglassError::compute_peratom() {
  memory usage of local atom-based array
  ------------------------------------------------------------------------- */
 
-double ComputeSph2HourglassError::memory_usage() {
+double ComputeSMDHourglassError::memory_usage() {
 	double bytes = nmax * sizeof(double);
 	return bytes;
 }

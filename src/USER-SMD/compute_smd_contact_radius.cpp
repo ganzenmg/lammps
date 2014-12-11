@@ -37,7 +37,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2ContactRadius::ComputeSph2ContactRadius(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDContactRadius::ComputeSMDContactRadius(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute smd/contact_radius command");
@@ -52,14 +52,14 @@ ComputeSph2ContactRadius::ComputeSph2ContactRadius(LAMMPS *lmp, int narg, char *
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2ContactRadius::~ComputeSph2ContactRadius()
+ComputeSMDContactRadius::~ComputeSMDContactRadius()
 {
   memory->sfree(contact_radius_vector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2ContactRadius::init()
+void ComputeSMDContactRadius::init()
 {
 
   int count = 0;
@@ -71,7 +71,7 @@ void ComputeSph2ContactRadius::init()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2ContactRadius::compute_peratom()
+void ComputeSMDContactRadius::compute_peratom()
 {
   invoked_peratom = update->ntimestep;
 
@@ -102,7 +102,7 @@ void ComputeSph2ContactRadius::compute_peratom()
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
 
-double ComputeSph2ContactRadius::memory_usage()
+double ComputeSMDContactRadius::memory_usage()
 {
   double bytes = nmax * sizeof(double);
   return bytes;

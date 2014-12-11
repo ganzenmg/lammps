@@ -1,7 +1,7 @@
 #!/bin/bash
-OLD="smd"
-NEW="smd"
-DPATH="./*"
+OLD="SPH2"
+NEW="SMD"
+DPATH="./*.h"
 BPATH="/tmp/foo"
 TFILE="/tmp/out.tmp.$$"
 [ ! -d $BPATH ] && mkdir -p $BPATH || :

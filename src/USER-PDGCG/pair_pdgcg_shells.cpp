@@ -16,21 +16,12 @@
  ------------------------------------------------------------------------- */
 
 #include "pair_pdgcg_shells.h"
-
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-//#include "error.h"
-//#include "float.h"
-//#include "memory.h"
 #include <cstdio>
 #include <iostream>
-
 #include <Eigen/Eigen>
-#include "../lib/sph2/Eigen/src/Core/CommaInitializer.h"
-#include "../lib/sph2/Eigen/src/Core/DenseBase.h"
-#include "../lib/sph2/Eigen/src/Core/Matrix.h"
-#include "../lib/sph2/Eigen/src/Core/util/ForwardDeclarations.h"
 #include "atom.h"
 #include "comm.h"
 #include "domain.h"
@@ -44,9 +35,7 @@
 #include "neighbor.h"
 #include "pointers.h"
 #include "mpi.h"
-//#include "fix.h"
 #include "fix_pdgcg_shells_neigh.h"
-//#include "update.h"
 
 using namespace LAMMPS_NS;
 using namespace Eigen;

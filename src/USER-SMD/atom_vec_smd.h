@@ -25,21 +25,21 @@
 
 #ifdef ATOM_CLASS
 
-AtomStyle(tlsph,AtomVecSph2)
+AtomStyle(smd,AtomVecSMD)
 
 #else
 
-#ifndef LMP_ATOM_VEC_SPH2_H
-#define LMP_ATOM_VEC_SPH2_H
+#ifndef LMP_ATOM_VEC_SMD_H
+#define LMP_ATOM_VEC_SMD_H
 
 #include "atom_vec.h"
 
 namespace LAMMPS_NS {
 
-class AtomVecSph2 : public AtomVec {
+class AtomVecSMD : public AtomVec {
  public:
-  AtomVecSph2(class LAMMPS *);
-  ~AtomVecSph2() {}
+  AtomVecSMD(class LAMMPS *);
+  ~AtomVecSMD() {}
   void init();
   void grow(int);
   void grow_reset();

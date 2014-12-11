@@ -39,7 +39,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2ULSPHStrainRate::ComputeSph2ULSPHStrainRate(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDULSPHStrainRate::ComputeSMDULSPHStrainRate(LAMMPS *lmp, int narg, char **arg) :
 		Compute(lmp, narg, arg) {
 	if (narg != 3)
 		error->all(FLERR, "Illegal compute smd/ulsph_strain_rate command");
@@ -53,13 +53,13 @@ ComputeSph2ULSPHStrainRate::ComputeSph2ULSPHStrainRate(LAMMPS *lmp, int narg, ch
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2ULSPHStrainRate::~ComputeSph2ULSPHStrainRate() {
+ComputeSMDULSPHStrainRate::~ComputeSMDULSPHStrainRate() {
 	memory->sfree(strain_rate_array);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2ULSPHStrainRate::init() {
+void ComputeSMDULSPHStrainRate::init() {
 
 	int count = 0;
 	for (int i = 0; i < modify->ncompute; i++)
@@ -71,7 +71,7 @@ void ComputeSph2ULSPHStrainRate::init() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2ULSPHStrainRate::compute_peratom() {
+void ComputeSMDULSPHStrainRate::compute_peratom() {
 	invoked_peratom = update->ntimestep;
 	int *mol = atom->molecule;
 
@@ -108,7 +108,7 @@ void ComputeSph2ULSPHStrainRate::compute_peratom() {
  memory usage of local atom-based array
  ------------------------------------------------------------------------- */
 
-double ComputeSph2ULSPHStrainRate::memory_usage() {
+double ComputeSMDULSPHStrainRate::memory_usage() {
 	double bytes = size_peratom_cols * nmax * sizeof(double);
 	return bytes;
 }
@@ -116,7 +116,7 @@ double ComputeSph2ULSPHStrainRate::memory_usage() {
 /*
  * deviator of a tensor
  */
-Matrix3d ComputeSph2ULSPHStrainRate::Deviator(Matrix3d M) {
+Matrix3d ComputeSMDULSPHStrainRate::Deviator(Matrix3d M) {
 	Matrix3d eye;
 	eye.setIdentity();
 	eye *= M.trace() / 3.0;

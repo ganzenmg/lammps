@@ -25,21 +25,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/contact_radius,ComputeSph2ContactRadius)
+ComputeStyle(smd/contact_radius,ComputeSMDContactRadius)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_CONTACT_RADIUS_H
-#define LMP_COMPUTE_SPH2_CONTACT_RADIUS_H
+#ifndef LMP_COMPUTE_SMD_CONTACT_RADIUS_H
+#define LMP_COMPUTE_SMD_CONTACT_RADIUS_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeSph2ContactRadius : public Compute {
+class ComputeSMDContactRadius : public Compute {
  public:
-  ComputeSph2ContactRadius(class LAMMPS *, int, char **);
-  ~ComputeSph2ContactRadius();
+  ComputeSMDContactRadius(class LAMMPS *, int, char **);
+  ~ComputeSMDContactRadius();
   void init();
   void compute_peratom();
   double memory_usage();

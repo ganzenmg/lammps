@@ -166,7 +166,7 @@ protected:
 	int ifix_tlsph;
 	int not_first;
 
-	class FixSph2IntegrateTlsph *fix_tlsph_time_integration;
+	class FixSMDIntegrateTlsph *fix_tlsph_time_integration;
 
 private:
 	double SafeLookup(std::string str, int itype);

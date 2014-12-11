@@ -468,7 +468,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 //		if (ifix_tlsph == -1)
 //			error->all(FLERR, "Fix ifix_tlsph does not exist");
 //
-//		fix_tlsph_time_integration = (FixSph2IntegrateTlsph *) modify->fix[ifix_tlsph];
+//		fix_tlsph_time_integration = (FixSMDIntegrateTlsph *) modify->fix[ifix_tlsph];
 //		fix_tlsph_time_integration->pair = this;
 //	}
 }

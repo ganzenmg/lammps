@@ -25,21 +25,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/internal_energy,ComputeSph2InternalEnergy)
+ComputeStyle(smd/internal_energy,ComputeSMDInternalEnergy)
 
 #else
 
-#ifndef LMP_COMPUTE_SPH2_INTERNAL_ENERGY_H
-#define LMP_COMPUTE_SPH2_INTERNAL_ENERGY_H
+#ifndef LMP_COMPUTE_SMD_INTERNAL_ENERGY_H
+#define LMP_COMPUTE_SMD_INTERNAL_ENERGY_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeSph2InternalEnergy : public Compute {
+class ComputeSMDInternalEnergy : public Compute {
  public:
-  ComputeSph2InternalEnergy(class LAMMPS *, int, char **);
-  ~ComputeSph2InternalEnergy();
+  ComputeSMDInternalEnergy(class LAMMPS *, int, char **);
+  ~ComputeSMDInternalEnergy();
   void init();
   void compute_peratom();
   double memory_usage();

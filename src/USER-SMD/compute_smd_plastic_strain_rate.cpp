@@ -37,7 +37,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2PlasticStrainRate::ComputeSph2PlasticStrainRate(LAMMPS *lmp, int narg, char **arg) :
+ComputeSMDPlasticStrainRate::ComputeSMDPlasticStrainRate(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute smd/plastic_strain command");
@@ -52,14 +52,14 @@ ComputeSph2PlasticStrainRate::ComputeSph2PlasticStrainRate(LAMMPS *lmp, int narg
 
 /* ---------------------------------------------------------------------- */
 
-ComputeSph2PlasticStrainRate::~ComputeSph2PlasticStrainRate()
+ComputeSMDPlasticStrainRate::~ComputeSMDPlasticStrainRate()
 {
   memory->sfree(plastic_strain_rate_vector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2PlasticStrainRate::init()
+void ComputeSMDPlasticStrainRate::init()
 {
 
   int count = 0;
@@ -71,7 +71,7 @@ void ComputeSph2PlasticStrainRate::init()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeSph2PlasticStrainRate::compute_peratom()
+void ComputeSMDPlasticStrainRate::compute_peratom()
 {
   invoked_peratom = update->ntimestep;
 
@@ -102,7 +102,7 @@ void ComputeSph2PlasticStrainRate::compute_peratom()
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
 
-double ComputeSph2PlasticStrainRate::memory_usage()
+double ComputeSMDPlasticStrainRate::memory_usage()
 {
   double bytes = nmax * sizeof(double);
   return bytes;
