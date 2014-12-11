@@ -22,7 +22,7 @@ group           target type 1
 
 velocity        projectile set 0 0.0 969.5 sum no units box
 
-pair_style      hybrid/overlay tlsph sph2/hertz
+pair_style      hybrid/overlay tlsph smd/hertz
 #                                  rh0        E  nu   Q1   Q2  hg Cp
 pair_coeff      1 1 tlsph *COMMON  2700.0e-9  70 0.3  0.1  0.0 10 910 &
                           *JOHNSON_COOK 0.3241 0.1138 0.42 0.002 1.0e-3 298 893 1.34 &
@@ -35,20 +35,20 @@ pair_coeff      2 2 tlsph *COMMON  2700.0e-9  70 0.3  0.1  0.0 10 910 &
 			  *FAILURE_MAX_PLASTIC_STRAIN 2.0 &
                           *END 
  
-pair_coeff      1 2 sph2/hertz ${contact_stiffness}
+pair_coeff      1 2 smd/hertz ${contact_stiffness}
 
 variable        mx_atom atom mass*vx
 compute         mx all reduce sum v_mx_atom
 variable        my_atom atom mass*vy
 compute         my all reduce sum v_my_atom
 
-compute         E all sph2/tlsph_strain
-compute         P all sph2/plastic_strain
-compute         S all sph2/tlsph_stress
-compute         d all sph2/damage
-compute         nn all sph2/tlsph_num_neighs
-compute         contact_radius all sph2/contact_radius
-compute         eint all sph2/internal_energy
+compute         E all smd/tlsph_strain
+compute         P all smd/plastic_strain
+compute         S all smd/tlsph_stress
+compute         d all smd/damage
+compute         nn all smd/tlsph_num_neighs
+compute         contact_radius all smd/contact_radius
+compute         eint all smd/internal_energy
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
 variable        volume atom vol
@@ -57,8 +57,8 @@ balance          1.0 rcb
 
 # time integration
 timestep        1.0e-10
-fix             dtfix all sph2/tlsph_dt_reset 5 0.1
-fix             integration_fix all sph2/integrate_tlsph 1.5e3 -1 update
+fix             dtfix all smd/tlsph_dt_reset 5 0.1
+fix             integration_fix all smd/integrate_tlsph 1.5e3 -1 update
 #variable        a equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
 #variable        disp equal 2.0*${vel}*f_dtfix[1]
 #fix             output_fix all print 10 "${disp} $a" file force_displacement.dat screen no
