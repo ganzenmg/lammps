@@ -1,0 +1,63 @@
+# shell test for rotation
+
+variable        l0 equal 1.0
+variable        rho equal 1.0
+variable        K equal 1 # Young's modulus
+variable        smax equal 100
+variable        syield equal 0.1
+variable        G0 equal -1
+variable        visc equal 0.0
+# ----
+variable        c0 equal 1.0
+variable        dt equal 0.1
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal 0.1 # Verlet list range
+
+units		si
+dimension       2
+boundary        sm sm p
+atom_style      tlsph
+neighbor        ${skin} bin
+comm_modify     vel yes
+newton          off
+atom_modify     map array
+
+region          box block -0.1 1.1 -0.1 0.1 -0.1 0.1 units box
+create_box      1 box
+lattice         sq ${l0}
+create_atoms    1 region box
+
+set             group all mol 1000
+set             group all mass 1
+set             group all diameter 1.5
+
+group           left  id 1
+group           right id 2
+
+pair_style      pdgcg
+pair_coeff      * * ${K} ${smax} ${G0} ${visc} ${syield}
+
+compute         eint all sph2/internal_energy
+compute         alleint all reduce sum c_eint
+variable        etot equal ke+c_alleint+pe
+variable        force equal fx[2]
+variable        stretch equal (x[2]-x[1]-1.0)/1.0
+
+thermo          10
+thermo_style    custom step ke pe v_stretch v_force
+ 
+dump            dump_id all custom 1 dump.LAMMPS id type x y z &
+                fx fy fz vx vy vz 
+dump_modify     dump_id first yes
+
+#
+# time integration
+timestep        ${dt}
+variable        nrun equal 100
+print           "running for ${nrun} timesteps"
+
+fix             move_fix right move linear 0.01 0 0 units box
+run             200
+fix             move_fix right move linear -0.01 0 0 units box
+run             200
+

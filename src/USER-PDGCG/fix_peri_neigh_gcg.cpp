@@ -50,7 +50,7 @@ FixPeriNeighGCG::FixPeriNeighGCG(LAMMPS *lmp, int narg, char **arg) :
 	maxpartner = 1;
 	npartner = NULL;
 	partner = NULL;
-	r0 = r1 = NULL;
+	r0 = plastic_stretch = NULL;
 	vinter = NULL;
 
 	grow_arrays(atom->nmax);
@@ -83,7 +83,7 @@ FixPeriNeighGCG::~FixPeriNeighGCG() {
 	memory->destroy(npartner);
 	memory->destroy(partner);
 	memory->destroy(r0);
-	memory->destroy(r1);
+	memory->destroy(plastic_stretch);
 	memory->destroy(vinter);
 }
 
@@ -211,12 +211,12 @@ void FixPeriNeighGCG::setup(int vflag) {
 
 	memory->destroy(partner);
 	memory->destroy(r0);
-	memory->destroy(r1);
+	memory->destroy(plastic_stretch);
 	memory->destroy(npartner);
 
 	npartner = NULL;
 	partner = NULL;
-	r0 = r1 = NULL;
+	r0 = plastic_stretch = NULL;
 	nmax = atom->nmax;
 	grow_arrays(nmax);
 
@@ -257,14 +257,14 @@ void FixPeriNeighGCG::setup(int vflag) {
 					if (rsq <= cutsq) {
 						partner[i][npartner[i]] = tag[j];
 						r0[i][npartner[i]] = sqrt(rsq);
-						r1[i][npartner[i]] = 0.0;
+						plastic_stretch[i][npartner[i]] = 0.0;
 						npartner[i]++;
 						vinter[i] += vfrac[j];
 
 						if (j < nlocal) {
 							partner[j][npartner[j]] = tag[i];
 							r0[j][npartner[j]] = sqrt(rsq);
-							r1[j][npartner[j]] = 0.0;
+							plastic_stretch[j][npartner[j]] = 0.0;
 							npartner[j]++;
 							vinter[j] += vfrac[i];
 						}
@@ -341,7 +341,7 @@ void FixPeriNeighGCG::grow_arrays(int nmax) {
 	memory->grow(npartner, nmax, "peri_neigh:npartner");
 	memory->grow(partner, nmax, maxpartner, "peri_neigh:partner");
 	memory->grow(r0, nmax, maxpartner, "peri_neigh:r0");
-	memory->grow(r1, nmax, maxpartner, "peri_neigh:r1");
+	memory->grow(plastic_stretch, nmax, maxpartner, "peri_neigh:r1");
 	memory->grow(vinter, nmax, "peri_neigh:vinter");
 }
 
@@ -354,7 +354,7 @@ void FixPeriNeighGCG::copy_arrays(int i, int j, int delflag) {
 	for (int m = 0; m < npartner[j]; m++) {
 		partner[j][m] = partner[i][m];
 		r0[j][m] = r0[i][m];
-		r1[j][m] = r1[i][m];
+		plastic_stretch[j][m] = plastic_stretch[i][m];
 	}
 	vinter[j] = vinter[i];
 }
@@ -436,7 +436,7 @@ int FixPeriNeighGCG::pack_exchange(int i, double *buf) {
 		//printf("SND[%d]: atom %d with tag id %d has partner with tag id %d with r0=%f\n", comm->me, i, tag[i], partner[i][n],
 		//		r0[i][n]);
 		buf[m++] = r0[i][n];
-		buf[m++] = r1[i][n];
+		buf[m++] = plastic_stretch[i][n];
 	}
 	buf[0] = m / 3;
 	buf[m++] = vinter[i];
@@ -466,7 +466,7 @@ int FixPeriNeighGCG::unpack_exchange(int nlocal, double *buf) {
 	for (int n = 0; n < npartner[nlocal]; n++) {
 		partner[nlocal][n] = static_cast<tagint>(buf[m++]);
 		r0[nlocal][n] = buf[m++];
-		r1[nlocal][n] = buf[m++];
+		plastic_stretch[nlocal][n] = buf[m++];
 	}
 	vinter[nlocal] = buf[m++];
 	return m;
@@ -516,7 +516,7 @@ int FixPeriNeighGCG::pack_restart(int i, double *buf) {
 	for (int n = 0; n < npartner[i]; n++) {
 		buf[m++] = partner[i][n];
 		buf[m++] = r0[i][n];
-		buf[m++] = r1[i][n];
+		buf[m++] = plastic_stretch[i][n];
 	}
 	buf[m++] = vinter[i];
 	return m;
@@ -541,7 +541,7 @@ void FixPeriNeighGCG::unpack_restart(int nlocal, int nth) {
 	for (int n = 0; n < npartner[nlocal]; n++) {
 		partner[nlocal][n] = static_cast<tagint>(extra[nlocal][m++]);
 		r0[nlocal][n] = extra[nlocal][m++];
-		r1[nlocal][n] = extra[nlocal][m++];
+		plastic_stretch[nlocal][n] = extra[nlocal][m++];
 	}
 	vinter[nlocal] = extra[nlocal][m++];
 }

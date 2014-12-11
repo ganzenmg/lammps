@@ -98,7 +98,7 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 	int nlocal = atom->nlocal;
 	int newton_pair = force->newton_pair;
 	double **r0 = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->r0;
-	double **plastic_stretch = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->r1;
+	double **plastic_stretch = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->plastic_stretch;
 	tagint **partner = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->partner;
 	int *npartner = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->npartner;
 	double *vinter = ((FixPeriNeighGCG *) modify->fix[ifix_peri])->vinter;
@@ -270,12 +270,14 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 				// bond stretch
 				stretch = dr / r0[i][jj]; // total stretch
 
-				double se;
+				// subtract plastic stretch from current stretch
+				stretch -= plastic_stretch[i][jj];
+
+				// alternative plasticity based on plastic stretch
 				if (stretch > syield[itype][jtype]) {
-					plastic_stretch[i][jj] = syield[itype][jtype] - stretch;
-					se = syield[itype][jtype]; // elastic part of stretch
-				} else {
-					se = stretch;
+					double plastic_stretch_increment = stretch - syield[itype][jtype];
+					plastic_stretch[i][jj] += plastic_stretch_increment;
+					stretch = syield[itype][jtype];
 				}
 
 				if (domain->dimension == 2) {
@@ -289,9 +291,9 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 				//c = 2.865 * bulkmodulus[itype][jtype] / (1.0); // applicable to delta = 2.0 * (1/2)
 
 				// force computation -- note we divide by a factor of r
-				evdwl = 0.5 * c * se * se * vfrac[i] * vfrac[j];
+				evdwl = 0.5 * c * stretch * stretch * vfrac[i] * vfrac[j];
 				//printf("evdwl = %f\n", evdwl);
-				fbond = -c * vfrac[i] * vfrac[j] * se / r0[i][jj];
+				fbond = -c * vfrac[i] * vfrac[j] * stretch / r0[i][jj];
 				if (r > 0.0)
 					fbond = fbond / r;
 				else

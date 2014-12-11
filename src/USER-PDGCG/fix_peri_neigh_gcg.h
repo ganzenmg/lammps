@@ -60,7 +60,7 @@ protected:
 	int *npartner;             // # of neighbors for each atom
 	tagint **partner;          // neighs for each atom, stored as global IDs
 	double **r0;               // initial distance to partners
-	double **r1;               // rest length of spring due to plasticity
+	double **plastic_stretch;               // rest length of spring due to plasticity
 	double *vinter;            // sum of vfrac for bonded neighbors
 
 	class NeighList *list;
