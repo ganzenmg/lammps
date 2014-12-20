@@ -157,11 +157,10 @@ protected:
 		NONE
 	};
 
-	//map< std::string, std::map< int, double > > matProp;
+	// C++ std dictionary to hold material model settings per particle type
 	typedef std::map<std::pair<std::string, int>, double> Dict;
-
 	Dict matProp2;
-	typedef Dict::const_iterator It;
+	//typedef Dict::const_iterator It;
 
 	int ifix_tlsph;
 	int not_first;

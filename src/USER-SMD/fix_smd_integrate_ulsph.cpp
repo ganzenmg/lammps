@@ -185,6 +185,7 @@ void FixSMDIntegrateUlsph::final_integrate() {
     double *de = atom->de;
     double *rho = atom->rho;
     double *drho = atom->drho;
+    double *radius = atom->radius;
     int *mask = atom->mask;
     int nlocal = atom->nlocal;
     if (igroup == atom->firstgroup)
@@ -213,6 +214,8 @@ void FixSMDIntegrateUlsph::final_integrate() {
 
             e[i] += dtf * de[i];
             rho[i] += dtf * drho[i];
+
+            radius[i] =  1.3 * sqrt(rmass[i] / rho[i]); // Monaghan approach for setting the radius
         }
     }
 }

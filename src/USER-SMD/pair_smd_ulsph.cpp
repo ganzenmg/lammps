@@ -9,7 +9,6 @@
  *
  * ----------------------------------------------------------------------- */
 
-
 /* ----------------------------------------------------------------------
  LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
  http://lammps.sandia.gov, Sandia National Laboratories
@@ -21,10 +20,6 @@
  the GNU General Public License.
 
  See the README file in the top-level LAMMPS directory.
- ------------------------------------------------------------------------- */
-
-/* ----------------------------------------------------------------------
- Contributing author: Mike Parks (SNL)
  ------------------------------------------------------------------------- */
 
 #include "math.h"
@@ -55,18 +50,12 @@ using namespace LAMMPS_NS;
 using namespace Eigen;
 
 #define COMPUTE_CORRECTED_DERIVATIVES false
-#define DENSITY_SUMMATION true
 /* ---------------------------------------------------------------------- */
 
 PairULSPH::PairULSPH(LAMMPS *lmp) :
 		Pair(lmp) {
 
-	C1 = NULL;
-	C2 = NULL;
-	C3 = NULL;
-	C4 = NULL;
 	Q1 = NULL;
-	Q2 = NULL;
 	eos = NULL;
 	pressure = NULL;
 	c0 = NULL;
@@ -87,12 +76,8 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 PairULSPH::~PairULSPH() {
 	if (allocated) {
 		//printf("... deallocating\n");
-		memory->destroy(C1);
-		memory->destroy(C2);
-		memory->destroy(C3);
-		memory->destroy(C4);
 		memory->destroy(Q1);
-		memory->destroy(Q2);
+		memory->destroy(rho0);
 		memory->destroy(eos);
 
 		delete[] onerad_dynamic;
@@ -118,41 +103,36 @@ PairULSPH::~PairULSPH() {
  *
  ---------------------------------------------------------------------- */
 
-void PairULSPH::PreCompute() {
-	double *vfrac = atom->vfrac;
+void PairULSPH::PreCompute_DensitySummation() {
 	double *radius = atom->radius;
 	double **x = atom->x;
-	double **v = atom->vest;
-	double **vint = atom->v; // Velocity-Verlet algorithm velocities
 	double *rmass = atom->rmass;
 	double *rho = atom->rho;
 	int *type = atom->type;
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
-	int *mol = atom->molecule;
-	int nmax = atom->nmax;
 	int nlocal = atom->nlocal;
-	int inum, jnum, ii, jj, i, itype, jtype, j, iDim;
-	double wfd, wShep, h, norm, irad, r, rSq, wf, ih, ihsq;
-	Vector3d dx, dv, g;
-	Matrix3d Ktmp, Ltmp;
-	Vector3d xi, xj, vi, vj, vinti, vintj, dvint;
+	int inum, jnum, ii, jj, i, itype, jtype, j;
+	double h, irad, hsq, rSq, wf;
+	Vector3d dx, xi, xj;
 
 	// zero accumulators
 	for (i = 0; i < nlocal; i++) {
-		itype = type[i];
-
-		shepardWeight[i] = 0.0;
-		delete_flag[i] = 0.0;
-		smoothVel[i].setZero();
-		L[i].setZero();
 		numNeighs[i] = 0;
-		K[i].setZero();
+	}
 
-		if (DENSITY_SUMMATION) {
-			if (setflag[itype][itype] == 1) {
-				rho[i] = 0.0;
-			}
+	/*
+	 * only recompute mass density if density summation is used.
+	 * otherwise, change in mass density is time-integrated
+	 */
+	for (i = 0; i < nlocal; i++) {
+		itype = type[i];
+		if (setflag[itype][itype] == 1) {
+			// initialize particle density with self-contribution.
+			h = 2.0 * radius[i];
+			hsq = h * h;
+			Poly6Kernel(hsq, h, 0.0, wf);
+			rho[i] = wf * rmass[i];
 		}
 	}
 
@@ -169,11 +149,86 @@ void PairULSPH::PreCompute() {
 		jnum = numneigh[i];
 		irad = radius[i];
 
+		xi << x[i][0], x[i][1], x[i][2];
+
+		for (jj = 0; jj < jnum; jj++) {
+			j = jlist[jj];
+			j &= NEIGHMASK;
+
+			xj << x[j][0], x[j][1], x[j][2];
+			dx = xj - xi;
+			rSq = dx.squaredNorm();
+			h = irad + radius[j];
+			hsq = h * h;
+			if (rSq < hsq) {
+
+				jtype = type[j];
+				Poly6Kernel(hsq, h, rSq, wf);
+
+				if (setflag[itype][itype] == 1) {
+					rho[i] += wf * rmass[j];
+				}
+				numNeighs[i] += 1;
+
+				if (j < nlocal) {
+					if (setflag[jtype][jtype] == 1) {
+						rho[j] += wf * rmass[i];
+					}
+					numNeighs[j] += 1;
+				}
+			}
+		} // end if check distance
+	} // end loop over j
+}
+
+/* ----------------------------------------------------------------------
+ *
+ * use half neighbor list to re-compute shape matrix
+ *
+ ---------------------------------------------------------------------- */
+
+void PairULSPH::PreCompute() {
+	double *radius = atom->radius;
+	double **x = atom->x;
+	double **v = atom->vest;
+	double *rmass = atom->rmass;
+	double *rho = atom->rho;
+	int *type = atom->type;
+	int *ilist, *jlist, *numneigh;
+	int **firstneigh;
+	int nlocal = atom->nlocal;
+	int inum, jnum, ii, jj, i, itype, jtype, j, iDim;
+	double wfd, h, irad, r, rSq, wf, ivol, jvol;
+	Vector3d dx, dv, g;
+	Matrix3d Ktmp, Ltmp;
+	Vector3d xi, xj, vi, vj;
+
+	// zero accumulators
+	for (i = 0; i < nlocal; i++) {
+		delete_flag[i] = 0.0;
+		L[i].setZero();
+		numNeighs[i] = 0;
+		K[i].setZero();
+	}
+
+// set up neighbor list variables
+	inum = list->inum;
+	ilist = list->ilist;
+	numneigh = list->numneigh;
+	firstneigh = list->firstneigh;
+
+	for (ii = 0; ii < inum; ii++) {
+		i = ilist[ii];
+		itype = type[i];
+		jlist = firstneigh[i];
+		jnum = numneigh[i];
+		irad = radius[i];
+		ivol = rmass[i] / rho[i];
+
 		// initialize Eigen data structures from LAMMPS data structures
 		for (iDim = 0; iDim < 3; iDim++) {
 			xi(iDim) = x[i][iDim];
 			vi(iDim) = v[i][iDim];
-			vinti(iDim) = vint[i][iDim];
 		}
 
 		for (jj = 0; jj < jnum; jj++) {
@@ -183,7 +238,6 @@ void PairULSPH::PreCompute() {
 			for (iDim = 0; iDim < 3; iDim++) {
 				xj(iDim) = x[j][iDim];
 				vj(iDim) = v[j][iDim];
-				vintj(iDim) = vint[j][iDim];
 			}
 
 			dx = xj - xi;
@@ -193,10 +247,10 @@ void PairULSPH::PreCompute() {
 
 				r = sqrt(rSq);
 				jtype = type[j];
+				jvol = rmass[j] / rho[j];
 
 				// distance vectors in current and reference configuration, velocity difference
 				dv = vj - vi;
-				dvint = vintj - vinti;
 
 				// kernel and derivative
 				kernel_and_derivative(h, r, wf, wfd);
@@ -204,42 +258,25 @@ void PairULSPH::PreCompute() {
 				// uncorrected kernel gradient
 				g = (wfd / r) * dx;
 
-				/* build correction matric for kernel derivatives */
+				/* build correction matrix for kernel derivatives */
 				if (COMPUTE_CORRECTED_DERIVATIVES) {
 					Ktmp = g * dx.transpose();
-					K[i] += vfrac[j] * Ktmp;
-				}
-
-				if (DENSITY_SUMMATION) {
-					if (setflag[itype][itype] == 1) {
-						rho[i] += wf * rmass[j];
-					}
+					K[i] += jvol * Ktmp;
 				}
 
 				// velocity gradient L
 				Ltmp = -dv * g.transpose();
-				L[i] += vfrac[j] * Ltmp;
+				L[i] += jvol * Ltmp; // note: should be mass / rho for ULSPH
 
-				shepardWeight[i] += vfrac[j] * wf;
-				smoothVel[i] += vfrac[j] * wf * dvint;
 				numNeighs[i] += 1;
 
 				if (j < nlocal) {
 
 					if (COMPUTE_CORRECTED_DERIVATIVES) {
-						K[j] += vfrac[i] * Ktmp;
+						K[j] += ivol * Ktmp;
 					}
 
-					if (DENSITY_SUMMATION) {
-						if (setflag[jtype][jtype] == 1) {
-							rho[j] += wf * rmass[i];
-						}
-					}
-
-					L[j] += vfrac[i] * Ltmp;
-
-					shepardWeight[j] += vfrac[i] * wf;
-					smoothVel[j] -= vfrac[i] * wf * dvint;
+					L[j] += ivol * Ltmp;
 					numNeighs[j] += 1;
 				}
 			} // end if check distance
@@ -252,16 +289,9 @@ void PairULSPH::PreCompute() {
 
 	for (i = 0; i < nlocal; i++) {
 		itype = type[i];
-		if (setflag[itype][itype] == 1) {
+		if (COMPUTE_CORRECTED_DERIVATIVES) {
+			if (setflag[itype][itype] == 1) {
 
-			if (DENSITY_SUMMATION) {
-				// add self contribution to particle density
-				h = 2.0 * radius[i];
-				kernel_and_derivative(h, 0.0, wf, wfd);
-				rho[i] += wf * rmass[i];
-			}
-
-			if (COMPUTE_CORRECTED_DERIVATIVES) {
 				K[i] = pseudo_inverse_SVD(K[i]);
 
 				if (domain->dimension == 2) {
@@ -271,16 +301,10 @@ void PairULSPH::PreCompute() {
 				K[i].setIdentity();
 			}
 
-			if (shepardWeight[i] != 0.0) {
-				smoothVel[i] /= shepardWeight[i];
-			} else {
-				smoothVel[i].setZero();
-			}
-
 			L[i] *= K[i];
-
-			//printf("rho = %g\n", rho[i]);
-		} // end check if particle is SPH-type
+		} else {
+			K[i].setIdentity();
+		}
 	} // end loop over i = 0 to nlocal
 }
 
@@ -291,28 +315,23 @@ void PairULSPH::compute(int eflag, int vflag) {
 	double **v = atom->vest;
 	double **vint = atom->v; // Velocity-Verlet algorithm velocities
 	double **f = atom->f;
-	double *vfrac = atom->vfrac;
 	double *de = atom->de;
 	double *drho = atom->drho;
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
-	double *contact_radius = atom->contact_radius;
-	double *e = atom->e;
 	double *rho = atom->rho;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
 	int i, j, ii, jj, jnum, itype, jtype, iDim, inum;
-	double evdwl, r, hg_mag, wf, wfd, h, rSq, ivol, jvol;
+	double r, wf, wfd, h, rSq, ivol, jvol;
 	double mu_ij, c_ij, rho_ij;
 	double delVdotDelR, visc_magnitude, deltaE;
-	double delta, sigv;
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
 	Vector3d fi, fj, dx, dv, f_stress, g, vinti, vintj, dvint;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new;
-	double rcut2, wf2;
 
-	//printf("in compute\n");
+//printf("in compute\n");
 
 	if (eflag || vflag)
 		ev_setup(eflag, vflag);
@@ -344,13 +363,14 @@ void PairULSPH::compute(int eflag, int vflag) {
 		numNeighs = new int[nmax];
 	}
 
-	// zero accumulators
+// zero accumulators
 	for (i = 0; i < nlocal; i++) {
 		shepardWeight[i] = 0.0;
 		smoothVel[i].setZero();
 	}
 
-	PairULSPH::PreCompute();
+	//PairULSPH::PreCompute_DensitySummation();
+	//PairULSPH::PreCompute();
 	PairULSPH::ComputePressure();
 
 	/*
@@ -363,7 +383,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	 * iterate over pairs of particles i, j and assign forces using pre-computed pressure
 	 */
 
-	// set up neighbor list variables
+// set up neighbor list variables
 	inum = list->inum;
 	ilist = list->ilist;
 	numneigh = list->numneigh;
@@ -374,7 +394,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 		itype = type[i];
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
-		//ivol = vfrac[i];
 		ivol = rmass[i] / rho[i];
 
 		//printf("i = %d, nj=%d\n", i, jnum);
@@ -405,7 +424,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 				r = sqrt(rSq);
 				jtype = type[j];
-				//jvol = vfrac[j];
 				jvol = rmass[j] / rho[j];
 
 				// distance vectors in current and reference configuration, velocity difference
@@ -422,13 +440,11 @@ void PairULSPH::compute(int eflag, int vflag) {
 				 * force -- the classical SPH way
 				 */
 
-				//f_stress = rmass[i] * rmass[j] * (stressTensor[i] / (rho[i] * rho[i]) + stressTensor[j] / (rho[j] * rho[j])) * g;
 				f_stress = -ivol * jvol * (stressTensor[i] + stressTensor[j]) * g;
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
 				 * Monaghan–Balsara form of the artificial viscosity
-				 * quadratic part is not used because it makes the simulation unstable
 				 */
 
 				delVdotDelR = dx.dot(dv);
@@ -437,7 +453,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 					c_ij = 0.5 * (c0[i] + c0[j]);
 					rho_ij = 0.5 * (rho[i] + rho[j]);
 
-					visc_magnitude = (Q1[itype][jtype] * c_ij * mu_ij - Q2[itype][jtype] * mu_ij * mu_ij) / rho_ij;
+					visc_magnitude = 0.5 * (Q1[itype] + Q1[jtype]) * c_ij * mu_ij / rho_ij;
 					f_visc = rmass[i] * rmass[j] * visc_magnitude * g;
 
 					//printf("mu=%g, c=%g, rho=%g, magnitude=%g\n", mu_ij, c_ij, rho_ij, f_visc.norm());
@@ -459,17 +475,20 @@ void PairULSPH::compute(int eflag, int vflag) {
 				f[i][2] += sumForces(2);
 				de[i] += deltaE;
 
+				// accumulate smooth velocities
+				shepardWeight[i] += jvol * wf;
+				smoothVel[i] += jvol * wf * dvint;
+
 				if (j < nlocal) {
 					f[j][0] -= sumForces(0);
 					f[j][1] -= sumForces(1);
 					f[j][2] -= sumForces(2);
 					de[j] += deltaE;
 					drho[j] -= rmass[i] * g.dot(dv);
-				}
 
-				// accumulate smooth velocities
-				shepardWeight[i] += vfrac[j] * wf;
-				smoothVel[i] += vfrac[j] * wf * dvint;
+					shepardWeight[j] += ivol * wf;
+					smoothVel[j] += ivol * wf * dvint;
+				}
 
 				// tally atomistic stress tensor
 				if (evflag) {
@@ -509,7 +528,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 
  output: final pressure pFinal, pressure rate p_rate
  ------------------------------------------------------------------------- */
-//PerfectGasEOS(lambda, rho[i], vfrac[i], e[i], &pFinal);
 void PairULSPH::PerfectGasEOS(double gamma, double vol, double mass, double energy, double *pFinal__, double *c0) {
 
 	/*
@@ -517,7 +535,7 @@ void PairULSPH::PerfectGasEOS(double gamma, double vol, double mass, double ener
 	 */
 
 	*pFinal__ = (1.0 - gamma) * energy / vol;
-	//printf("gamma = %f, vol%f, e=%g ==> p=%g\n", gamma, vol, energy, *pFinal__/1.0e-9);
+//printf("gamma = %f, vol%f, e=%g ==> p=%g\n", gamma, vol, energy, *pFinal__/1.0e-9);
 
 	if (energy > 0.0) {
 		*c0 = sqrt((gamma - 1.0) * energy / mass);
@@ -541,8 +559,10 @@ void PairULSPH::TaitEOS(const double exponent, const double c0_reference, const 
 		double &pressure, double &sound_speed) {
 
 	double B = rho_reference * c0_reference * c0_reference / exponent;
-	pressure = B * (pow(rho_current / rho_reference, exponent) - 1.0);
-	sound_speed = c0_reference;
+	double tmp = pow(rho_current / rho_reference, exponent);
+	pressure = B * (tmp - 1.0);
+	double bulk_modulus = B * tmp * exponent; // computed as rho * d(pressure)/d(rho)
+	sound_speed = sqrt(bulk_modulus / rho_current);
 }
 
 /* ----------------------------------------------------------------------
@@ -551,103 +571,47 @@ void PairULSPH::TaitEOS(const double exponent, const double c0_reference, const 
 void PairULSPH::ComputePressure() {
 	double *radius = atom->radius;
 	double *rho = atom->rho;
-	double *vfrac = atom->vfrac;
 	double *rmass = atom->rmass;
-	double *e = atom->e;
-	double **tlsph_stress = atom->tlsph_stress;
-	double dt = update->dt;
+	//double *e = atom->e;
 	int *type = atom->type;
-	double pFinal;
+	double pFinal, ivol;
 	int i, itype;
 	int nlocal = atom->nlocal;
-	Matrix3d D, W, elaStress, elaStressDot, viscStress, V, sigma_diag, artStressDiag;
-	double mu_e, mu_s, eta, lambda1, lambda2, kinvisc, epsilon;
-	double lambda, mu;
-	Matrix3d Jaumann_rate, eye;
-	SelfAdjointEigenSolver<Matrix3d> es;
-	int flag;
+	Matrix3d D, W, V, sigma_diag;
+	Matrix3d eye;
 
-	hMin = 1.0e22;
+	dtCFL = 1.0e22;
 	eye.setIdentity();
 
-	//printf("in assemble stress\n");
+	double var1, var2, var3;
 
-	for (i = 0; i < nlocal; i++) {
-		stressTensor[i].setZero();
-		itype = type[i];
-		//printf("setflag: %d\n", setflag[itype][itype]);
+	/*
+	 * iterate over particle types first, only use SafeLookup (slow!) once for each type, store the result.
+	 * The iterate over nlocal and check if type matches!
+	 */
+
+	int ntypes = atom->ntypes;
+	for (itype = 1; itype < ntypes + 1; itype++) {
 		if (setflag[itype][itype] == 1) {
-
-			/*
-			 * initial elastic stress state:
-			 */
-
-			elaStress(0, 0) = tlsph_stress[i][0];
-			elaStress(0, 1) = tlsph_stress[i][1];
-			elaStress(0, 2) = tlsph_stress[i][2];
-			elaStress(1, 1) = tlsph_stress[i][3];
-			elaStress(1, 2) = tlsph_stress[i][4];
-			elaStress(2, 2) = tlsph_stress[i][5];
-			elaStress(1, 0) = elaStress(0, 1);
-			elaStress(2, 0) = elaStress(0, 2);
-			elaStress(2, 1) = elaStress(1, 2);
-
-			//printf("eos = %d\n", eos[itype]);
-			switch (eos[itype][itype]) {
+			switch (eos[itype]) {
 			case PERFECT_GAS:
-				PerfectGasEOS(C1[itype][itype], vfrac[i], rmass[i], e[i], &pFinal, &c0[i]);
+				error->one(FLERR, "not yet implemented");
+				//PerfectGasEOS(C1[itype][itype], ivol, rmass[i], e[i], &pFinal, &c0[i]);
 				break;
-			case TAIT:
-				//      Tait exponent,    c0_reference,     rho_reference
-				TaitEOS(C1[itype][itype], C2[itype][itype], C3[itype][itype], rho[i], pFinal, c0[i]);
+			case EOS_TAIT:
+				var1 = SafeLookup("tait_exponent", itype);
+				var2 = SafeLookup("c_ref", itype);
+				var3 = SafeLookup("rho_ref", itype);
 
-				stressTensor[i].setZero();
-				stressTensor[i](0, 0) = pFinal;
-				stressTensor[i](1, 1) = pFinal;
-				stressTensor[i](2, 2) = pFinal;
-
-				D = 0.5 * (L[i] + L[i].transpose());
-				W = 0.5 * (L[i] - L[i].transpose());
-//
-//				lambda1 = 0.02e3;
-//				lambda2 = 0.02e3;
-//
-//				kinvisc = 0.0;
-//				eta = kinvisc * C3[itype][itype]; // C3 is reference rho;
-//				mu_s = eta * lambda2 / lambda1;
-//				mu_e = eta - mu_s;
-//
-//				// elastic stress rate
-//				elaStressDot = (2. * mu_e / lambda1) * D
-//						- (1. / lambda1) * elaStress + W * elaStress
-//						- elaStress * W + D * elaStress + elaStress * D
-//						- L[i] * elaStress;
-//
-//				elaStress += dt * elaStressDot;
-//
-//				// Newtonian part of stress
-//				viscStress = mu_s * Deviator(D);
-
-				// total stress
-				//stressTensor[i] += elaStress + viscStress;
-				stressTensor[i] += 2.0 * C4[itype][itype] * D;
-
-				//printf("atom %d: p=%f, c0=%f, rho[i]=%g\n", i, pFinal, c0[i], rho[i]);
-
-				break;
-			case LINEAR_ELASTIC:
-				lambda = C1[itype][itype] * C2[itype][itype] / ((1.0 + C2[itype][itype]) * (1.0 - 2.0 * C2[itype][itype]));
-				mu = C1[itype][itype] / (2.0 * (1.0 + C2[itype][itype]));
-
-				D = 0.5 * (L[i] + L[i].transpose());
-				W = 0.5 * (L[i] - L[i].transpose());
-
-				// elaStressDot = (lambda + 2.0 * mu / 3.0) * D.trace() * eye + 2.0 * mu * Deviator(D);
-				elaStressDot = 2.0 * mu * Deviator(D);
-
-				Jaumann_rate = elaStressDot + W * elaStress + elaStress * W.transpose();
-				elaStress += dt * Jaumann_rate;
-				stressTensor[i] = elaStress;
+				for (i = 0; i < nlocal; i++) {
+					if (type[i] == itype) {
+						TaitEOS(var1, var2, var3, rho[i], pFinal, c0[i]);
+						stressTensor[i].setZero();
+						stressTensor[i](0, 0) = pFinal;
+						stressTensor[i](1, 1) = pFinal;
+						stressTensor[i](2, 2) = pFinal;
+					}
+				}
 				break;
 
 			case NONE:
@@ -658,11 +622,18 @@ void PairULSPH::ComputePressure() {
 				error->one(FLERR, "unknown EOS.");
 				break;
 			}
+		}
+	}
 
+	for (i = 0; i < nlocal; i++) {
+		itype = type[i];
+		if (setflag[itype][itype] == 1) {
 			/*
 			 * kernel gradient correction
 			 */
-			stressTensor[i] = stressTensor[i] * K[i];
+			if (COMPUTE_CORRECTED_DERIVATIVES) {
+				stressTensor[i] = stressTensor[i] * K[i];
+			}
 
 			pressure[i] = stressTensor[i].trace() / 3.0;
 
@@ -670,24 +641,11 @@ void PairULSPH::ComputePressure() {
 			 * minimum kernel Radius
 			 */
 
-			hMin = MIN(radius[i], hMin);
-
-			/*
-			 * store updated stress
-			 */
-
-			tlsph_stress[i][0] = elaStress(0, 0);
-			tlsph_stress[i][1] = elaStress(0, 1);
-			tlsph_stress[i][2] = elaStress(0, 2);
-
-			tlsph_stress[i][3] = elaStress(1, 1);
-			tlsph_stress[i][4] = elaStress(1, 2);
-			tlsph_stress[i][5] = elaStress(2, 2);
-
+			dtCFL = MIN(radius[i] / c0[i], dtCFL);
 		}
 	}
 
-	//printf("stable timestep = %g\n", 0.1 * hMin * MaxBulkVelocity);
+//printf("stable timestep = %g\n", 0.1 * hMin * MaxBulkVelocity);
 }
 
 /* ----------------------------------------------------------------------
@@ -696,7 +654,7 @@ void PairULSPH::ComputePressure() {
 
 void PairULSPH::allocate() {
 
-	//printf("in allocate\n");
+//printf("in allocate\n");
 
 	allocated = 1;
 	int n = atom->ntypes;
@@ -706,13 +664,9 @@ void PairULSPH::allocate() {
 		for (int j = i; j <= n; j++)
 			setflag[i][j] = 0;
 
-	memory->create(C1, n + 1, n + 1, "pair:C1");
-	memory->create(C2, n + 1, n + 1, "pair:C2");
-	memory->create(C3, n + 1, n + 1, "pair:C3");
-	memory->create(C4, n + 1, n + 1, "pair:C4");
-	memory->create(Q1, n + 1, n + 1, "pair:Q1");
-	memory->create(Q2, n + 1, n + 1, "pair:Q2");
-	memory->create(eos, n + 1, n + 1, "pair:eosmodel");
+	memory->create(Q1, n + 1, "pair:Q1");
+	memory->create(rho0, n + 1, "pair:Q2");
+	memory->create(eos, n + 1, "pair:eosmodel");
 
 	memory->create(cutsq, n + 1, n + 1, "pair:cutsq"); // always needs to be allocated, even with granular neighborlist
 
@@ -721,7 +675,7 @@ void PairULSPH::allocate() {
 	maxrad_dynamic = new double[n + 1];
 	maxrad_frozen = new double[n + 1];
 
-	//printf("end of allocate\n");
+//printf("end of allocate\n");
 }
 
 /* ----------------------------------------------------------------------
@@ -738,89 +692,150 @@ void PairULSPH::settings(int narg, char **arg) {
  ------------------------------------------------------------------------- */
 
 void PairULSPH::coeff(int narg, char **arg) {
-	//printf("in coeff\n");
+	int ioffset, iarg, iNextKwd, itype;
+	char str[128];
+	std::string s, t;
 
-	double C1_one, C2_one, C3_one, C4_one, q1_one, q2_one;
+	if (narg < 3) {
+		sprintf(str, "number of arguments for pair tlsph is too small!");
+		error->all(FLERR, str);
+	}
 	if (!allocated)
 		allocate();
 
-	int ilo, ihi, jlo, jhi;
-	force->bounds(arg[0], atom->ntypes, ilo, ihi);
-	force->bounds(arg[1], atom->ntypes, jlo, jhi);
+	/*
+	 * check that parameters are given only in i,i form
+	 */
+	if (force->inumeric(FLERR, arg[0]) != force->inumeric(FLERR, arg[1])) {
+		sprintf(str, "ULSPH coefficients can only be specified between particles of same type!");
+		error->all(FLERR, str);
+	}
 
-	int eos_one;
-	if (strcmp(arg[2], "perfectgas") == 0) {
-		eos_one = PERFECT_GAS;
-	} else if (strcmp(arg[2], "tait") == 0) {
-		eos_one = TAIT;
-	} else if (strcmp(arg[2], "linear_elastic") == 0) {
-		eos_one = LINEAR_ELASTIC;
-	} else if (strcmp(arg[2], "none") == 0) {
-		eos_one = NONE;
+	itype = force->inumeric(FLERR, arg[0]);
+
+	if (comm->me == 0)
+		printf("\n******************SMD / ULSPH PROPERTIES OF PARTICLE TYPE %d **************************\n", itype);
+
+	/*
+	 * read parameters which are common -- regardless of material / eos model
+	 */
+
+	ioffset = 2;
+	if (strcmp(arg[ioffset], "*COMMON") != 0) {
+		sprintf(str, "common keyword missing!");
+		error->all(FLERR, str);
 	} else {
-		//printf(arg[2]);
-		error->all(FLERR, "unknown EOS model selected");
+		printf("common keyword found\n");
 	}
 
-	switch (eos_one) {
-	case PERFECT_GAS:
-		// we want gamma, q1, q2
-		if (narg != 6)
-			error->all(FLERR, "Incorrect number of args for EOS perfectgas");
-		C1_one = atof(arg[3]);
-		q1_one = atof(arg[4]);
-		q2_one = atof(arg[5]);
-		break;
-	case TAIT:
-		if (narg != 9)
-			error->all(FLERR, "Incorrect number of args for EOS Tait");
-		C1_one = atof(arg[3]); // Tait exponent
-		C2_one = atof(arg[4]); // reference speed of sound
-		C3_one = atof(arg[5]); // reference density
-		C4_one = atof(arg[6]); // dynamic shear viscosity
-		q1_one = atof(arg[7]); // linear term in artificial viscosiy
-		q2_one = atof(arg[8]); // quadratic term in artificial viscosiy
-		break;
-	case LINEAR_ELASTIC:
-		if (narg != 7)
-			error->all(FLERR, "Incorrect number of args for linear elastic material model");
-		C1_one = atof(arg[3]); // Young's modulus
-		C2_one = atof(arg[4]); // Poisson ratio
-		q1_one = atof(arg[5]); // linear term in artificial viscosiy
-		q2_one = atof(arg[6]); // quadratic term in artificial viscosiy
-		break;
-	case NONE:
-		if (narg != 3)
-			error->all(FLERR, "Incorrect number of args for EOS none");
-		break;
-	default:
-		error->one(FLERR, "unknown EOS.");
-		break;
-	}
-
-	int count = 0;
-	for (int i = ilo; i <= ihi; i++) {
-		for (int j = MAX(jlo, i); j <= jhi; j++) {
-			eos[i][j] = eos_one;
-			C1[i][j] = C1_one;
-			C2[i][j] = C2_one;
-			C3[i][j] = C3_one;
-			C4[i][j] = C4_one;
-			Q1[i][j] = q1_one;
-			Q2[i][j] = q2_one;
-			setflag[i][j] = 1;
-			count++;
-
-			if (comm->me == 0) {
-				printf("setting sph/fluid itype=%d, jtype = %d\n", i, j);
-			}
+	t = string("*");
+	iNextKwd = -1;
+	for (iarg = ioffset + 1; iarg < narg; iarg++) {
+		s = string(arg[iarg]);
+		if (s.compare(0, t.length(), t) == 0) {
+			iNextKwd = iarg;
+			break;
 		}
 	}
 
-	if (count == 0)
-		error->all(FLERR, "Incorrect args for pair coefficients");
+	printf("keyword following *COMMON is %s\n", arg[iNextKwd]);
 
-	//printf("end of coeff\n");
+	if (iNextKwd < 0) {
+		sprintf(str, "no *KEYWORD terminates *COMMON");
+		error->all(FLERR, str);
+	}
+
+	if (iNextKwd - ioffset != 4 + 1) {
+		sprintf(str, "expected 7 arguments following *COMMON but got %d\n", iNextKwd - ioffset - 1);
+		error->all(FLERR, str);
+	}
+
+	matProp2[std::make_pair("rho_ref", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+	matProp2[std::make_pair("c_ref", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
+	matProp2[std::make_pair("viscosity_q1", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+	matProp2[std::make_pair("heat_capacity", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
+
+	matProp2[std::make_pair("bulk_modulus", itype)] = SafeLookup("c_ref", itype) * SafeLookup("c_ref", itype)
+			* SafeLookup("rho_ref", itype);
+
+	if (comm->me == 0) {
+		printf("\n material unspecific properties for SPH2/TLSPH definition of particle type %d:\n", itype);
+		printf("%40s : %g\n", "reference density", SafeLookup("rho_ref", itype));
+		printf("%40s : %g\n", "reference speed of sound", SafeLookup("c_ref", itype));
+		printf("%40s : %g\n", "linear viscosity coefficient", SafeLookup("viscosity_q1", itype));
+		printf("%40s : %g\n", "heat capacity [energy / (mass * temperature)]", SafeLookup("heat_capacity", itype));
+		printf("%40s : %g\n", "bulk modulus", SafeLookup("bulk_modulus", itype));
+	}
+
+	/*
+	 * read following material cards
+	 */
+
+	if (comm->me == 0) {
+		printf("next kwd is %s\n", arg[iNextKwd]);
+	}
+	eos[itype] = NONE;
+
+	while (true) {
+		if (strcmp(arg[iNextKwd], "*END") == 0) {
+			sprintf(str, "found *END");
+			error->message(FLERR, str);
+			break;
+		}
+
+		ioffset = iNextKwd;
+		if (strcmp(arg[ioffset], "*EOS_TAIT") == 0) {
+
+			/*
+			 * Tait EOS
+			 */
+
+			eos[itype] = EOS_TAIT;
+			printf("reading *EOS_TAIT\n");
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *EOS_TAIT");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 1 + 1) {
+				sprintf(str, "expected 1 arguments following *EOS_TAIT but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			matProp2[std::make_pair("tait_exponent", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "Tait EOS");
+				printf("%60s : %g\n", "Exponent", SafeLookup("tait_exponent", itype));
+			}
+		} // end Tait EOS
+
+		else {
+			sprintf(str, "unknown *KEYWORD: %s", arg[ioffset]);
+			error->all(FLERR, str);
+		}
+
+	}
+
+	/*
+	 * copy data which is looked up in inner pairwise loops from slow maps to fast arrays
+	 */
+
+	Q1[itype] = SafeLookup("viscosity_q1", itype);
+	rho0[itype] = SafeLookup("rho_ref", itype);
+
+	setflag[itype][itype] = 1;
 }
 
 /* ----------------------------------------------------------------------
@@ -835,21 +850,13 @@ double PairULSPH::init_one(int i, int j) {
 	if (setflag[i][j] == 0)
 		error->all(FLERR, "All pair coeffs are not set");
 
-	Q1[j][i] = Q1[i][j];
-	Q2[j][i] = Q2[i][j];
-	C1[j][i] = C1[i][j];
-	C2[j][i] = C2[i][j];
-	C3[j][i] = C3[i][j];
-	C4[j][i] = C4[i][j];
-	eos[j][i] = eos[i][j];
-
 // cutoff = sum of max I,J radii for
 // dynamic/dynamic & dynamic/frozen interactions, but not frozen/frozen
 
 	double cutoff = maxrad_dynamic[i] + maxrad_dynamic[j];
 	cutoff = MAX(cutoff, maxrad_frozen[i] + maxrad_dynamic[j]);
 	cutoff = MAX(cutoff, maxrad_dynamic[i] + maxrad_frozen[j]);
-	//printf("cutoff for pair sph/fluid = %f\n", cutoff);
+//printf("cutoff for pair sph/fluid = %f\n", cutoff);
 	return cutoff;
 }
 
@@ -860,7 +867,7 @@ double PairULSPH::init_one(int i, int j) {
 void PairULSPH::init_style() {
 	int i;
 
-	//printf(" in init style\n");
+//printf(" in init style\n");
 // request a granular neighbor list
 	int irequest = neighbor->request(this);
 	neighbor->requests[irequest]->half = 0;
@@ -897,67 +904,12 @@ void PairULSPH::init_list(int id, NeighList *ptr) {
 }
 
 /* ----------------------------------------------------------------------
- proc 0 writes to restart file
- ------------------------------------------------------------------------- */
-
-void PairULSPH::write_restart(FILE *fp) {
-	int i, j;
-	for (i = 1; i <= atom->ntypes; i++) {
-		fwrite(&C1[i], sizeof(double), 1, fp);
-		fwrite(&C2[i], sizeof(double), 1, fp);
-		fwrite(&Q1[i], sizeof(double), 1, fp);
-		for (j = i; j <= atom->ntypes; j++) {
-			fwrite(&setflag[i][j], sizeof(int), 1, fp);
-			if (setflag[i][j]) {
-
-			}
-		}
-	}
-}
-
-/* ----------------------------------------------------------------------
- proc 0 reads from restart file, bcasts
- ------------------------------------------------------------------------- */
-
-void PairULSPH::read_restart(FILE *fp) {
-	allocate();
-
-	int i, j;
-	int me = comm->me;
-	for (i = 1; i <= atom->ntypes; i++) {
-		if (me == 0) {
-			fread(&C1[i], sizeof(double), 1, fp);
-			fread(&C2[i], sizeof(double), 1, fp);
-			fread(&Q1[i], sizeof(double), 1, fp);
-		}
-
-		MPI_Bcast(&C1[i], 1, MPI_DOUBLE, 0, world);
-		MPI_Bcast(&C2[i], 1, MPI_DOUBLE, 0, world);
-		MPI_Bcast(&Q1[i], 1, MPI_DOUBLE, 0, world);
-
-		for (j = i; j <= atom->ntypes; j++) {
-			if (me == 0) {
-				fread(&setflag[i][j], sizeof(int), 1, fp);
-			}
-			MPI_Bcast(&setflag[i][j], 1, MPI_INT, 0, world);
-
-			if (setflag[i][j]) {
-				if (me == 0) {
-					//fread(&Q1[i][j], sizeof(double), 1, fp);
-				}
-				//MPI_Bcast(&Q1[i][j], 1, MPI_DOUBLE, 0, world);
-			}
-		}
-	}
-}
-
-/* ----------------------------------------------------------------------
  memory usage of local atom-based arrays
  ------------------------------------------------------------------------- */
 
 double PairULSPH::memory_usage() {
 
-	//printf("in memory usage\n");
+//printf("in memory usage\n");
 
 	return 11 * nmax * sizeof(double);
 
@@ -969,7 +921,7 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 	double *rho = atom->rho;
 	int i, j, m;
 
-	//printf("packing comm\n");
+//printf("packing comm\n");
 	m = 0;
 	for (i = 0; i < n; i++) {
 		j = list[i];
@@ -1041,6 +993,19 @@ void PairULSPH::kernel_and_derivative(const double h, const double r, double &wf
 }
 
 /*
+ * compute a normalized smoothing kernel only
+ */
+void PairULSPH::Poly6Kernel(const double hsq, const double h, const double rsq, double &wf) {
+
+	double tmp = hsq - rsq;
+	if (domain->dimension == 2) {
+		wf = tmp * tmp * tmp / (0.7853981635e0 * hsq * hsq * hsq * hsq);
+	} else {
+		wf = tmp * tmp * tmp / (0.6382918409e0 * hsq * hsq * hsq * hsq * h);
+	}
+}
+
+/*
  * Pseudo-inverse via SVD
  */
 
@@ -1076,17 +1041,18 @@ Matrix3d PairULSPH::pseudo_inverse_SVD(Matrix3d M) {
  */
 
 void *PairULSPH::extract(const char *str, int &i) {
-	//printf("in extract\n");
+//printf("in extract\n");
 	if (strcmp(str, "smd/ulsph/smoothVel_ptr") == 0) {
 		return (void *) smoothVel;
-	} else if (strcmp(str, "smd/ulsph/hMin_ptr") == 0) {
-		return (void *) &hMin;
 	} else if (strcmp(str, "smd/ulsph/stressTensor_ptr") == 0) {
 		return (void *) stressTensor;
 	} else if (strcmp(str, "smd/ulsph/velocityGradient_ptr") == 0) {
 		return (void *) L;
 	} else if (strcmp(str, "smd/ulsph/numNeighs_ptr") == 0) {
 		return (void *) numNeighs;
+	} else if (strcmp(str, "smd/ulsph/dtCFL_ptr") == 0) {
+		//printf("dtcfl = %f\n", dtCFL);
+		return (void *) &dtCFL;
 	}
 
 	return NULL;
@@ -1100,4 +1066,32 @@ Matrix3d PairULSPH::Deviator(Matrix3d M) {
 	eye.setIdentity();
 	eye *= M.trace() / 3.0;
 	return M - eye;
+}
+
+double PairULSPH::SafeLookup(std::string str, int itype) {
+//cout << "string passed to lookup: " << str << endl;
+	char msg[128];
+	if (matProp2.count(std::make_pair(str, itype)) == 1) {
+		//cout << "returning look up value %d " << matProp2[std::make_pair(str, itype)] << endl;
+		return matProp2[std::make_pair(str, itype)];
+	} else {
+		//sprintf(msg, "failed to lookup indentifier [%s] for particle type %d", str, itype);
+		error->all(FLERR, msg);
+	}
+	return 1.0;
+}
+
+bool PairULSPH::CheckKeywordPresent(std::string str, int itype) {
+	int count = matProp2.count(std::make_pair(str, itype));
+	if (count == 0) {
+		return false;
+	} else if (count == 1) {
+		return true;
+	} else {
+		char msg[128];
+		cout << "keyword: " << str << endl;
+		sprintf(msg, "ambiguous count for keyword: %d times present\n", count);
+		error->all(FLERR, msg);
+	}
+	return false;
 }

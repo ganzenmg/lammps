@@ -25,7 +25,7 @@
 
 #ifdef PAIR_CLASS
 
-PairStyle(sph/fluid,PairULSPH)
+PairStyle(ulsph,PairULSPH)
 
 #else
 
@@ -36,8 +36,10 @@ PairStyle(sph/fluid,PairULSPH)
 #include <Eigen/Eigen>
 #include <Eigen/Dense>
 #include <Eigen/SVD>
+#include <map>
 
 using namespace Eigen;
+using namespace std;
 namespace LAMMPS_NS {
 
 class PairULSPH: public Pair {
@@ -50,20 +52,16 @@ public:
     double init_one(int, int);
     void init_style();
     void init_list(int, class NeighList *);
-    void write_restart(FILE *);
-    void read_restart(FILE *);
-    void write_restart_settings(FILE *) {
-    }
-    void read_restart_settings(FILE *) {
-    }
     virtual double memory_usage();
     int pack_forward_comm(int, int *, double *, int, int *);
     void unpack_forward_comm(int, int, double *);
     void kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
+    void Poly6Kernel(const double hsq, const double h, const double rsq, double &wf);
     Matrix3d pseudo_inverse_SVD(Matrix3d);
     void ComputePressure();
     void *extract(const char *, int &);
     void PreCompute();
+    void PreCompute_DensitySummation();
     Matrix3d Deviator(Matrix3d);
 
     /*
@@ -75,9 +73,10 @@ public:
                  double &pressure, double &sound_speed);
 
 protected:
-    double **C1, **C2, **C3, **C4; // coefficients for EOS
-    double **Q1, **Q2; // linear and quadratic artificial viscosity coeffs
-    int **eos; // strength (deviatoric) and pressure constitutive models
+
+    double *rho0; // reference mass density per type
+    double *Q1; // linear artificial viscosity coeff
+    int *eos; // eos models
 
     double *onerad_dynamic, *onerad_frozen;
     double *maxrad_dynamic, *maxrad_frozen;
@@ -92,14 +91,20 @@ protected:
     Matrix3d *stressTensor, *L;
 
     enum {
-        NONE, PERFECT_GAS, TAIT, LINEAR_ELASTIC
+        NONE, PERFECT_GAS, EOS_TAIT, VISCOSITY_LINEAR
     };
+
+    double dtCFL;
+
 
 private:
     double *delete_flag;
     double *pressure;
+    typedef std::map<std::pair<std::string, int>, double> Dict;
+    Dict matProp2;
+	double SafeLookup(std::string str, int itype);
+	bool CheckKeywordPresent(std::string str, int itype);
 
-    double hMin;
 };
 
 }

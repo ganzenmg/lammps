@@ -223,8 +223,15 @@ int AtomVecSMD::pack_comm(int n, int *list, double *buf, int pbc_flag, int *pbc)
 /* ---------------------------------------------------------------------- */
 
 int AtomVecSMD::pack_comm_vel(int n, int *list, double *buf, int pbc_flag, int *pbc) {
+	// communicate quantities to ghosts, which are changed by time-integration AND are required on ghost atoms.
+
 	//no need to pack stress or defgrad information here, as these quantities are not required for ghost atoms.
 	// Inside pair_style tlsph, these quantities are computed and communicated to ghosts.
+
+	// no need to communicate x0 here, as it is not changed by time integration
+	// if x0 is changed when the ref config is updated, this communication is performed in the fix_integrate/tlsph
+	// similarily, rmass could be removed here.
+	// radius should be communicated here for future time-integration of the radius with ulsph (not implemented yet)
 	int i, j, m;
 	double dx, dy, dz, dvx, dvy, dvz;
 

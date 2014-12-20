@@ -117,7 +117,7 @@ void PairHertz::compute(int eflag, int vflag) {
 		ytmp = x[i][1];
 		ztmp = x[i][2];
 		itype = type[i];
-		ri = 1.1 * radius[i];
+		ri = 1.0 * radius[i];
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 
@@ -134,7 +134,7 @@ void PairHertz::compute(int eflag, int vflag) {
 			}
 			rsq = delx * delx + dely * dely + delz * delz;
 
-			rj = 1.1 * radius[j];
+			rj = 1.0 * radius[j];
 
 
 			rcut = ri + rj;
@@ -158,26 +158,12 @@ void PairHertz::compute(int eflag, int vflag) {
 				}
 
 				/*
-				 * contact viscosity
+				 * contact viscosity -- needs to be done, see GRANULAR package for normal & shear damping
+				 * for now: no damping and thus no viscous energy deltaE
 				 */
+				deltaE = 0.0;
 
-				q1 = 1.0;
-				rho0 = 2700.0e-9;
-				c0 = sqrt(bulkmodulus[itype][jtype] / rho0);
 
-				hrSq = rcutSq - rsq; // [m^2]
-				wfd = -14.0323944878e0 * hrSq / (rcutSq * rcutSq * rcutSq); // [1/m^4] ==> correct for dW/dr in 3D
-
-				delVdotDelR = delx * (v[j][0] - v[i][0]) + dely * (v[j][1] - v[i][1]) + delz * (v[j][2] - v[i][2]); // units: m^2/s
-				mu_ij = rcut * delVdotDelR / (r * r + 0.1 * rcut * rcut); // m * m/s * m / m*m ==> units m/s
-				visc_magnitude = q1 * c0 * mu_ij / rho0; // units: m^5 / (s^-2 kg)
-				f_visc = -rmass[i] * rmass[j] * visc_magnitude * wfd / (r + 1.0e-1 * rcut); // units: kg * s^-2
-
-				//printf("fpair = %f, fvisc = %f, mu_ij, \n", fpair, f_visc);
-
-				deltaE = 0.5 * f_visc * delVdotDelR;
-
-				fpair += f_visc;
 
 				if (evflag) {
 					ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, delx, dely, delz);
@@ -186,13 +172,13 @@ void PairHertz::compute(int eflag, int vflag) {
 				f[i][0] += delx * fpair;
 				f[i][1] += dely * fpair;
 				f[i][2] += delz * fpair;
-				de[i] += deltaE;
+				//de[i] += deltaE;
 
 				if (newton_pair || j < nlocal) {
 					f[j][0] -= delx * fpair;
 					f[j][1] -= dely * fpair;
 					f[j][2] -= delz * fpair;
-					de[j] += deltaE;
+					//de[j] += deltaE;
 				}
 
 			}
@@ -294,7 +280,7 @@ double PairHertz::init_one(int i, int j) {
 	cutoff = MAX(cutoff, maxrad_dynamic[i] + maxrad_frozen[j]);
 
 	if (comm->me == 0) {
-		printf("cutoff for pair hertz = %f\n", cutoff);
+		printf("cutoff for pair smd/hertz = %f\n", cutoff);
 	}
 	return cutoff;
 }
@@ -309,7 +295,7 @@ void PairHertz::init_style() {
 	// error checks
 
 	if (!atom->contact_radius_flag)
-		error->all(FLERR, "Pair style tlsph/ipc_hertz requires atom style with contact_radius");
+		error->all(FLERR, "Pair style smd/hertz requires atom style with contact_radius");
 
 	int irequest = neighbor->request(this);
 	neighbor->requests[irequest]->half = 0;

@@ -3,6 +3,8 @@ variable        l0 equal 0.05
 variable        rho equal 1000
 variable        h equal 2.5*${l0}
 variable        c0 equal 10.0
+variable        visc equal 0.1
+variable        Cp equal 1.0
 # ----
 variable        dt equal 0.125*${h}/${c0}
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
@@ -12,11 +14,11 @@ variable        mass_one equal ${vol_one}*${rho}
 
 units		si
 dimension       2
-boundary        f f p
-atom_style      tlsph
+boundary        sm sm p
+atom_style      smd
 comm_style      tiled
 neighbor        ${skin} bin
-neigh_modify    every 10 delay 0 check yes # only build neighbor list if particle has moved half the skin distance
+neigh_modify    every 5 delay 0 check yes # only build neighbor list if particle has moved half the skin distance
 comm_modify     vel yes
 newton          off
 
@@ -37,22 +39,20 @@ set             group all contact_radius ${l0}
 set             group all mass ${mass_one}
 set             group all volume ${vol_one}
 
-pair_style      sph/fluid
-pair_coeff      * * tait      7.0  ${c0}  ${rho}     0.0e-6      0.1 0.0
+pair_style      ulsph
+pair_coeff      1 1 *COMMON ${rho} ${c0} ${visc} ${Cp} &
+		*EOS_TAIT 7.0 &
+	        *END
 
-compute         eint all sph2/internal_energy
-compute         rho all sph2/rho
+compute         eint all smd/internal_energy
+compute         rho all smd/rho
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint
-compute         contact_radius all sph2/contact_radius
-compute         fS all sph2/ulsph_stress
+compute         contact_radius all smd/contact_radius
+compute         fS all smd/ulsph_stress
 compute         aS all stress/atom NULL pair
 
 #
-timestep        ${dt}
-variable        maxdist equal 0.0025*${h}
-fix             dtfix all dt/reset 5 NULL ${dt} ${maxdist} units box
-
 variable        nrun equal round(10.0/${dt})
 print "running for ${nrun} steps"
 
@@ -60,20 +60,26 @@ variable        dumpFreq equal 100 #round(${nrun}/100)
 dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
                 fx fy vx vy c_eint &
                 c_contact_radius mol c_rho &
-                c_fS[1] c_fS[2] c_fS[4]
+                c_fS[1] c_fS[2] c_fS[4] mass radius
 dump_modify     dump_id first yes
 
 thermo          100
 thermo_style    custom step ke pe v_etot c_alleint
 thermo_modify   lost ignore
 
-fix             rhofix all sph2/adjust_rho 1000 1
-run             1000
-unfix           rhofix
+#fix             rhofix all smd/adjust_rho 1000 1
+#run             1000
+#unfix           rhofix
+
+fix             dtfix all smd/adjust_dt 5 0.1
+
+thermo          100
+thermo_style    custom step ke pe v_etot c_alleint f_dtfix dt
+thermo_modify   lost ignore
 
 fix             gfix water gravity -9.81 vector 0 1 0 # add gravity. This fix also computes potential energy of mass in gravity field.
 fix             bc_fix bc setforce 0 0 0
-fix             integration_fix_resin all sph2/integrate_ulsph 1.5e3
+fix             integration_fix_resin all smd/integrate_ulsph 1.5e3
 fix             10 all balance 50 0.9 rcb
 run             20000
 

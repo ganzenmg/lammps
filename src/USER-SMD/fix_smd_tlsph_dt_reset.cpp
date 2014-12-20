@@ -9,7 +9,6 @@
  *
  * ----------------------------------------------------------------------- */
 
-
 /* ----------------------------------------------------------------------
  LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
  http://lammps.sandia.gov, Sandia National Laboratories
@@ -51,7 +50,7 @@ using namespace FixConst;
 FixSMDTlsphDtReset::FixSMDTlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
 	if (narg != 5)
-		error->all(FLERR, "Illegal fix tlsph/dt/reset command");
+		error->all(FLERR, "Illegal fix smd/adjust_dt command");
 
 	// set time_depend, else elapsed time accumulation can be messed up
 
@@ -65,7 +64,7 @@ FixSMDTlsphDtReset::FixSMDTlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 
 	nevery = atoi(arg[3]);
 	if (nevery <= 0)
-		error->all(FLERR, "Illegal fix tlsph/dt/reset command");
+		error->all(FLERR, "Illegal fix smd/adjust_dt command");
 
 	safety_factor = atof(arg[4]);
 
@@ -107,28 +106,36 @@ void FixSMDTlsphDtReset::initial_integrate(int vflag) {
 
 void FixSMDTlsphDtReset::end_of_step() {
 	double dtmin = BIG;
+	int itmp = 0;
 
 	/*
-	 * determine stable CFL timestep
+	 * extract minimum CFL timestep from TLSPH and ULSPH pair styles
 	 */
 
-	int itmp = 0;
-	double *dtCFL = (double *) force->pair->extract("smd/tlsph/dtCFL_ptr", itmp);
-	if (dtCFL == NULL) {
-		error->all(FLERR, "fix tlsph/dt/reset failed to access tlsph dtCFL");
+	double *dtCFL_TLSPH = (double *) force->pair->extract("smd/tlsph/dtCFL_ptr", itmp);
+	double *dtCFL_ULSPH = (double *) force->pair->extract("smd/ulsph/dtCFL_ptr", itmp);
+
+	if ((dtCFL_TLSPH == NULL) && (dtCFL_ULSPH == NULL)) {
+		error->all(FLERR, "fix smd/adjust_dt failed to access a valid dtCFL");
 	}
 
-	dtmin = safety_factor * *dtCFL; // apply safety factor
+	if (dtCFL_TLSPH != NULL) {
+		dtmin = MIN(dtmin, *dtCFL_TLSPH);
+	}
+
+	if (dtCFL_ULSPH != NULL) {
+		dtmin = MIN(dtmin, *dtCFL_ULSPH);
+	}
+
+	dtmin *= safety_factor; // apply safety factor
 
 	MPI_Allreduce(&dtmin, &dt, 1, MPI_DOUBLE, MPI_MIN, world);
-
 
 // if timestep didn't change, just return
 // else reset update->dt and other classes that depend on it
 
 	if (dt == update->dt)
 		return;
-
 
 	t_elapsed = t_laststep + (update->ntimestep - laststep) * update->dt;
 	t_laststep = t_elapsed;
@@ -140,7 +147,6 @@ void FixSMDTlsphDtReset::end_of_step() {
 	for (int i = 0; i < modify->nfix; i++)
 		modify->fix[i]->reset_dt();
 }
-
 
 /* ---------------------------------------------------------------------- */
 
