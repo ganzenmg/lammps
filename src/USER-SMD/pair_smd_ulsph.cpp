@@ -50,7 +50,7 @@ using namespace LAMMPS_NS;
 using namespace Eigen;
 
 #define COMPUTE_CORRECTED_DERIVATIVES false
-/* ---------------------------------------------------------------------- */
+
 
 PairULSPH::PairULSPH(LAMMPS *lmp) :
 		Pair(lmp) {
@@ -266,7 +266,7 @@ void PairULSPH::PreCompute() {
 
 				// velocity gradient L
 				Ltmp = -dv * g.transpose();
-				L[i] += jvol * Ltmp; // note: should be mass / rho for ULSPH
+				L[i] += jvol * Ltmp;
 
 				numNeighs[i] += 1;
 
@@ -287,25 +287,42 @@ void PairULSPH::PreCompute() {
 	 * invert shape matrix and compute corrected quantities
 	 */
 
-	for (i = 0; i < nlocal; i++) {
-		itype = type[i];
-		if (COMPUTE_CORRECTED_DERIVATIVES) {
-			if (setflag[itype][itype] == 1) {
+	if (COMPUTE_CORRECTED_DERIVATIVES) {
+		for (i = 0; i < nlocal; i++) {
+			itype = type[i];
 
-				K[i] = pseudo_inverse_SVD(K[i]);
+			if (domain->dimension == 2) {
+				Matrix2d K2d;
+				K2d(0, 0) = K[i](0, 0);
+				K2d(0, 1) = K[i](0, 1);
+				K2d(1, 0) = K[i](1, 0);
+				K2d(1, 1) = K[i](1, 1);
 
-				if (domain->dimension == 2) {
-					K[i](2, 2) = 1.0; // make inverse of K well defined even when it is rank-deficient (3d matrix, only 2d information)
+				if ((K2d.determinant() > 1.0e-1) && (numNeighs[i] > 4)) {
+					Matrix2d K2di;
+					K2di = K2d.inverse();
+
+					K[i].setIdentity();
+					K[i](0, 0) = K2di(0, 0);
+					K[i](0, 1) = K2di(0, 1);
+					K[i](1, 0) = K2di(1, 0);
+					K[i](1, 1) = K2di(1, 1);
+				} else {
+					K[i].setIdentity();
 				}
-			} else {
-				K[i].setIdentity();
+
+			} else { // 3d
+				if (K[i].determinant() > 1.0e-4) {
+					K[i] = pseudo_inverse_SVD(K[i]);
+				} else {
+					K[i].setIdentity();
+				}
 			}
 
 			L[i] *= K[i];
-		} else {
-			K[i].setIdentity();
-		}
-	} // end loop over i = 0 to nlocal
+
+		} // end loop over i = 0 to nlocal
+	}
 }
 
 /* ---------------------------------------------------------------------- */
@@ -367,6 +384,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	for (i = 0; i < nlocal; i++) {
 		shepardWeight[i] = 0.0;
 		smoothVel[i].setZero();
+		numNeighs[i] = 0;
 	}
 
 	//PairULSPH::PreCompute_DensitySummation();
@@ -478,6 +496,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				// accumulate smooth velocities
 				shepardWeight[i] += jvol * wf;
 				smoothVel[i] += jvol * wf * dvint;
+				numNeighs[i] += 1;
 
 				if (j < nlocal) {
 					f[j][0] -= sumForces(0);
@@ -487,7 +506,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 					drho[j] -= rmass[i] * g.dot(dv);
 
 					shepardWeight[j] += ivol * wf;
-					smoothVel[j] += ivol * wf * dvint;
+					smoothVel[j] -= ivol * wf * dvint;
+					numNeighs[j] += 1;
 				}
 
 				// tally atomistic stress tensor
@@ -759,7 +779,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 			* SafeLookup("rho_ref", itype);
 
 	if (comm->me == 0) {
-		printf("\n material unspecific properties for SPH2/TLSPH definition of particle type %d:\n", itype);
+		printf("\n material unspecific properties for SMD/ULSPH definition of particle type %d:\n", itype);
 		printf("%40s : %g\n", "reference density", SafeLookup("rho_ref", itype));
 		printf("%40s : %g\n", "reference speed of sound", SafeLookup("c_ref", itype));
 		printf("%40s : %g\n", "linear viscosity coefficient", SafeLookup("viscosity_q1", itype));
@@ -778,8 +798,10 @@ void PairULSPH::coeff(int narg, char **arg) {
 
 	while (true) {
 		if (strcmp(arg[iNextKwd], "*END") == 0) {
-			sprintf(str, "found *END");
-			error->message(FLERR, str);
+			if (comm->me == 0) {
+				sprintf(str, "found *END");
+				error->message(FLERR, str);
+			}
 			break;
 		}
 

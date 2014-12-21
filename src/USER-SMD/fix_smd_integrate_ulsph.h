@@ -52,6 +52,8 @@ class FixSMDIntegrateUlsph : public Fix {
   double *step_respa;
   int mass_require;
   bool xsphFlag;
+  bool adjust_radius_flag;
+  double adjust_radius_factor;
 
   class Pair *pair;
 };

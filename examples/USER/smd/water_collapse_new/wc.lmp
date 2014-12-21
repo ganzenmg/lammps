@@ -51,6 +51,7 @@ variable        etot equal ke+c_alleint
 compute         contact_radius all smd/contact_radius
 compute         fS all smd/ulsph_stress
 compute         aS all stress/atom NULL pair
+compute         nn all smd/ulsph_num_neighs
 
 #
 variable        nrun equal round(10.0/${dt})
@@ -60,7 +61,7 @@ variable        dumpFreq equal 100 #round(${nrun}/100)
 dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
                 fx fy vx vy c_eint &
                 c_contact_radius mol c_rho &
-                c_fS[1] c_fS[2] c_fS[4] mass radius
+                c_fS[1] c_fS[2] c_fS[4] mass radius c_nn
 dump_modify     dump_id first yes
 
 thermo          100
@@ -79,7 +80,7 @@ thermo_modify   lost ignore
 
 fix             gfix water gravity -9.81 vector 0 1 0 # add gravity. This fix also computes potential energy of mass in gravity field.
 fix             bc_fix bc setforce 0 0 0
-fix             integration_fix_resin all smd/integrate_ulsph 1.5e3
+fix             integration_fix_resin all smd/integrate_ulsph 1.5e3 xsph 1.3
 fix             10 all balance 50 0.9 rcb
 run             20000
 

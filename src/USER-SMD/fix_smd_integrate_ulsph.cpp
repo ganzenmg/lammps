@@ -9,7 +9,6 @@
  *
  * ----------------------------------------------------------------------- */
 
-
 /* ----------------------------------------------------------------------
  LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
  http://lammps.sandia.gov, Sandia National Laboratories
@@ -41,6 +40,7 @@
 #include "memory.h"
 #include "error.h"
 #include "pair.h"
+#include "domain.h"
 #include <Eigen/Eigen>
 
 using namespace Eigen;
@@ -50,50 +50,71 @@ using namespace FixConst;
 /* ---------------------------------------------------------------------- */
 
 FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
-        Fix(lmp, narg, arg) {
+		Fix(lmp, narg, arg) {
 
-    if ((atom->e_flag != 1) || (atom->rho_flag != 1))
-        error->all(FLERR, "fix sph_fluid command requires atom_style with both energy and density");
+	if ((atom->e_flag != 1) || (atom->rho_flag != 1))
+		error->all(FLERR, "fix sph_fluid command requires atom_style with both energy and density");
 
-    if (narg < 4)
-        error->all(FLERR, "Illegal number of arguments for fix sph_fluid command");
+	if (narg < 4)
+		error->all(FLERR, "Illegal number of arguments for fix sph_fluid command");
 
-    vlimit = atof(arg[3]);
-    if (vlimit > 0.0) {
-        if (comm->me == 0) {
-            error->message(FLERR, "*** fix sph/fluid will cap velocities ***");
-        }
-    }
+	vlimit = force->numeric(FLERR, arg[3]);
+	if (vlimit > 0.0) {
+		if (comm->me == 0) {
+			error->message(FLERR, "*** fix sph/fluid will cap velocities ***");
+		}
+	}
 
-    xsphFlag = false;
+	adjust_radius_flag = false;
+	xsphFlag = false;
+	int iarg = 4;
+	while (true) {
+		if (strcmp(arg[iarg], "xsph") == 0) {
+			xsphFlag = true;
+			if (comm->me == 0) {
+				error->message(FLERR, "*** fix sph_fluid will use XSPH time integration ***");
+			}
+		} else if (strcmp(arg[iarg], "adjust_radius") == 0) {
+			adjust_radius_flag = true;
 
-    for (int iarg = 4; iarg < narg; iarg++) {
-        if (strcmp(arg[iarg], "xsph") == 0) {
-            xsphFlag = true;
-            if (comm->me == 0) {
-                error->message(FLERR, "*** fix sph_fluid will use XSPH time integration ***");
-            }
-        }
-    }
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected number following adjust_radius");
+			}
 
-    time_integrate = 1;
+			adjust_radius_factor = force->numeric(FLERR, arg[iarg]);
+			if (comm->me == 0) {
+				printf("adjust_radius factor is %f\n", adjust_radius_factor);
+				error->message(FLERR, "*** fix sph_fluid will adjust smoothing length dynamically ***");
+			}
+		}
+
+		iarg++;
+
+		if (iarg >= narg) {
+			break;
+		}
+
+	}
+
+	time_integrate = 1;
 }
 
 /* ---------------------------------------------------------------------- */
 
 int FixSMDIntegrateUlsph::setmask() {
-    int mask = 0;
-    mask |= INITIAL_INTEGRATE;
-    mask |= FINAL_INTEGRATE;
-    return mask;
+	int mask = 0;
+	mask |= INITIAL_INTEGRATE;
+	mask |= FINAL_INTEGRATE;
+	return mask;
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixSMDIntegrateUlsph::init() {
-    dtv = update->dt;
-    dtf = 0.5 * update->dt * force->ftm2v;
-    vlimitsq = vlimit * vlimit;
+	dtv = update->dt;
+	dtf = 0.5 * update->dt * force->ftm2v;
+	vlimitsq = vlimit * vlimit;
 }
 
 /* ----------------------------------------------------------------------
@@ -101,128 +122,129 @@ void FixSMDIntegrateUlsph::init() {
  ------------------------------------------------------------------------- */
 
 void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
-    // update v and x and rho and e of atoms in group
+	// update v and x and rho and e of atoms in group
 
-    double **x = atom->x;
-    double **v = atom->v;
-    double **f = atom->f;
-    double **vest = atom->vest;
-    double *rho = atom->rho;
-    double *drho = atom->drho;
-    double *e = atom->e;
-    double *de = atom->de;
-    double *rmass = atom->rmass;
+	double **x = atom->x;
+	double **v = atom->v;
+	double **f = atom->f;
+	double **vest = atom->vest;
+	double *rho = atom->rho;
+	double *drho = atom->drho;
+	double *e = atom->e;
+	double *de = atom->de;
+	double *rmass = atom->rmass;
 
-    int *mask = atom->mask;
-    int nlocal = atom->nlocal;
-    int i;
-    double dtfm, vsq, scale;
+	int *mask = atom->mask;
+	int nlocal = atom->nlocal;
+	int i;
+	double dtfm, vsq, scale;
 
-    int itmp = 0;
-    Vector3d *smoothVel = (Vector3d *) force->pair->extract("sphFluid_smoothVel_ptr", itmp);
+	int itmp = 0;
+	Vector3d *smoothVel = (Vector3d *) force->pair->extract("smd/ulsph/smoothVel_ptr", itmp);
 
-    if (xsphFlag) {
-        if (smoothVel == NULL) {
-            error->one(FLERR, "fix sph_fluid failed to access smoothVel array");
-        }
-    }
+	if (xsphFlag) {
+		if (smoothVel == NULL) {
+			error->one(FLERR, "fix sph_fluid failed to access smoothVel array");
+		}
+	}
 
-    if (igroup == atom->firstgroup)
-        nlocal = atom->nfirst;
+	if (igroup == atom->firstgroup)
+		nlocal = atom->nfirst;
 
-    for (i = 0; i < nlocal; i++) {
-        if (mask[i] & groupbit) {
-                dtfm = dtf / rmass[i];
+	for (i = 0; i < nlocal; i++) {
+		if (mask[i] & groupbit) {
+			dtfm = dtf / rmass[i];
 
-            e[i] += dtf * de[i]; // half-step update of particle internal energy
-            rho[i] += dtf * drho[i]; // ... and density
+			e[i] += dtf * de[i]; // half-step update of particle internal energy
+			rho[i] += dtf * drho[i]; // ... and density
 
-            v[i][0] += dtfm * f[i][0];
-            v[i][1] += dtfm * f[i][1];
-            v[i][2] += dtfm * f[i][2];
+			v[i][0] += dtfm * f[i][0];
+			v[i][1] += dtfm * f[i][1];
+			v[i][2] += dtfm * f[i][2];
 
-            // extrapolate velocity from half- to full-step
-            vest[i][0] = v[i][0] + dtfm * f[i][0];
-            vest[i][1] = v[i][1] + dtfm * f[i][1];
-            vest[i][2] = v[i][2] + dtfm * f[i][2];
+			// extrapolate velocity from half- to full-step
+			vest[i][0] = v[i][0] + dtfm * f[i][0];
+			vest[i][1] = v[i][1] + dtfm * f[i][1];
+			vest[i][2] = v[i][2] + dtfm * f[i][2];
 
-            if (vlimit > 0.0) {
-                vsq = v[i][0] * v[i][0] + v[i][1] * v[i][1] + v[i][2] * v[i][2];
-                if (vsq > vlimitsq) {
-                    scale = sqrt(vlimitsq / vsq);
-                    v[i][0] *= scale;
-                    v[i][1] *= scale;
-                    v[i][2] *= scale;
+			if (vlimit > 0.0) {
+				vsq = v[i][0] * v[i][0] + v[i][1] * v[i][1] + v[i][2] * v[i][2];
+				if (vsq > vlimitsq) {
+					scale = sqrt(vlimitsq / vsq);
+					v[i][0] *= scale;
+					v[i][1] *= scale;
+					v[i][2] *= scale;
 
-                    vest[i][0] = v[i][0];
-                    vest[i][1] = v[i][1];
-                    vest[i][2] = v[i][2];
-                }
-            }
+					vest[i][0] = v[i][0];
+					vest[i][1] = v[i][1];
+					vest[i][2] = v[i][2];
+				}
+			}
 
-            if (xsphFlag) {
-                x[i][0] += dtv * (v[i][0] + 0.5 * smoothVel[i](0));
-                x[i][1] += dtv * (v[i][1] + 0.5 * smoothVel[i](1));
-                x[i][2] += dtv * (v[i][2] + 0.5 * smoothVel[i](2));
-            } else {
-                x[i][0] += dtv * v[i][0];
-                x[i][1] += dtv * v[i][1];
-                x[i][2] += dtv * v[i][2];
-            }
-        }
-    }
+			if (xsphFlag) {
+				x[i][0] += dtv * (v[i][0] - 0.5 * smoothVel[i](0));
+				x[i][1] += dtv * (v[i][1] - 0.5 * smoothVel[i](1));
+				x[i][2] += dtv * (v[i][2] - 0.5 * smoothVel[i](2));
+			} else {
+				x[i][0] += dtv * v[i][0];
+				x[i][1] += dtv * v[i][1];
+				x[i][2] += dtv * v[i][2];
+			}
+		}
+	}
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixSMDIntegrateUlsph::final_integrate() {
 
-    // update v, rho, and e of atoms in group
+	// update v, rho, and e of atoms in group
 
-    double **v = atom->v;
-    double **f = atom->f;
-    double *e = atom->e;
-    double *de = atom->de;
-    double *rho = atom->rho;
-    double *drho = atom->drho;
-    double *radius = atom->radius;
-    int *mask = atom->mask;
-    int nlocal = atom->nlocal;
-    if (igroup == atom->firstgroup)
-        nlocal = atom->nfirst;
-    double dtfm, vsq, scale;
-    double *rmass = atom->rmass;
-    double *vfrac = atom->vfrac;
+	double **v = atom->v;
+	double **f = atom->f;
+	double *e = atom->e;
+	double *de = atom->de;
+	double *rho = atom->rho;
+	double *drho = atom->drho;
+	double *radius = atom->radius;
+	int *mask = atom->mask;
+	int nlocal = atom->nlocal;
+	if (igroup == atom->firstgroup)
+		nlocal = atom->nfirst;
+	double dtfm, vsq, scale;
+	double *rmass = atom->rmass;
 
-    for (int i = 0; i < nlocal; i++) {
-        if (mask[i] & groupbit) {
+	for (int i = 0; i < nlocal; i++) {
+		if (mask[i] & groupbit) {
 
-            dtfm = dtf / rmass[i];
-            v[i][0] += dtfm * f[i][0];
-            v[i][1] += dtfm * f[i][1];
-            v[i][2] += dtfm * f[i][2];
+			dtfm = dtf / rmass[i];
+			v[i][0] += dtfm * f[i][0];
+			v[i][1] += dtfm * f[i][1];
+			v[i][2] += dtfm * f[i][2];
 
-            if (vlimit > 0.0) {
-                vsq = v[i][0] * v[i][0] + v[i][1] * v[i][1] + v[i][2] * v[i][2];
-                if (vsq > vlimitsq) {
-                    scale = sqrt(vlimitsq / vsq);
-                    v[i][0] *= scale;
-                    v[i][1] *= scale;
-                    v[i][2] *= scale;
-                }
-            }
+			if (vlimit > 0.0) {
+				vsq = v[i][0] * v[i][0] + v[i][1] * v[i][1] + v[i][2] * v[i][2];
+				if (vsq > vlimitsq) {
+					scale = sqrt(vlimitsq / vsq);
+					v[i][0] *= scale;
+					v[i][1] *= scale;
+					v[i][2] *= scale;
+				}
+			}
 
-            e[i] += dtf * de[i];
-            rho[i] += dtf * drho[i];
+			e[i] += dtf * de[i];
+			rho[i] += dtf * drho[i];
 
-            radius[i] =  1.3 * sqrt(rmass[i] / rho[i]); // Monaghan approach for setting the radius
-        }
-    }
+			if (adjust_radius_flag) {
+				radius[i] = adjust_radius_factor * pow(rmass[i] / rho[i], 1./domain->dimension); // Monaghan approach for setting the radius
+			}
+		}
+	}
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixSMDIntegrateUlsph::reset_dt() {
-    dtv = update->dt;
-    dtf = 0.5 * update->dt * force->ftm2v;
+	dtv = update->dt;
+	dtf = 0.5 * update->dt * force->ftm2v;
 }
