@@ -1898,13 +1898,16 @@ double PairTlsph::init_one(int i, int j) {
 	if (setflag[i][j] == 0)
 		error->all(FLERR, "All pair coeffs are not set");
 
+	if (force->newton == 1)
+		error->all(FLERR, "Pair style tlsph requires newton off");
+
 // cutoff = sum of max I,J radii for
 // dynamic/dynamic & dynamic/frozen interactions, but not frozen/frozen
 
 	double cutoff = maxrad_dynamic[i] + maxrad_dynamic[j];
 	cutoff = MAX(cutoff, maxrad_frozen[i] + maxrad_dynamic[j]);
 	cutoff = MAX(cutoff, maxrad_dynamic[i] + maxrad_frozen[j]);
-//printf("cutoff for pair peri/gcg = %f\n", cutoff);
+//printf("cutoff for pair pair tlsph = %f\n", cutoff);
 	return cutoff;
 }
 

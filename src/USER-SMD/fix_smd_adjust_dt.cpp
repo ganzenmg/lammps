@@ -25,7 +25,7 @@
 #include "math.h"
 #include "stdlib.h"
 #include "string.h"
-#include "fix_smd_tlsph_dt_reset.h"
+#include "fix_smd_adjust_dt.h"
 #include "atom.h"
 #include "update.h"
 #include "integrate.h"
