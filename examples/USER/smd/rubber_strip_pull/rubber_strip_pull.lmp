@@ -1,24 +1,24 @@
-# TLSPH example: elongate a 2d strip of elastic material py pulling its ends apart
-
-# define initial parameters
-variable        l0 equal 1.0 # lattice spacing for creating particles
-variable        rho equal 1 # initial mass density
+variable        l0 equal 1.0
+variable        rho equal 1
 variable        E equal 1.0 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
-variable        h equal 3.01*${l0} # SPH smoothing kernel diameter
+variable        G equal ${E}/(2*(1.0+${nu}))
+variable        h equal 3.01*${l0}
 variable        vol_one equal ${l0}^2 # volume of one particle
 variable        mass_one equal ${vol_one}*${rho} # mass of one particle
-variable        skin equal 0.1*${l0} # Verlet list range
-variable        vel equal 0.001 # pull velocity
+variable        c0 equal sqrt(${E}/${rho}) # initial guess for the speed of sound
+variable        dt equal 0.125*${h}/${c0} # initial time step size
+variable        skin equal 0.5*${l0} # Verlet list range
+variable        vel equal 0.001
 
 units		si # si means: a consistent system of units is used. Here: mm / GPa / ms
 dimension       2 # this is a 2d plane-strain simulation
 boundary        sm sm p # simulation box boundaries
-atom_style      smd 
+atom_style      smd # 
 neighbor        ${skin} bin
-neigh_modify    every 10 delay 0 check yes # re-build neighbor list every 10 steps
-newton          off # required for SMD simulations!
-comm_modify     vel yes # required for SMD simulations!
+neigh_modify    every 10 delay 0 check yes
+newton          off
+comm_modify     vel yes
 
 # create simulation box and particles
 lattice         sq ${l0}
@@ -42,10 +42,6 @@ pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.06  0.0  0 1.0 &
 		*EOS_LINEAR &
                 *END
 
-<<<<<<< HEAD
-compute         S all smd/tlsph_stress # Cauchy stress tensor
-compute         nn all smd/tlsph_num_neighs # number of neighbors for each particle
-=======
 compute         E all smd/tlsph_strain
 compute         S all smd/tlsph_stress
 compute         nn all smd/tlsph_num_neighs
@@ -53,54 +49,29 @@ compute         contact_radius all smd/contact_radius
 compute         eint all smd/internal_energy
 compute         P all smd/plastic_strain
 compute         err all smd/hourglass_error
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
 
-dump            dump_id all custom 100 dump.LAMMPS id type x y z &
+dump            dump_id all custom 100 dump.LAMMPS id type x y z diameter fx fy fz &
+		c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
                 c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
-<<<<<<< HEAD
-                vx vy vz c_nn
-=======
                 vx vy vz c_eint proc &
                 c_nn mol mass c_P c_err radius
 dump_modify     dump_id first yes
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
 
-<<<<<<< HEAD
-# define velocity boundary conditions
-velocity        top set 0.0  ${vel} 0.0 sum no units box
-=======
 fix             dtfix all smd/adjust_dt 5 0.1 # adjust time increment very 5 steps with safety factor 0.1
 variable        stress equal (f_botfix[2]-f_topfix[2])/2.0
 variable        strain equal (2.0*${vel}*f_dtfix[1])
 
 velocity        top set 0.0  ${vel} 0.0 sum no units box # initialize velocity for top row of particles
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
 velocity        bot set 0.0 -${vel} 0.0 sum no units box
 fix             topfix top setforce 0 0 0
 fix             botfix bot setforce 0 0 0
-<<<<<<< HEAD
-=======
 fix             integration_fix all smd/integrate_tlsph 1.5e3 -1 update
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
 
-# define variables for outputting stress/strain curve. obtain stress as average of top and
-# bottom forces and divide by the initial cross section area (20)
-variable        stress equal 0.5*(f_botfix[2]-f_topfix[2])/20 
-variable        strain equal (2.0*${vel}*time/20) # strain: relative enlongation
-fix             integration_fix all  smd/integrate_tlsph update xsph
 fix             stress_curve all print 10 "${strain} ${stress}" file stress_strain.dat screen no
-fix             dtfix all smd/adjust_dt 5 0.1
 
-<<<<<<< HEAD
-# run for 1000 timesteps and print information every 100 timesteps
-thermo 100 
-thermo_style    custom step time dt v_strain v_stress
-run             10000
-=======
 thermo 100
 thermo_style    custom step dt f_dtfix[1] v_strain
 
 run             1000
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
 
 
