@@ -25,7 +25,7 @@
 #include "math.h"
 #include "stdlib.h"
 #include "string.h"
-#include "fix_smd_tlsph_dt_reset.h"
+#include "fix_smd_adjust_dt.h"
 #include "atom.h"
 #include "update.h"
 #include "integrate.h"
@@ -62,25 +62,15 @@ FixSMDTlsphDtReset::FixSMDTlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 	extscalar = 0;
 	extvector = 0;
 
-	nevery = force->inumeric(FLERR, arg[3]);
+	nevery = atoi(arg[3]);
 	if (nevery <= 0)
-		error->all(FLERR, "Illegal fix smd/adjust_dt command. nevery must be positive and > 0.");
+		error->all(FLERR, "Illegal fix smd/adjust_dt command");
 
-	safety_factor = force->numeric(FLERR, arg[4]);
-	if (safety_factor > 0.9)
-		error->all(FLERR, "Illegal fix smd/adjust_dt command. pre-factor must be <= 0.9 (0.1 is a safe choice).");
+	safety_factor = atof(arg[4]);
 
 	// initializations
 	t_elapsed = t_laststep = 0.0;
 	laststep = update->ntimestep;
-
-	if (comm->me == 0) {
-		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
-		printf("fix smd/integrate_ulsph is active for group: %s \n", arg[1]);
-		printf("... will update the stable time increment every %d timesteps\n", nevery);
-		printf("... pre-factor for CFL-criterion is %f\n", safety_factor);
-		printf(">>========>>========>>========>>========>>========>>========>>========>>========\n\n");
-	}
 }
 
 /* ---------------------------------------------------------------------- */
