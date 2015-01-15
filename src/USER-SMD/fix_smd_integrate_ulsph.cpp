@@ -53,26 +53,26 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
 
 	if ((atom->e_flag != 1) || (atom->rho_flag != 1))
-		error->all(FLERR, "fix sph_fluid command requires atom_style with both energy and density");
+		error->all(FLERR, "fix smd/integrate_ulsph command requires atom_style with both energy and density");
 
-	if (narg < 4)
-		error->all(FLERR, "Illegal number of arguments for fix sph_fluid command");
-
-	vlimit = force->numeric(FLERR, arg[3]);
-	if (vlimit > 0.0) {
-		if (comm->me == 0) {
-			error->message(FLERR, "*** fix sph/fluid will cap velocities ***");
-		}
-	}
+	if (narg < 3)
+		error->all(FLERR, "Illegal number of arguments for fix smd/integrate_ulsph command");
 
 	adjust_radius_flag = false;
 	xsphFlag = false;
-	int iarg = 4;
+	vlimit = -1.0;
+	int iarg = 3;
+
+	if (comm->me == 0) {
+		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
+		printf("fix smd/integrate_ulsph is active for group: %s \n", arg[1]);
+	}
+
 	while (true) {
 		if (strcmp(arg[iarg], "xsph") == 0) {
 			xsphFlag = true;
 			if (comm->me == 0) {
-				error->message(FLERR, "*** fix sph_fluid will use XSPH time integration ***");
+				printf("... will use XSPH time integration\n");
 			}
 		} else if (strcmp(arg[iarg], "adjust_radius") == 0) {
 			adjust_radius_flag = true;
@@ -84,9 +84,23 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 
 			adjust_radius_factor = force->numeric(FLERR, arg[iarg]);
 			if (comm->me == 0) {
-				printf("adjust_radius factor is %f\n", adjust_radius_factor);
-				error->message(FLERR, "*** fix sph_fluid will adjust smoothing length dynamically ***");
+				printf("... will adjust smoothing length dynamically with factor %g\n",
+						adjust_radius_factor);
 			}
+		} else if (strcmp(arg[iarg], "limit_velocity") == 0) {
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected number following limit_velocity");
+			}
+
+			vlimit = force->numeric(FLERR, arg[iarg]);
+			if (comm->me == 0) {
+				printf("... will limit velocities to <= %g\n", vlimit);
+			}
+		} else {
+			char msg[128];
+			sprintf(msg, "Illegal keyword for smd/integrate_ulsph: %s\n", arg[iarg]);
+			error->all(FLERR, msg);
 		}
 
 		iarg++;
@@ -95,6 +109,10 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 			break;
 		}
 
+	}
+
+	if (comm->me == 0) {
+		printf(">>========>>========>>========>>========>>========>>========>>========>>========\n\n");
 	}
 
 	time_integrate = 1;
@@ -144,7 +162,7 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 
 	if (xsphFlag) {
 		if (smoothVel == NULL) {
-			error->one(FLERR, "fix sph_fluid failed to access smoothVel array");
+			error->one(FLERR, "fix smd/integrate_ulsph failed to access smoothVel array");
 		}
 	}
 
@@ -236,7 +254,7 @@ void FixSMDIntegrateUlsph::final_integrate() {
 			rho[i] += dtf * drho[i];
 
 			if (adjust_radius_flag) {
-				radius[i] = adjust_radius_factor * pow(rmass[i] / rho[i], 1./domain->dimension); // Monaghan approach for setting the radius
+				radius[i] = adjust_radius_factor * pow(rmass[i] / rho[i], 1. / domain->dimension); // Monaghan approach for setting the radius
 			}
 		}
 	}

@@ -49,7 +49,6 @@ class FixSMDIntegrateUlsph : public Fix {
   class NeighList *list;
  protected:
   double dtv,dtf, vlimit, vlimitsq;;
-  double *step_respa;
   int mass_require;
   bool xsphFlag;
   bool adjust_radius_flag;

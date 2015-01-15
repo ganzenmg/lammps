@@ -9,7 +9,6 @@
  *
  * ----------------------------------------------------------------------- */
 
-
 /* ----------------------------------------------------------------------
  LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
  http://lammps.sandia.gov, Sandia National Laboratories
@@ -50,35 +49,77 @@ using namespace std;
 
 FixSMDIntegrateTlsph::FixSMDIntegrateTlsph(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
-	if (narg < 4) {
+	if (narg < 3) {
 		printf("narg=%d\n", narg);
-		error->all(FLERR, "Illegal fix tlsph/integrate command");
+		error->all(FLERR, "Illegal fix smd/integrate_tlsph command");
 	}
 
-	vlimit = atof(arg[3]);
-	if (vlimit > 0.0) {
-		if (comm->me == 0) {
-			error->message(FLERR, "*** fix tlsph/integrate will cap velocities ***");
-		}
-	}
-
+	adjust_radius_flag = false;
+	reinitReferenceConfigurationFlag = false;
 	updateReferenceConfigurationFlag = false;
 	xsphFlag = false;
+	vlimit = -1.0;
+	int iarg = 3;
 
-	for (int iarg = 4; iarg < narg; iarg++) {
-		if (strcmp(arg[iarg], "update") == 0) {
-			updateReferenceConfigurationFlag = true;
-			if (comm->me == 0) {
-				error->message(FLERR, "*** fix tlsph/integrate will update the reference configuration ***");
-			}
+	if (comm->me == 0) {
+		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
+		printf("fix smd/integrate_tlsph is active for group: %s \n", arg[1]);
+	}
+
+	while (true) {
+
+		if (iarg >= narg) {
+			break;
 		}
 
 		if (strcmp(arg[iarg], "xsph") == 0) {
 			xsphFlag = true;
 			if (comm->me == 0) {
-				error->message(FLERR, "*** fix tlsph/integrate will use XSPH time integration ***");
+				printf("... will use XSPH time integration\n");
 			}
+		} else if (strcmp(arg[iarg], "update") == 0) {
+			updateReferenceConfigurationFlag = true;
+			if (comm->me == 0) {
+				printf("... will update the reference configuration\n");
+			}
+		} else if (strcmp(arg[iarg], "reinit") == 0) {
+			reinitReferenceConfigurationFlag = true;
+			if (comm->me == 0) {
+				printf("... will reinitialize reference configuration with current configuration\n");
+			}
+		} else if (strcmp(arg[iarg], "adjust_radius") == 0) {
+			adjust_radius_flag = true;
+
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected number following adjust_radius");
+			}
+
+			adjust_radius_factor = force->numeric(FLERR, arg[iarg]);
+			if (comm->me == 0) {
+				printf("... will adjust smoothing length dynamically with factor %g\n", adjust_radius_factor);
+			}
+		} else if (strcmp(arg[iarg], "limit_velocity") == 0) {
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected number following limit_velocity");
+			}
+
+			vlimit = force->numeric(FLERR, arg[iarg]);
+			if (comm->me == 0) {
+				printf("... will limit velocities to <= %g\n", vlimit);
+			}
+		} else {
+			char msg[128];
+			sprintf(msg, "Illegal keyword for smd/integrate_tlsph: %s\n", arg[iarg]);
+			error->all(FLERR, msg);
 		}
+
+		iarg++;
+	}
+
+	if (comm->me == 0) {
+		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
 	}
 
 	time_integrate = 1;
@@ -110,21 +151,22 @@ void FixSMDIntegrateTlsph::init() {
 	/*
 	 * need this to initialize x0 coordinates if not properly set in data file
 	 */
+	if (reinitReferenceConfigurationFlag == true) {
+		double **x = atom->x;
+		double **x0 = atom->x0;
+		int *mask = atom->mask;
+		int nlocal = atom->nlocal;
 
-	double **x = atom->x;
-	double **x0 = atom->x0;
-	int *mask = atom->mask;
-	int nlocal = atom->nlocal;
+		for (int i = 0; i < nlocal; i++) {
 
-	for (int i = 0; i < nlocal; i++) {
+			if (mask[i] & groupbit) {
 
-		if (mask[i] & groupbit) {
+				// re-set x0 coordinates
+				x0[i][0] = x[i][0];
+				x0[i][1] = x[i][1];
+				x0[i][2] = x[i][2];
 
-			// re-set x0 coordinates
-//			x0[i][0] = x[i][0];
-//			x0[i][1] = x[i][1];
-//			x0[i][2] = x[i][2];
-
+			}
 		}
 	}
 }
@@ -157,7 +199,7 @@ void FixSMDIntegrateTlsph::initial_integrate(int vflag) {
 		int *updateFlag_ptr = (int *) force->pair->extract("smd/tlsph/updateFlag_ptr", itmp);
 		if (updateFlag_ptr == NULL) {
 			error->one(FLERR,
-					"fix tlsph/integrate failed to access updateFlag pointer. Check if a pair style exist which calculates this quantity.");
+					"fix smd/integrate_tlsph failed to access updateFlag pointer. Check if a pair style exist which calculates this quantity.");
 		}
 
 		// sum all update flag across processors
@@ -180,7 +222,7 @@ void FixSMDIntegrateTlsph::initial_integrate(int vflag) {
 	if (xsphFlag) {
 		if (smoothVel == NULL) {
 			error->one(FLERR,
-					"fix tlsph/integrate failed to access smoothVel array. Check if a pair style exist which calculates this quantity.");
+					"fix smd/integrate_tlsph failed to access smoothVel array. Check if a pair style exist which calculates this quantity.");
 		}
 	}
 
@@ -342,7 +384,7 @@ void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 			x0[i][2] = x[i][2];
 
 			// compute current total deformation gradient
-			Ftotal = F0 * Fincr[i]; // this is the total deformation gradient: reference deformation times incremental deformation
+			Ftotal = F0 * Fincr[i];	// this is the total deformation gradient: reference deformation times incremental deformation
 
 			// store the current deformation gradient the reference deformation gradient
 			defgrad0[i][0] = Ftotal(0, 0);
@@ -359,7 +401,9 @@ void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 			J = Fincr[i].determinant();
 			vfrac[i] *= J;
 
-			//radius[i] *= sqrt(J);
+			if (adjust_radius_flag) {
+				radius[i] = adjust_radius_factor * pow(vfrac[i], 1. / domain->dimension); // Monaghan approach for setting the radius
+			}
 
 			if (numNeighsRefConfig[i] < 25) {
 				radius[i] *= 1.1;
