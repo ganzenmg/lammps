@@ -330,6 +330,7 @@ void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 	double **defgrad0 = atom->tlsph_fold;
 	double *radius = atom->radius;
 	double *contact_radius = atom->contact_radius;
+	double *plastic_strain = atom->eff_plastic_strain;
 	double **x = atom->x;
 	double **x0 = atom->x0;
 	double *vfrac = atom->vfrac;
@@ -366,53 +367,58 @@ void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 		 */
 		if (mask[i] & groupbit) {
 
-			// need determinant of old deformation gradient associated with reference configuration
-			F0(0, 0) = defgrad0[i][0];
-			F0(0, 1) = defgrad0[i][1];
-			F0(0, 2) = defgrad0[i][2];
-			F0(1, 0) = defgrad0[i][3];
-			F0(1, 1) = defgrad0[i][4];
-			F0(1, 2) = defgrad0[i][5];
-			F0(2, 0) = defgrad0[i][6];
-			F0(2, 1) = defgrad0[i][7];
-			F0(2, 2) = defgrad0[i][8];
-			J0 = F0.determinant();
+			if (plastic_strain[i] > 0.01) {
 
-			// re-set x0 coordinates
-			x0[i][0] = x[i][0];
-			x0[i][1] = x[i][1];
-			x0[i][2] = x[i][2];
+				// need determinant of old deformation gradient associated with reference configuration
+				F0(0, 0) = defgrad0[i][0];
+				F0(0, 1) = defgrad0[i][1];
+				F0(0, 2) = defgrad0[i][2];
+				F0(1, 0) = defgrad0[i][3];
+				F0(1, 1) = defgrad0[i][4];
+				F0(1, 2) = defgrad0[i][5];
+				F0(2, 0) = defgrad0[i][6];
+				F0(2, 1) = defgrad0[i][7];
+				F0(2, 2) = defgrad0[i][8];
+				J0 = F0.determinant();
 
-			// compute current total deformation gradient
-			Ftotal = F0 * Fincr[i];	// this is the total deformation gradient: reference deformation times incremental deformation
+				// re-set x0 coordinates
+				x0[i][0] = x[i][0];
+				x0[i][1] = x[i][1];
+				x0[i][2] = x[i][2];
 
-			// store the current deformation gradient the reference deformation gradient
-			defgrad0[i][0] = Ftotal(0, 0);
-			defgrad0[i][1] = Ftotal(0, 1);
-			defgrad0[i][2] = Ftotal(0, 2);
-			defgrad0[i][3] = Ftotal(1, 0);
-			defgrad0[i][4] = Ftotal(1, 1);
-			defgrad0[i][5] = Ftotal(1, 2);
-			defgrad0[i][6] = Ftotal(2, 0);
-			defgrad0[i][7] = Ftotal(2, 1);
-			defgrad0[i][8] = Ftotal(2, 2);
+				// compute current total deformation gradient
+				Ftotal = F0 * Fincr[i];	// this is the total deformation gradient: reference deformation times incremental deformation
 
-			// adjust particle volumes
-			J = Fincr[i].determinant();
-			vfrac[i] *= J;
+				// store the current deformation gradient the reference deformation gradient
+				defgrad0[i][0] = Ftotal(0, 0);
+				defgrad0[i][1] = Ftotal(0, 1);
+				defgrad0[i][2] = Ftotal(0, 2);
+				defgrad0[i][3] = Ftotal(1, 0);
+				defgrad0[i][4] = Ftotal(1, 1);
+				defgrad0[i][5] = Ftotal(1, 2);
+				defgrad0[i][6] = Ftotal(2, 0);
+				defgrad0[i][7] = Ftotal(2, 1);
+				defgrad0[i][8] = Ftotal(2, 2);
 
-			if (adjust_radius_flag) {
-				radius[i] = adjust_radius_factor * pow(vfrac[i], 1. / domain->dimension); // Monaghan approach for setting the radius
-			}
+				// adjust particle volumes
+				J = Fincr[i].determinant();
+				vfrac[i] *= J;
 
-			if (numNeighsRefConfig[i] < 25) {
-				radius[i] *= 1.1;
-			} else if (numNeighsRefConfig[i] > 80) {
-				radius[i] *= 0.9;
-			}
+				if (adjust_radius_flag) {
+					radius[i] = adjust_radius_factor * pow(vfrac[i], 1. / domain->dimension); // Monaghan approach for setting the radius
+				}
 
-			// do not allow radius to grow excessively
-			radius[i] = MIN(radius[i], 20.0 * contact_radius[i]);
+				if (numNeighsRefConfig[i] < 25) {
+					radius[i] *= 1.1;
+				} else if (numNeighsRefConfig[i] > 80) {
+					radius[i] *= 0.9;
+				}
+
+				// do not allow radius to grow excessively
+				//radius[i] = MIN(radius[i], 20.0 * contact_radius[i]);
+
+
+			} // end check plastic strain
 
 		}
 

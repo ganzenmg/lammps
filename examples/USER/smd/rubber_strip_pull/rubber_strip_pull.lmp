@@ -11,7 +11,7 @@ variable        mass_one equal ${vol_one}*${rho} # mass of one particle
 variable        skin equal 0.1*${l0} # Verlet list range
 variable        vel equal 0.001 # pull velocity
 
-units		si # si means: a consistent system of units is used. Here: mm / GPa / ms
+units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
 dimension       2 # this is a 2d plane-strain simulation
 boundary        sm sm p # simulation box boundaries
 atom_style      smd 
@@ -37,70 +37,33 @@ group           bot region bot # bottom row of particles
 
 pair_style      tlsph # activate Total-Lagrangian SPH
 #                           rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.06  0.0  0 1.0 &
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.06  0.0  10 1.0 &
                 *LINEAR_STRENGTH &
 		*EOS_LINEAR &
                 *END
 
-<<<<<<< HEAD
 compute         S all smd/tlsph_stress # Cauchy stress tensor
 compute         nn all smd/tlsph_num_neighs # number of neighbors for each particle
-=======
-compute         E all smd/tlsph_strain
-compute         S all smd/tlsph_stress
-compute         nn all smd/tlsph_num_neighs
-compute         contact_radius all smd/contact_radius
-compute         eint all smd/internal_energy
-compute         P all smd/plastic_strain
-compute         err all smd/hourglass_error
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
 
 dump            dump_id all custom 100 dump.LAMMPS id type x y z &
-                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
-<<<<<<< HEAD
-                vx vy vz c_nn
-=======
-                vx vy vz c_eint proc &
-                c_nn mol mass c_P c_err radius
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] c_nn
 dump_modify     dump_id first yes
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
 
-<<<<<<< HEAD
-# define velocity boundary conditions
-velocity        top set 0.0  ${vel} 0.0 sum no units box
-=======
-fix             dtfix all smd/adjust_dt 5 0.1 # adjust time increment very 5 steps with safety factor 0.1
-variable        stress equal (f_botfix[2]-f_topfix[2])/2.0
-variable        strain equal (2.0*${vel}*f_dtfix[1])
-
-velocity        top set 0.0  ${vel} 0.0 sum no units box # initialize velocity for top row of particles
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
+# apply velocity boundary condition to top and bottom rows of particles
+velocity        top set 0.0  ${vel} 0.0 sum no units box 
 velocity        bot set 0.0 -${vel} 0.0 sum no units box
 fix             topfix top setforce 0 0 0
 fix             botfix bot setforce 0 0 0
-<<<<<<< HEAD
-=======
-fix             integration_fix all smd/integrate_tlsph 1.5e3 -1 update
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
 
 # define variables for outputting stress/strain curve. obtain stress as average of top and
-# bottom forces and divide by the initial cross section area (20)
+# bottom forces and divide by the initial cross section area (20 mm * 1 mm)
 variable        stress equal 0.5*(f_botfix[2]-f_topfix[2])/20 
-variable        strain equal (2.0*${vel}*time/20) # strain: relative enlongation
-fix             integration_fix all  smd/integrate_tlsph update xsph
+variable        strain equal (2.0*${vel}*time/20) # strain: relative elongation
+fix             integration_fix all smd/integrate_tlsph
 fix             stress_curve all print 10 "${strain} ${stress}" file stress_strain.dat screen no
 fix             dtfix all smd/adjust_dt 5 0.1
 
-<<<<<<< HEAD
-# run for 1000 timesteps and print information every 100 timesteps
-thermo 100 
-thermo_style    custom step time dt v_strain v_stress
-run             10000
-=======
 thermo 100
-thermo_style    custom step dt f_dtfix[1] v_strain
+thermo_style    custom step dt time v_strain
 
-run             1000
->>>>>>> branch 'master' of https://github.com/ganzenmg/lammps.git
-
-
+run             10000

@@ -1,99 +1,60 @@
-#processors      4 1 1
-variable        rho equal 2700.0e-9
-variable        h equal 0.7
-variable        E equal 10 # Young's modulus
+# TLSPH example: elongate a 2d strip of elastic material py pulling its ends apart
+
+# define initial parameters
+variable        l0 equal 1.0 # lattice spacing for creating particles
+variable        rho equal 1 # initial mass density
+variable        E equal 1.0 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
-variable        sigy equal 0.1
-variable        vel equal 10.0
-variable        hg equal 0.0
-# ----
-variable        c0 equal sqrt(${E}/${rho})
-variable        dt equal 0.125*${h}/${c0}
-print           "sound speed is ${c0}, CFL timestep is ${dt}"
-variable        skin equal 1.0*${h} # Verlet list range
-variable        contact_stiffness equal 1*${E}
+variable        sigma_yield equal 0.1 # plastic yield stress for bar 2
+variable        skin equal 0.1*${l0} # Verlet list range
+variable        vel equal 100.0 # pull velocity
 
-units		si
-dimension       3
-boundary        s s s
-atom_style      tlsph
+units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
+dimension       3 # this is a 2d plane-strain simulation
+boundary        sm sm sm # simulation box boundaries
+atom_style      smd
 neighbor        ${skin} bin
-neigh_modify    every 10 delay 0 check yes # only build neighbor list if particle has moved half the skin distance
-comm_modify     vel yes
-newton          off
+comm_style      tiled
+neigh_modify    every 10 delay 0 check yes # re-build neighbor list every 10 steps
+newton          off # required for SMD simulations!
+comm_modify     vel yes # required for SMD simulations!
 
+# read particle data
 read_data       cbar_adjusted.data
-variable        xmin equal bound(all,xmin)
-variable        xminplus equal ${xmin}+5.0
-variable        xmax equal bound(all,xmax)
-variable        xmaxminus equal ${xmax}-5.0
-region          BX block ${xminplus} ${xmaxminus} EDGE EDGE EDGE EDGE units box side out
-group           BX region BX
+group           bar1 type 1
+group           bar2 type 2
 
-variable        ymin equal bound(all,ymin)
-variable        yminplus equal ${ymin}+5.0
-variable        ymax equal bound(all,ymax)
-variable        ymaxminus equal ${ymax}-5.0
-region          BY block EDGE EDGE ${yminplus} ${ymaxminus} EDGE EDGE units box side out
-group           BY region BY
+pair_style      hybrid/overlay tlsph smd/hertz # activate Total-Lagrangian SPH
+#                                 rh0    E    nu    Q1    Q2   hg    Cp
+pair_coeff      1 1 tlsph *COMMON ${rho} ${E} ${nu} 0.06  0.0  00 1.0 &
+                *LINEAR_STRENGTH &
+		*EOS_LINEAR &
+                *END
+pair_coeff      2 2 tlsph *COMMON ${rho} ${E} ${nu} 1.06  0.0  00 1.0 &
+                *LINEAR_PLASTICITY ${sigma_yield} &
+		*EOS_LINEAR &
+                *END
+pair_coeff      1 2 smd/hertz ${E}
 
-region          top block EDGE EDGE EDGE EDGE 5 EDGE units box
-region          bot block EDGE EDGE EDGE EDGE EDGE 4.99 units box
-group           top region top
-group           bot region bot
+compute         S all smd/tlsph_stress # Cauchy stress tensor
+compute         nn all smd/tlsph_num_neighs # number of neighbors for each particle
+compute         cr all smd/contact_radius
+compute         p all smd/plastic_strain
 
-velocity        top set 0.0 0.0 -${vel} sum no units box
-velocity        bot set 0.0 0.0 ${vel} sum no units box
-
-pair_style      hybrid/overlay tlsph tlsph/ipc_hertz
-#                         strength EOS                    c0    E     nu   hg    visc sigy     max.strain    
-pair_coeff      1 1 tlsph linearplastic            linear ${c0} ${E} ${nu} ${hg} 0.10  ${sigy} 1.00
-pair_coeff      2 2 tlsph linearplastic            linear ${c0} ${E} ${nu} ${hg} 0.10  ${sigy} 1.00
-pair_coeff      1 2 tlsph/ipc_hertz ${contact_stiffness}
-
-compute         F all tlsph/defgrad
-compute         E all tlsph/strain
-compute         P all tlsph/eff_plastic_strain
-compute         S all tlsph/stress
-compute         d all tlsph/damage
-compute         nn all tlsph/num_neighs
-compute         contact_radius all sph/contact_radius
-compute         eint all sph/e
-compute         alleint all reduce sum c_eint
-#compute         sumforce BCL reduce sum fx
-variable        etot equal ke+c_alleint+pe
-
-
-
-balance         1.0 shift xy 20 1.0
-
-# time integration
-timestep        ${dt}
-variable        maxdist equal 0.0025*${h}
-fix             dtfix all dt/reset 5 NULL ${dt} ${maxdist} units box
-fix             force_fix1 BY setforce 0 0 0
-fix             force_fix2 BX setforce 0 0 0
-fix             integration_fix all tlsph/integrate 1.5e3 xsph
-
-
-variable        nrun equal round((10.0/${vel})/${dt})
-print "running for ${nrun} steps"
-
-variable        dumpFreq equal round(${nrun}/1000)
-dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
-                c_F[1]  c_F[2] c_F[3] c_F[4] c_F[5] c_F[6] c_F[7] c_F[8] c_F[9] c_F[10] &
-                c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
-                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
-                fx fy fz vx vy vz c_P c_eint &
-                c_contact_radius c_nn mol c_d mass
-
+dump            dump_id all custom 100 dump.LAMMPS id type x y z &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] c_nn c_cr proc c_p
 dump_modify     dump_id first yes
 
-thermo          100
-thermo_style    custom step ke pe v_etot c_alleint dt #f_force_fix1[1]
-#thermo_modify   lost ignore
+# apply velocity boundary condition to top and bottom rows of particles
+velocity        bar1 set 0.0 0.0  ${vel} sum no units box 
+velocity        bar2 set 0.0 0.0 -${vel} sum no units box 
 
-run             ${nrun}
-#
-#
-#
+fix             integration_fix all smd/integrate_tlsph update
+fix             dtfix all smd/adjust_dt 5 0.1
+
+thermo 100
+thermo_style    custom step dt time ke pe
+
+balance         1.0 rcb
+
+run             5000

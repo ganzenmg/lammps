@@ -271,8 +271,8 @@ void PairTlsph::PreCompute() {
 //
 //				}
 
-				Ftmp = du * g.transpose(); // only use displacement here, turns out to be numerically more stable
-						//Ftmp = dx * g.transpose();
+				//Ftmp = du * g.transpose(); // only use displacement here, turns out to be numerically more stable
+				Ftmp = dx * g.transpose();
 				Fdottmp = dv * g.transpose();
 
 				K[i] += volj * Ktmp;
@@ -320,7 +320,7 @@ void PairTlsph::PreCompute() {
 				}
 
 				Fincr[i] *= K[i];
-				Fincr[i] += eye; // need to add identity matrix to comple the deformation gradient
+				//Fincr[i] += eye; // need to add identity matrix to complete the deformation gradient if displacement is used for Ftmp
 				Fdot[i] *= K[i];
 
 				/*

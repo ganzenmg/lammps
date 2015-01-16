@@ -126,6 +126,9 @@ void PairHertz::compute(int eflag, int vflag) {
 			j &= NEIGHMASK;
 
 			jtype = type[j];
+
+			if (itype == type[j]) continue;
+
 			delx = xtmp - x[j][0];
 			dely = ytmp - x[j][1];
 			delz = ztmp - x[j][2];
