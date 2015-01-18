@@ -120,7 +120,7 @@ void ComputeSMDTLSPHstrain::compute_peratom() {
 			Ftotal = F0 * Fincr[i]; // this is the total deformation gradient: reference deformation times incremental deformation
 
 
-			E = 0.5 * (Ftotal * Ftotal.transpose() - eye); // Green-Lagrange strain
+			E = 0.5 * (Ftotal.transpose() * Ftotal - eye); // Green-Lagrange strain
 			strainVector[i][0] = E(0, 0);
 			strainVector[i][1] = E(1, 1);
 			strainVector[i][2] = E(2, 2);

@@ -90,14 +90,8 @@ FixSMDIntegrateTlsph::FixSMDIntegrateTlsph(LAMMPS *lmp, int narg, char **arg) :
 		} else if (strcmp(arg[iarg], "adjust_radius") == 0) {
 			adjust_radius_flag = true;
 
-			iarg++;
-			if (iarg == narg) {
-				error->all(FLERR, "expected number following adjust_radius");
-			}
-
-			adjust_radius_factor = force->numeric(FLERR, arg[iarg]);
 			if (comm->me == 0) {
-				printf("... will adjust smoothing length dynamically with factor %g\n", adjust_radius_factor);
+				printf("... will evolve smoothing length dynamically based on deformation\n");
 			}
 		} else if (strcmp(arg[iarg], "limit_velocity") == 0) {
 			iarg++;
@@ -217,10 +211,10 @@ void FixSMDIntegrateTlsph::initial_integrate(int vflag) {
 		}
 	}
 
-	Vector3d *smoothVel = (Vector3d *) force->pair->extract("smd/tlsph/smoothVel_ptr", itmp);
+	Vector3d *smoothVelDifference = (Vector3d *) force->pair->extract("smd/tlsph/smoothVel_ptr", itmp);
 
 	if (xsphFlag) {
-		if (smoothVel == NULL) {
+		if (smoothVelDifference == NULL) {
 			error->one(FLERR,
 					"fix smd/integrate_tlsph failed to access smoothVel array. Check if a pair style exist which calculates this quantity.");
 		}
@@ -229,6 +223,8 @@ void FixSMDIntegrateTlsph::initial_integrate(int vflag) {
 	for (int i = 0; i < nlocal; i++) {
 		if (mask[i] & groupbit) {
 			dtfm = dtf / rmass[i];
+
+			// 1st part of Velocity_Verlet: push velocties 1/2 time increment ahead
 			v[i][0] += dtfm * f[i][0];
 			v[i][1] += dtfm * f[i][1];
 			v[i][2] += dtfm * f[i][2];
@@ -246,10 +242,9 @@ void FixSMDIntegrateTlsph::initial_integrate(int vflag) {
 			if (xsphFlag) {
 
 				// construct XSPH velocity
-
-				vxsph_x = v[i][0] + 0.5 * smoothVel[i](0);
-				vxsph_y = v[i][1] + 0.5 * smoothVel[i](1);
-				vxsph_z = v[i][2] + 0.5 * smoothVel[i](2);
+				vxsph_x = v[i][0] + 0.5 * smoothVelDifference[i](0);
+				vxsph_y = v[i][1] + 0.5 * smoothVelDifference[i](1);
+				vxsph_z = v[i][2] + 0.5 * smoothVelDifference[i](2);
 
 				vest[i][0] = v[i][0] + dtfm * f[i][0];
 				vest[i][1] = v[i][1] + dtfm * f[i][1];
@@ -265,7 +260,7 @@ void FixSMDIntegrateTlsph::initial_integrate(int vflag) {
 				vest[i][1] = v[i][1] + dtfm * f[i][1];
 				vest[i][2] = v[i][2] + dtfm * f[i][2];
 
-				x[i][0] += dtv * v[i][0];
+				x[i][0] += dtv * v[i][0]; // 2nd part of Velocity-Verlet: push positions one full time increment ahead
 				x[i][1] += dtv * v[i][1];
 				x[i][2] += dtv * v[i][2];
 			}
@@ -295,8 +290,9 @@ void FixSMDIntegrateTlsph::final_integrate() {
 	for (i = 0; i < nlocal; i++) {
 		if (mask[i] & groupbit) {
 			dtfm = dtf / rmass[i];
-			v[i][0] += dtfm * f[i][0];
-			v[i][1] += dtfm * f[i][1];
+
+			v[i][0] += dtfm * f[i][0]; // 3rd part of Velocity-Verlet: push velocities another half time increment ahead
+			v[i][1] += dtfm * f[i][1]; // both positions and velocities are now defined at full time-steps.
 			v[i][2] += dtfm * f[i][2];
 
 			// limit velocity
@@ -329,19 +325,21 @@ void FixSMDIntegrateTlsph::reset_dt() {
 void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 	double **defgrad0 = atom->tlsph_fold;
 	double *radius = atom->radius;
-	double *contact_radius = atom->contact_radius;
-	double *plastic_strain = atom->eff_plastic_strain;
+	//double *contact_radius = atom->contact_radius;
 	double **x = atom->x;
 	double **x0 = atom->x0;
 	double *vfrac = atom->vfrac;
 	int nlocal = atom->nlocal;
 	int i, itmp;
-	double J, J0;
+	double J;
 	Matrix3d Ftotal;
+	Matrix3d C, eye;
 	int *mask = atom->mask;
 	if (igroup == atom->firstgroup) {
 		nlocal = atom->nfirst;
 	}
+
+	eye.setIdentity();
 
 	Matrix3d F0;
 	// access current deformation gradient
@@ -362,12 +360,7 @@ void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 
 	for (i = 0; i < nlocal; i++) {
 
-		/*
-		 * only update coordinates if plastic strain exceeds a certain threshold
-		 */
 		if (mask[i] & groupbit) {
-
-			if (plastic_strain[i] > 0.01) {
 
 				// need determinant of old deformation gradient associated with reference configuration
 				F0(0, 0) = defgrad0[i][0];
@@ -379,7 +372,6 @@ void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 				F0(2, 0) = defgrad0[i][6];
 				F0(2, 1) = defgrad0[i][7];
 				F0(2, 2) = defgrad0[i][8];
-				J0 = F0.determinant();
 
 				// re-set x0 coordinates
 				x0[i][0] = x[i][0];
@@ -400,25 +392,23 @@ void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 				defgrad0[i][7] = Ftotal(2, 1);
 				defgrad0[i][8] = Ftotal(2, 2);
 
-				// adjust particle volumes
+				/*
+				 * Adjust particle volume as the reference configuration is changed.
+				 * We safeguard against excessive deformations by limiting the adjustment range
+				 * to the intervale J \in [0.9..1.1]
+				 */
 				J = Fincr[i].determinant();
+				J = MAX(J, 0.9);
+				J = MIN(J, 1.1);
 				vfrac[i] *= J;
 
 				if (adjust_radius_flag) {
-					radius[i] = adjust_radius_factor * pow(vfrac[i], 1. / domain->dimension); // Monaghan approach for setting the radius
+					radius[i] *= pow(J, 1. / domain->dimension);
 				}
 
-				if (numNeighsRefConfig[i] < 25) {
-					radius[i] *= 1.1;
-				} else if (numNeighsRefConfig[i] > 80) {
-					radius[i] *= 0.9;
-				}
-
-				// do not allow radius to grow excessively
-				//radius[i] = MIN(radius[i], 20.0 * contact_radius[i]);
-
-
-			} // end check plastic strain
+				//do not allow radius to grow excessively
+				//radius[i] = MIN(radius[i], 10.0 * contact_radius[i]); // this only makes sense for well defined contact radii with compact regular initial node spacings
+				//radius[i] = MAX(radius[i], 2.0 * contact_radius[i]);
 
 		}
 

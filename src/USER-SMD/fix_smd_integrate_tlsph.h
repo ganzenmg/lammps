@@ -54,7 +54,6 @@ public:
 
 protected:
     double dtv, dtf, vlimit, vlimitsq;
-    double adjust_radius_factor;
     int mass_require;
     bool updateReferenceConfigurationFlag, xsphFlag, reinitReferenceConfigurationFlag, adjust_radius_flag;
     int nRefConfigUpdates;

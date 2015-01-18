@@ -48,18 +48,16 @@
 #include "math_special.h"
 #include <map>
 #include "fix_smd_integrate_tlsph.h"
-
-using namespace std;
-using namespace LAMMPS_NS;
-
-#define JAUMANN 0
-#define DETF_MIN 0.1 // maximum compression deformation allowed
-#define DETF_MAX 40.0 // maximum tension deformation allowdw
 #include <Eigen/SVD>
 #include <Eigen/Eigen>
 using namespace Eigen;
+using namespace std;
+using namespace LAMMPS_NS;
 using namespace MathSpecial;
 
+#define JAUMANN 0
+#define DETF_MIN 0.1 // maximum compression deformation allowed
+#define DETF_MAX 40.0 // maximum tension deformation allowed
 #define TLSPH_DEBUG 0
 #define PLASTIC_STRAIN_AVERAGE_WINDOW 100.0
 
@@ -80,7 +78,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 	Fdot = Fincr = K = PK1 = NULL;
 	d = R = FincrInv = W = D = NULL;
 	detF = NULL;
-	smoothVel = NULL;
+	smoothVelDifference = NULL;
 	shearFailureFlag = NULL;
 	numNeighsRefConfig = NULL;
 	shepardWeight = NULL;
@@ -118,7 +116,7 @@ PairTlsph::~PairTlsph() {
 		delete[] K;
 		delete[] detF;
 		delete[] PK1;
-		delete[] smoothVel;
+		delete[] smoothVelDifference;
 		delete[] d;
 		delete[] R;
 		delete[] FincrInv;
@@ -144,14 +142,14 @@ void PairTlsph::PreCompute() {
 	double *radius = atom->radius;
 	double **x0 = atom->x0;
 	double **x = atom->x;
-	double **v = atom->vest;
+	double **v = atom->vest; // extrapolated velocities corresponding to current positions
 	double **vint = atom->v; // Velocity-Verlet algorithm velocities
 	int *tag = atom->tag;
 	int *type = atom->type;
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
 	int nlocal = atom->nlocal;
-	int inum, jnum, ii, jj, i, j, iDim, itype;
+	int inum, jnum, ii, jj, i, j, itype;
 	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
 	Vector3d dx0, dx, dv, g;
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
@@ -168,16 +166,8 @@ void PairTlsph::PreCompute() {
 		shearFailureFlag[i] = false;
 		shepardWeight[i] = 0.0;
 		numNeighsRefConfig[i] = 0;
-		smoothVel[i].setZero();
+		smoothVelDifference[i].setZero();
 		hourglass_error[i] = 0.0;
-
-//		x0i << x0[i][0], x0[i][1], x0[i][2];
-//		xi << x[i][0], x[i][1], x[i][2];
-//		if ((xi - x0i).norm() > 1.0e-8) {
-//			printf("particle positions deviate in zeroth time step\n");
-//			error->one(FLERR, "d");
-//		}
-
 	}
 
 	// set up neighbor list variables
@@ -199,12 +189,10 @@ void PairTlsph::PreCompute() {
 		voli = vfrac[i];
 
 		// initialize Eigen data structures from LAMMPS data structures
-		for (iDim = 0; iDim < 3; iDim++) {
-			x0i(iDim) = x0[i][iDim];
-			xi(iDim) = x[i][iDim];
-			vi(iDim) = v[i][iDim];
-			vinti(iDim) = vint[i][iDim];
-		}
+		x0i << x0[i][0], x0[i][1], x0[i][2];
+		xi << x[i][0], x[i][1], x[i][2];
+		vi << v[i][0], v[i][1], v[i][2];
+		vinti << vint[i][0], vint[i][1], vint[i][2];
 
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
@@ -229,18 +217,11 @@ void PairTlsph::PreCompute() {
 			if (r0Sq < h * h) {
 
 				// initialize Eigen data structures from LAMMPS data structures
-				for (iDim = 0; iDim < 3; iDim++) {
-					xj(iDim) = x[j][iDim];
-					vj(iDim) = v[j][iDim];
-					vintj(iDim) = vint[j][iDim];
-				}
+				xj << x[j][0], x[j][1], x[j][2];
+				vj << v[j][0], v[j][1], v[j][2];
+				vintj << vint[j][0], vint[j][1], vint[j][2];
 
 				r0 = sqrt(r0Sq);
-
-//				if (r0 < 0.1) {
-//					printf("distance is %f\n", r0);
-//				}
-
 				volj = vfrac[j];
 
 				// distance vectors in current and reference configuration, velocity difference
@@ -249,29 +230,15 @@ void PairTlsph::PreCompute() {
 					domain->minimum_image(dx(0), dx(1), dx(2));
 				dv = vj - vi;
 				dvint = vintj - vinti;
-				du = xj - x0j - (xi - x0i);
 
 				// kernel function
-				spiky_kernel_and_derivative(h, r0, wf, wfd);
+				barbara_kernel_and_derivative(h, r0, wf, wfd);
 
 				// uncorrected kernel gradient
 				g = (wfd / r0) * dx0;
 
 				/* build matrices */
 				Ktmp = g * dx0.transpose();
-
-//				if (tag[i] == 9575) {
-//					cout << "displacement vector is " << dx << endl;
-//					cout << "current pos is " << xi << endl;
-//					cout << "pos0 is " << x0i << endl;
-//
-//					cout << "displacement of i is " << x0i - xi << endl;
-//					cout << "displacement of j is " << x0j - xj << endl << endl;
-//
-//
-//				}
-
-				//Ftmp = du * g.transpose(); // only use displacement here, turns out to be numerically more stable
 				Ftmp = dx * g.transpose();
 				Fdottmp = dv * g.transpose();
 
@@ -279,7 +246,7 @@ void PairTlsph::PreCompute() {
 				Fincr[i] += volj * Ftmp;
 				Fdot[i] += volj * Fdottmp;
 				shepardWeight[i] += volj * wf;
-				smoothVel[i] += volj * wf * dvint;
+				smoothVelDifference[i] += volj * wf * dvint;
 				numNeighsRefConfig[i]++;
 
 				if (j < nlocal) {
@@ -287,7 +254,7 @@ void PairTlsph::PreCompute() {
 					Fincr[j] += voli * Ftmp;
 					Fdot[j] += voli * Fdottmp;
 					shepardWeight[j] += voli * wf;
-					smoothVel[j] -= voli * wf * dvint;
+					smoothVelDifference[j] -= voli * wf * dvint;
 					numNeighsRefConfig[j]++;
 				}
 
@@ -304,7 +271,7 @@ void PairTlsph::PreCompute() {
 		itype = type[i];
 		if (setflag[itype][itype] == 1) { // we only do the subsequent calculation if pair style is defined for this particle
 
-			if ((numNeighsRefConfig[i] < domain->dimension) && (mol[i] > 0)) { // cannot possibly invert shape matrix
+			if ((numNeighsRefConfig[i] < domain->dimension + 2) && (mol[i] > 0)) { // cannot possibly invert shape matrix
 				printf("deleting particle [%d] because number of neighbors=%d is too small\n", tag[i], numNeighsRefConfig[i]);
 				mol[i] = -1;
 			}
@@ -312,49 +279,85 @@ void PairTlsph::PreCompute() {
 			if (mol[i] > 0) {
 
 				if (domain->dimension == 2) {
-					K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
+					K[i](0, 2) = 0.0;
+					K[i](1, 2) = 0.0;
+					K[i](2, 0) = 0.0;
+					K[i](2, 1) = 0.0;
+					K[i](2, 2) = 1.0;
+					K[i] = K[i].inverse().eval();
+					//K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
 					K[i](2, 2) = 1.0; // make inverse of K well defined even when it is rank-deficient (3d matrix, only 2d information)
 				} else {
-					//K[i] = K[i].inverse().eval();
-					K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
+					K[i] = K[i].inverse().eval();
+					//K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
 				}
 
-				Fincr[i] *= K[i];
-				//Fincr[i] += eye; // need to add identity matrix to complete the deformation gradient if displacement is used for Ftmp
+				//	K[i].setIdentity();
+
+				Fincr[i] *= K[i]; // use shape matrix to obtain first-order corrected SPH approximation
 				Fdot[i] *= K[i];
 
 				/*
 				 * we need to be able to recover from a potentially planar (2d) configuration of particles
 				 */
 				if (domain->dimension == 2) {
+					Fincr[i](0, 2) = 0.0;
+					Fincr[i](1, 2) = 0.0;
+					Fincr[i](2, 0) = 0.0;
+					Fincr[i](2, 1) = 0.0;
 					Fincr[i](2, 2) = 1.0;
+					Fdot[i](0, 2) = 0.0;
+					Fdot[i](1, 2) = 0.0;
+					Fdot[i](2, 0) = 0.0;
+					Fdot[i](2, 1) = 0.0;
+					Fdot[i](2, 2) = 0.0;
 				}
+				detF[i] = Fincr[i].determinant();
+				//FincrInv[i] = PairTlsph::pseudo_inverse_SVD(Fincr[i]);;
+				FincrInv[i] = Fincr[i].inverse();
+
+				/*
+				 * check that F * F^-1 is unit matrix
+				 */
+				Matrix3d Mdiff = Fincr[i] * FincrInv[i] - eye;
+				if (Mdiff.norm() > 1.0e-10) {
+					printf("Inversion of F is inaccurate\n");
+					cout << "Here is the difference matrix to unity:" << endl << Mdiff << endl;
+				}
+
+//				if (tag[i] == 101) {
+//					printf("J=%f, nn = %d\n", detF[i], numNeighsRefConfig[i]);
+//					cout << "Here is matrix F:" << endl << Fincr[i] << endl;
+//					cout << "Here is matrix F-1:" << endl << FincrInv[i] << endl;
+//					cout << "Here is matrix K-1:" << endl << K[i] << endl << endl;
+//				}
 
 				/*
 				 * make sure F stays within some limits
 				 */
 
-				if (Fincr[i].determinant() < DETF_MIN) {
+				if (detF[i] < DETF_MIN) {
 					printf("deleting particle [%d] because det(F)=%f is smaller than limit=%f\n", tag[i], Fincr[i].determinant(),
 					DETF_MIN);
 					printf("nn = %d\n", numNeighsRefConfig[i]);
 					cout << "Here is matrix F:" << endl << Fincr[i] << endl;
+					cout << "Here is matrix F-1:" << endl << FincrInv[i] << endl;
 					cout << "Here is matrix K-1:" << endl << K[i] << endl;
 					mol[i] = -1;
-				} else if (Fincr[i].determinant() > DETF_MAX) {
+					//error->one(FLERR, "");
+				} else if (detF[i] > DETF_MAX) {
 					printf("deleting particle [%d] because det(F)=%f is larger than limit=%f\n", tag[i], Fincr[i].determinant(),
 					DETF_MAX);
+					printf("nn = %d\n", numNeighsRefConfig[i]);
 					cout << "Here is matrix F:" << endl << Fincr[i] << endl;
+					cout << "Here is matrix F-1:" << endl << FincrInv[i] << endl;
+					cout << "Here is matrix K-1:" << endl << K[i] << endl;
 					mol[i] = -1;
+					//error->one(FLERR, "");
 				}
 
 				if (mol[i] > 0) {
-					detF[i] = Fincr[i].determinant();
-					FincrInv[i] = PairTlsph::pseudo_inverse_SVD(Fincr[i]);
-					//FincrInv[i] = Fincr[i].inverse();
-
 					// velocity gradient, see Pronto2d, eqn.(2.1.3)
-					// I think that the incremental defgrad should be used here as we describe the motion relative to the reference configuration
 					L = Fdot[i] * FincrInv[i];
 
 					// symmetric (D) and asymmetric (W) parts of L
@@ -379,19 +382,22 @@ void PairTlsph::PreCompute() {
 					}
 
 					// normalize average velocity field aroudn an integration point
-					smoothVel[i] /= shepardWeight[i];
+					smoothVelDifference[i] /= shepardWeight[i];
 
 				} // end if mol[i] > 0
 
 			} // end if mol[i] > 0
 
 			if (mol[i] < 0) {
+				d[i].setZero();
+				D[i].setZero();
 				Fdot[i].setZero();
 				Fincr[i].setIdentity();
-				smoothVel[i].setZero();
+				//smoothVel[i].setZero();
 				detF[i] = 1.0;
+				K[i].setIdentity();
 			}
-		}  // end if setflage[itype]
+		}  // end if setflag[itype]
 	} // end loop over i = 0 to nlocal
 }
 
@@ -400,9 +406,6 @@ void PairTlsph::PreCompute() {
 void PairTlsph::compute(int eflag, int vflag) {
 
 	if (atom->nmax > nmax) {
-
-		//printf("******************************** REALLOC\n");
-
 		nmax = atom->nmax;
 		delete[] Fdot;
 		Fdot = new Matrix3d[nmax]; // memory usage: 9 doubles
@@ -414,8 +417,8 @@ void PairTlsph::compute(int eflag, int vflag) {
 		PK1 = new Matrix3d[nmax]; // memory usage: 9 doubles; total 5*9=45 doubles
 		delete[] detF;
 		detF = new double[nmax]; // memory usage: 1 double; total 46 doubles
-		delete[] smoothVel;
-		smoothVel = new Vector3d[nmax]; // memory usage: 3 doubles; total 49 doubles
+		delete[] smoothVelDifference;
+		smoothVelDifference = new Vector3d[nmax]; // memory usage: 3 doubles; total 49 doubles
 		delete[] d;
 		d = new Matrix3d[nmax]; // memory usage: 9 doubles; total 58 doubles
 		delete[] R;
@@ -438,8 +441,8 @@ void PairTlsph::compute(int eflag, int vflag) {
 		hourglass_error = new double[nmax];
 	}
 
-//	if (update->ntimestep % 1 == 0) {
-//	SmoothField();
+//	if (update->ntimestep % 100 == 0) {
+//		SmoothField();
 //	}
 
 	PairTlsph::PreCompute();
@@ -452,25 +455,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 	comm->forward_comm_pair(this);
 
 	ComputeForces(eflag, vflag);
-
-	/*
-	 * initialize neighbor list pointer for time integration fix.
-	 * this needs to be done here beacuse fix is created after pair.
-	 */
-//	if (update->ntimestep == 1) {
-//
-//		ifix_tlsph = -1;
-//		for (int i = 0; i < modify->nfix; i++) {
-//			printf("fix %d\n", i);
-//			if (strcmp(modify->fix[i]->style, "smd/integrate_tlsph") == 0)
-//				ifix_tlsph = i;
-//		}
-//		if (ifix_tlsph == -1)
-//			error->all(FLERR, "Fix ifix_tlsph does not exist");
-//
-//		fix_tlsph_time_integration = (FixSMDIntegrateTlsph *) modify->fix[ifix_tlsph];
-//		fix_tlsph_time_integration->pair = this;
-//	}
 }
 
 void PairTlsph::ComputeForces(int eflag, int vflag) {
@@ -489,7 +473,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	int i, j, ii, jj, jnum, itype, iDim, inum;
 	double r, hg_mag, wf, wfd, h, r0, r0Sq, voli, volj;
 	double delVdotDelR, visc_magnitude, deltaE, mu_ij, hg_err;
-	double delta;
+	double delta, stress_force_magnitude, hourglass_force_magnitude;
 	char str[128];
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
@@ -550,7 +534,6 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 			if (type[j] != itype) {
 				sprintf(str, "particle pair is not of same type!");
 				error->all(FLERR, str);
-				;
 			}
 
 			// check that distance between i and j (in the reference config) is less than cutoff
@@ -582,7 +565,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				// derivative of kernel function and reference distance
 				// kernel function
-				spiky_kernel_and_derivative(h, r0, wf, wfd);
+				barbara_kernel_and_derivative(h, r0, wf, wfd);
 				//printf("wf = %f, wfd = %f\n", wf, wfd);
 
 				// current distance
@@ -602,18 +585,14 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				 */
 
 				// because hourglass control and artificial viscosity are evaluated using the current coordinates,
-				// call kernel and kernel gradient with current separation
-				//barbara_kernel_and_derivative(h, r, wf, wfd);
+				// call kernel and kernel gradient weights with current separation
+				barbara_kernel_and_derivative(h, r, wf, wfd);
+
 				delVdotDelR = dx.dot(dv);
 				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h); // m * m/s * m / m*m ==> units m/s
-				//if (delVdotDelR < 0.0) {
-
 				visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // this has units of pressure
 				//printf("visc_magnitude = %f, c_ij=%f, mu_ij=%f\n", visc_magnitude, c_ij, mu_ij);
 				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h);
-				//} else {
-				//	f_visc.setZero();
-				//}
 
 				/*
 				 * hourglass deviation of particles i and j
@@ -653,7 +632,6 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					if (delVdotDelR * delta < 0.0) {
 						hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
 					} else {
-						//hg_mag = 0.9 * hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
 						hg_mag = 0.0;
 					}
 					f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
@@ -670,6 +648,16 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					//printf("delta = %g, hg_mag = %g, coeff=%g, wf=%g, vi=%g, vj=%g, Ei=%f, Ej-%f\n",delta, hg_mag, hg_coeff[itype][jtype], wf, voli, volj,
 					//		youngsmodulus[itype], youngsmodulus[jtype]);
 
+				}
+
+				/*
+				 * scale hourglass forces if neccessary
+				 */
+
+				stress_force_magnitude = f_stress.norm();
+				hourglass_force_magnitude = f_hg.norm();
+				if (hourglass_force_magnitude > 100.0 * stress_force_magnitude) {
+					f_hg = 100.0 * stress_force_magnitude * (f_hg / hourglass_force_magnitude);
 				}
 
 				// sum stress, viscous, and hourglass forces
@@ -700,19 +688,13 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				// check if a particle has moved too much w.r.t another particles
 				if (r > r0) {
-					if ((r - r0) > 0.5 * neighbor->skin) {
+					if ((r - r0) > 0.75 * neighbor->skin) {
 						//printf("current distance is %f, r0 distance is %f\n", r, r0);
 						updateFlag = 1;
 					}
 				}
-
-				// update relative velocity based timestep
-				//dtRelative = MIN(dtRelative, r / (dv.norm() + 0.1 * c_ij));
-
 			}
-
 		}
-
 	}
 
 	for (i = 0; i < nlocal; i++) {
@@ -1174,10 +1156,20 @@ void PairTlsph::AssembleStress() {
 					}
 
 					if (CheckKeywordPresent("failure_max_plastic_strain", itype)) {
+						/*
+						 * plastic strain damage does not happen instantaneously.
+						 * Rather, take time which signal_velocity takes to go over a distance h
+						 */
 
-						if (eff_plastic_strain[i] >= SafeLookup("failure_max_plastic_strain", itype)) {
-							damage[i] = 1.0;
+						if (eff_plastic_strain[i] >= 0.99 * SafeLookup("failure_max_plastic_strain", itype)) {
+							damage[i] += dt / (100.0 * radius[i] / signal_vel0[itype]);
+							damage[i] = MAX(damage[i], 1.0);
 							eff_plastic_strain[i] = SafeLookup("failure_max_plastic_strain", itype);
+						}
+						if (pFinal < 0.0) { // compression: particle can carry compressive load but reduced shear
+							sigma_damaged = pFinal * eye + (1.0 - damage[i]) * sigmaFinal_dev;
+						} else { // tension: particle has reduced tensile and shear load bearing capability
+							sigma_damaged = (1.0 - damage[i]) * (pFinal * eye + sigmaFinal_dev);
 						}
 					}
 
@@ -1201,7 +1193,11 @@ void PairTlsph::AssembleStress() {
 				} // end if damage[i] < 1.0
 
 				if (damage[i] >= 1.0) {
-					sigma_damaged = pFinal * eye;
+					if (pFinal < 0.0) {
+						sigma_damaged = pFinal * eye;
+					} else {
+						sigma_damaged.setZero();
+					}
 				}
 
 				/*
@@ -1242,7 +1238,7 @@ void PairTlsph::AssembleStress() {
 				 * Convert to PK1. Note that reference configuration used for computing the forces is linked via
 				 * the incremental deformation gradient, not the full deformation gradient.
 				 */
-				PK1[i] = Fincr[i].determinant() * T * FincrInv[i].transpose();
+				PK1[i] = detF[i] * T * FincrInv[i].transpose();
 
 				/*
 				 * pre-multiply stress tensor with shape matrix to save computation in force loop
@@ -1998,7 +1994,7 @@ void *PairTlsph::extract(const char *str, int &i) {
 	} else if (strcmp(str, "smd/tlsph/PK1_ptr") == 0) {
 		return (void *) PK1;
 	} else if (strcmp(str, "smd/tlsph/smoothVel_ptr") == 0) {
-		return (void *) smoothVel;
+		return (void *) smoothVelDifference;
 	} else if (strcmp(str, "smd/tlsph/numNeighsRefConfig_ptr") == 0) {
 		return (void *) numNeighsRefConfig;
 	} else if (strcmp(str, "smd/tlsph/stressTensor_ptr") == 0) {
@@ -2120,13 +2116,16 @@ void PairTlsph::barbara_kernel_and_derivative(const double h, const double r, do
 	 * Barbara kernel
 	 */
 
+	double arg = (1.570796327 * (r + h)) / h;
+	double hsq = h * h;
+
 	if (domain->dimension == 2) {
-		double arg = (1.570796327 * (r + h)) / h;
-		double hsq = h * h;
 		wf = (1.680351548 * (cos(arg) + 1.)) / hsq;
 		wfd = -2.639490040 * sin(arg) / (hsq * h);
 	} else {
-		error->one(FLERR, "not implemented yet");
+		wf = 2.051578323 * (cos(arg) + 1.) / (hsq * h);
+		wfd = -3.222611694 * sin(arg) / (hsq * hsq);
+		//error->one(FLERR, "not implemented yet");
 	}
 
 }
@@ -2411,7 +2410,7 @@ void PairTlsph::SmoothField() {
 		h = 2.0 * radius[i];
 		r0 = 0.0;
 
-		spiky_kernel_and_derivative(h, r0, wf, wfd);
+		barbara_kernel_and_derivative(h, r0, wf, wfd);
 		average_stress[i] = wf * vfrac[i] * stress;
 		norm[i] = wf * vfrac[i];
 	}
@@ -2468,7 +2467,7 @@ void PairTlsph::SmoothField() {
 				stress(2, 2) = tlsph_stress[j][5];
 
 				// kernel function
-				spiky_kernel_and_derivative(h, r0, wf, wfd);
+				barbara_kernel_and_derivative(h, r0, wf, wfd);
 
 				average_stress[i] += wf * volj * stress;
 				norm[i] += volj * wf;
@@ -2501,6 +2500,9 @@ void PairTlsph::SmoothField() {
 		tlsph_stress[i][5] = stress(2, 2);
 
 	}
+
+	delete[] average_stress;
+	delete[] norm;
 
 }
 
@@ -2596,13 +2598,12 @@ void PairTlsph::SmoothFieldXSPH() {
 				stress_j(2, 2) = tlsph_stress[j][5];
 
 				// kernel function
-				spiky_kernel_and_derivative(h, r0, wf, wfd);
+				barbara_kernel_and_derivative(h, r0, wf, wfd);
 
 				stress_difference[i] += wf * volj * (stress_j - stress_i);
 				norm[i] += volj * wf;
 
 				if (j < nlocal) {
-
 					stress_difference[j] += wf * voli * (stress_i - stress_j);
 					norm[j] += voli * wf;
 				}
@@ -2612,15 +2613,18 @@ void PairTlsph::SmoothFieldXSPH() {
 	} // end loop over i
 
 	for (i = 0; i < nlocal; i++) {
-
-		tlsph_stress[i][0] += stress_difference[i](0, 0) / norm[i];
-		tlsph_stress[i][1] += stress_difference[i](0, 1) / norm[i];
-		tlsph_stress[i][2] += stress_difference[i](0, 2) / norm[i];
-		tlsph_stress[i][3] += stress_difference[i](1, 1) / norm[i];
-		tlsph_stress[i][4] += stress_difference[i](1, 2) / norm[i];
-		tlsph_stress[i][5] += stress_difference[i](2, 2) / norm[i];
-
+		if (norm[i] > 0.0) {
+			tlsph_stress[i][0] += stress_difference[i](0, 0) / norm[i];
+			tlsph_stress[i][1] += stress_difference[i](0, 1) / norm[i];
+			tlsph_stress[i][2] += stress_difference[i](0, 2) / norm[i];
+			tlsph_stress[i][3] += stress_difference[i](1, 1) / norm[i];
+			tlsph_stress[i][4] += stress_difference[i](1, 2) / norm[i];
+			tlsph_stress[i][5] += stress_difference[i](2, 2) / norm[i];
+		}
 	}
+
+	delete[] stress_difference;
+	delete[] norm;
 
 }
 

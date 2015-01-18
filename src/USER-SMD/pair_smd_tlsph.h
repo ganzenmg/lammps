@@ -138,7 +138,7 @@ protected:
 	Matrix3d *R; // rotation matrix
 	Matrix3d *FincrInv;
 	Matrix3d *D, *W; // strain rate and spin tensor
-	Vector3d *smoothVel;
+	Vector3d *smoothVelDifference;
 	Matrix3d *CauchyStress;
 	double *detF, *p_wave_speed, *shepardWeight;
 	double *hourglass_error;

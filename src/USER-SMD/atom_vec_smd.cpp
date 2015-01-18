@@ -254,6 +254,15 @@ int AtomVecSMD::pack_comm_vel(int n, int *list, double *buf, int pbc_flag, int *
 			buf[m++] = e[j]; // 12
 			buf[m++] = rho[j]; // 13
 
+			// temporary -- only ned this for smoothing of the stress field
+//			buf[m++] = tlsph_stress[j][0];
+//			buf[m++] = tlsph_stress[j][1];
+//			buf[m++] = tlsph_stress[j][2];
+//			buf[m++] = tlsph_stress[j][3];
+//			buf[m++] = tlsph_stress[j][4];
+//			buf[m++] = tlsph_stress[j][5]; // 19
+
+
 		}
 	} else {
 		if (domain->triclinic == 0) {
@@ -368,6 +377,14 @@ void AtomVecSMD::unpack_comm_vel(int n, int first, double *buf) {
 		vest[i][2] = buf[m++]; // 11
 		e[i] = buf[m++];
 		rho[i] = buf[m++]; // 13
+
+		// temporary -- only ned this for smoothing of the stress field
+//		tlsph_stress[i][0] = buf[m++];
+//		tlsph_stress[i][1] = buf[m++];
+//		tlsph_stress[i][2] = buf[m++];
+//		tlsph_stress[i][3] = buf[m++];
+//		tlsph_stress[i][4] = buf[m++];
+//		tlsph_stress[i][5] = buf[m++];
 	}
 }
 
