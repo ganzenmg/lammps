@@ -49,7 +49,7 @@ using namespace FixConst;
 
 FixSMDTlsphDtReset::FixSMDTlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
-	if (narg != 5)
+	if (narg != 4)
 		error->all(FLERR, "Illegal fix smd/adjust_dt command");
 
 	// set time_depend, else elapsed time accumulation can be messed up
@@ -62,15 +62,10 @@ FixSMDTlsphDtReset::FixSMDTlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 	extscalar = 0;
 	extvector = 0;
 
-	nevery = atoi(arg[3]);
-	if (nevery <= 0)
-		error->all(FLERR, "Illegal fix smd/adjust_dt command");
-
-	safety_factor = atof(arg[4]);
+	safety_factor = atof(arg[3]);
 
 	// initializations
-	t_elapsed = t_laststep = 0.0;
-	laststep = update->ntimestep;
+	t_elapsed = 0.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -97,9 +92,8 @@ void FixSMDTlsphDtReset::setup(int vflag) {
 /* ---------------------------------------------------------------------- */
 
 void FixSMDTlsphDtReset::initial_integrate(int vflag) {
-	// calculate elapsed time based on previous reset timestep
 
-	t_elapsed = t_laststep + (update->ntimestep - laststep) * update->dt;
+	t_elapsed += update->dt;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -137,10 +131,6 @@ void FixSMDTlsphDtReset::end_of_step() {
 	if (dt == update->dt)
 		return;
 
-	t_elapsed = t_laststep + (update->ntimestep - laststep) * update->dt;
-	t_laststep = t_elapsed;
-	laststep = update->ntimestep;
-
 	update->dt = dt;
 	if (force->pair)
 		force->pair->reset_dt();
@@ -151,13 +141,6 @@ void FixSMDTlsphDtReset::end_of_step() {
 /* ---------------------------------------------------------------------- */
 
 double FixSMDTlsphDtReset::compute_scalar() {
-	return update->dt;
+	return t_elapsed;
 }
 
-/* ---------------------------------------------------------------------- */
-
-double FixSMDTlsphDtReset::compute_vector(int n) {
-	if (n == 0)
-		return t_elapsed;
-	return (double) laststep;
-}

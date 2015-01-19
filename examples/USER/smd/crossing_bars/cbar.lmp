@@ -6,7 +6,7 @@ variable        rho equal 1 # initial mass density
 variable        E equal 1.0 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
 variable        sigma_yield equal 0.1 # plastic yield stress for bar 2
-variable        skin equal 0.1*${l0} # Verlet list range
+variable        skin equal 2.0*${l0} # Verlet list range
 variable        vel equal 100.0 # pull velocity
 
 units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
@@ -26,11 +26,11 @@ group           bar2 type 2
 
 pair_style      hybrid/overlay tlsph smd/hertz # activate Total-Lagrangian SPH
 #                                 rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 tlsph *COMMON ${rho} ${E} ${nu} 0.06  0.0  00 1.0 &
+pair_coeff      1 1 tlsph *COMMON ${rho} ${E} ${nu} 0.56  0.0  100 1.0 &
                 *LINEAR_STRENGTH &
 		*EOS_LINEAR &
                 *END
-pair_coeff      2 2 tlsph *COMMON ${rho} ${E} ${nu} 1.06  0.0  00 1.0 &
+pair_coeff      2 2 tlsph *COMMON ${rho} ${E} ${nu} 1.06  0.0  100 1.0 &
                 *LINEAR_PLASTICITY ${sigma_yield} &
 		*EOS_LINEAR &
                 *END
@@ -49,7 +49,7 @@ dump_modify     dump_id first yes
 velocity        bar1 set 0.0 0.0  ${vel} sum no units box 
 velocity        bar2 set 0.0 0.0 -${vel} sum no units box 
 
-fix             integration_fix all smd/integrate_tlsph update
+fix             integration_fix all smd/integrate_tlsph update xsph adjust_radius
 fix             dtfix all smd/adjust_dt 5 0.1
 
 thermo 100
@@ -57,4 +57,4 @@ thermo_style    custom step dt time ke pe
 
 balance         1.0 rcb
 
-run             5000
+run             30000

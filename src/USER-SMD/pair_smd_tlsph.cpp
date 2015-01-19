@@ -688,7 +688,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				// check if a particle has moved too much w.r.t another particles
 				if (r > r0) {
-					if ((r - r0) > 0.75 * neighbor->skin) {
+					//if ((r - r0) > 0.75 * neighbor->skin) { works reasonably well, but let's base the update criterion on a per-particle length-scale
+					if ((r - r0) > 0.75*h + 0.0 * neighbor->skin) {
 						//printf("current distance is %f, r0 distance is %f\n", r, r0);
 						updateFlag = 1;
 					}

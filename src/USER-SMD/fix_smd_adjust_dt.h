@@ -46,12 +46,10 @@ class FixSMDTlsphDtReset : public Fix {
   void initial_integrate(int);
   void end_of_step();
   double compute_scalar();
-  double compute_vector(int);
 
  private:
-  bigint laststep;
   double safety_factor;
-  double dt,t_elapsed,t_laststep;
+  double dt,t_elapsed;
 };
 
 }
