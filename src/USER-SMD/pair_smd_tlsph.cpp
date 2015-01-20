@@ -55,10 +55,10 @@ using namespace std;
 using namespace LAMMPS_NS;
 using namespace MathSpecial;
 
-#define JAUMANN 0
+#define JAUMANN false
 #define DETF_MIN 0.1 // maximum compression deformation allowed
 #define DETF_MAX 40.0 // maximum tension deformation allowed
-#define TLSPH_DEBUG 0
+#define TLSPH_DEBUG 1
 #define PLASTIC_STRAIN_AVERAGE_WINDOW 100.0
 
 /* ---------------------------------------------------------------------- */
@@ -381,7 +381,7 @@ void PairTlsph::PreCompute() {
 						d[i] = R[i].transpose() * D[i] * R[i];
 					}
 
-					// normalize average velocity field aroudn an integration point
+					// normalize average velocity field around an integration point
 					smoothVelDifference[i] /= shepardWeight[i];
 
 				} // end if mol[i] > 0
@@ -689,7 +689,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				// check if a particle has moved too much w.r.t another particles
 				if (r > r0) {
 					//if ((r - r0) > 0.75 * neighbor->skin) { works reasonably well, but let's base the update criterion on a per-particle length-scale
-					if ((r - r0) > 0.75*h + 0.0 * neighbor->skin) {
+					if ((r - r0) > 0.75 * h + 0.0 * neighbor->skin) {
 						//printf("current distance is %f, r0 distance is %f\n", r, r0);
 						updateFlag = 1;
 					}
@@ -1047,7 +1047,7 @@ void PairTlsph::AssembleStress() {
 				case EOS_LINEAR:
 					LinearEOS(SafeLookup("bulk_modulus", itype), pInitial, d_iso, dt, pFinal, p_rate);
 					break;
-				case NONE:
+				case EOS_NONE:
 					pFinal = 0.0;
 					p_rate = 0.0;
 					break;
@@ -1064,7 +1064,6 @@ void PairTlsph::AssembleStress() {
 							p_rate);
 
 					break;
-
 				default:
 					error->one(FLERR, "unknown EOS.");
 					break;
@@ -1079,7 +1078,11 @@ void PairTlsph::AssembleStress() {
 					switch (strengthModel[itype]) {
 					case LINEAR_STRENGTH:
 						//printf("mu0 is %f\n", mu0[itype]);
-						LinearStrength(SafeLookup("lame_mu", itype), sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
+						//LinearStrength(SafeLookup("lame_mu", itype), sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
+
+						sigma_dev_rate = 2.0 * SafeLookup("lame_mu", itype) * d_dev;
+						sigmaFinal_dev = sigmaInitial_dev + dt * sigma_dev_rate;
+
 						break;
 					case LINEAR_DEFGRAD:
 						LinearStrengthDefgrad(SafeLookup("lame_lambda", itype), SafeLookup("lame_mu", itype), Fincr[i],
@@ -1111,7 +1114,7 @@ void PairTlsph::AssembleStress() {
 						eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
 
 						break;
-					case NONE:
+					case STRENGTH_NONE:
 						sigmaFinal_dev.setZero();
 						sigma_dev_rate.setZero();
 						break;
@@ -1133,6 +1136,11 @@ void PairTlsph::AssembleStress() {
 				 * It is degraded by the damage / failure models below.
 				 */
 				sigma_damaged = sigmaFinal;
+
+				/*
+				 * assemble stress rate
+				 */
+				sigma_rate = p_rate * eye + sigma_dev_rate;
 
 				/*
 				 *  failure criteria
@@ -1201,17 +1209,6 @@ void PairTlsph::AssembleStress() {
 					}
 				}
 
-				/*
-				 * store unrotated stress in atom vector
-				 * symmetry is exploited
-				 */
-				tlsph_stress[i][0] = sigmaFinal(0, 0);
-				tlsph_stress[i][1] = sigmaFinal(0, 1);
-				tlsph_stress[i][2] = sigmaFinal(0, 2);
-				tlsph_stress[i][3] = sigmaFinal(1, 1);
-				tlsph_stress[i][4] = sigmaFinal(1, 2);
-				tlsph_stress[i][5] = sigmaFinal(2, 2);
-
 				if (JAUMANN) {
 					/*
 					 * sigma is already the co-rotated Cauchy stress.
@@ -1230,6 +1227,17 @@ void PairTlsph::AssembleStress() {
 					 */
 					T = R[i] * sigma_damaged * R[i].transpose();
 				}
+
+				/*
+				 * store unrotated stress in atom vector
+				 * symmetry is exploited
+				 */
+				tlsph_stress[i][0] = sigmaFinal(0, 0);
+				tlsph_stress[i][1] = sigmaFinal(0, 1);
+				tlsph_stress[i][2] = sigmaFinal(0, 2);
+				tlsph_stress[i][3] = sigmaFinal(1, 1);
+				tlsph_stress[i][4] = sigmaFinal(1, 2);
+				tlsph_stress[i][5] = sigmaFinal(2, 2);
 
 				// store rotated, "true" Cauchy stress
 				CauchyStress[i] = T;
@@ -1395,7 +1403,7 @@ void PairTlsph::coeff(int narg, char **arg) {
 	matProp2[std::make_pair("hourglass_amp", itype)] = force->numeric(FLERR, arg[ioffset + 6]);
 	matProp2[std::make_pair("heat_capacity", itype)] = force->numeric(FLERR, arg[ioffset + 7]);
 
-	matProp2[std::make_pair("lame_lambda", itype)] = SafeLookup("poisson_ratio", itype)
+	matProp2[std::make_pair("lame_lambda", itype)] = SafeLookup("youngs_modulus", itype) * SafeLookup("poisson_ratio", itype)
 			/ ((1.0 + SafeLookup("poisson_ratio", itype) * (1.0 - 2.0 * SafeLookup("poisson_ratio", itype))));
 	matProp2[std::make_pair("lame_mu", itype)] = SafeLookup("youngs_modulus", itype)
 			/ (2.0 * (1.0 + SafeLookup("poisson_ratio", itype)));
@@ -1425,8 +1433,8 @@ void PairTlsph::coeff(int narg, char **arg) {
 	 */
 
 	//printf("next kwd is %s\n", arg[iNextKwd]);
-	eos[itype] = NONE;
-	strengthModel[itype] = NONE;
+	eos[itype] = EOS_NONE;
+	strengthModel[itype] = STRENGTH_NONE;
 
 	while (true) {
 		if (strcmp(arg[iNextKwd], "*END") == 0) {
@@ -1601,6 +1609,41 @@ void PairTlsph::coeff(int narg, char **arg) {
 				printf("%60s : %g\n", "T0 : reference (room) temperature", SafeLookup("JC_T0", itype));
 				printf("%60s : %g\n", "Tmelt : melting temperature", SafeLookup("JC_Tmelt", itype));
 				printf("%60s : %g\n", "M : exponent for temperature dependency", SafeLookup("JC_M", itype));
+			}
+
+		} else if (strcmp(arg[ioffset], "*EOS_NONE") == 0) {
+
+			/*
+			 * no eos
+			 */
+
+			eos[itype] = EOS_NONE;
+			if (comm->me == 0) {
+				printf("reading *EOS_NONE\n");
+			}
+
+			t = string("*");
+			iNextKwd = -1;
+			for (iarg = ioffset + 1; iarg < narg; iarg++) {
+				s = string(arg[iarg]);
+				if (s.compare(0, t.length(), t) == 0) {
+					iNextKwd = iarg;
+					break;
+				}
+			}
+
+			if (iNextKwd < 0) {
+				sprintf(str, "no *KEYWORD terminates *EOS_NONE");
+				error->all(FLERR, str);
+			}
+
+			if (iNextKwd - ioffset != 1) {
+				sprintf(str, "expected 0 arguments following *EOS_NONE but got %d\n", iNextKwd - ioffset - 1);
+				error->all(FLERR, str);
+			}
+
+			if (comm->me == 0) {
+				printf("\n%60s\n", "no EOS selected");
 			}
 
 		} else if (strcmp(arg[ioffset], "*EOS_LINEAR") == 0) {
@@ -2126,7 +2169,7 @@ void PairTlsph::barbara_kernel_and_derivative(const double h, const double r, do
 	} else {
 		wf = 2.051578323 * (cos(arg) + 1.) / (hsq * h);
 		wfd = -3.222611694 * sin(arg) / (hsq * hsq);
-		//error->one(FLERR, "not implemented yet");
+//error->one(FLERR, "not implemented yet");
 	}
 
 }
@@ -2259,7 +2302,7 @@ void PairTlsph::IsotropicMaxStressDamage(Matrix3d S, double maxStress, double dt
 			}
 		}
 
-		// undiagonalize stress matrix
+// undiagonalize stress matrix
 		S_damaged = V * S_diag * V.inverse();
 	} else {
 		S_damaged = S;
@@ -2279,7 +2322,7 @@ void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrai
 
 	if (max_eigenvalue > maxStrain) {
 		damage = damage + dt * 0.04 * soundspeed / characteristicLength;
-		//printf("failing strain at %f\n", max_eigenvalue);
+//printf("failing strain at %f\n", max_eigenvalue);
 		damage = MIN(damage, 1.0);
 	}
 
@@ -2288,17 +2331,17 @@ void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrai
 		es.compute(S);
 		Matrix3d V = es.eigenvectors(); // compute eigenvalue and eigenvectors of stress
 
-		// diagonalize stress matrix
+// diagonalize stress matrix
 		Matrix3d S_diag = V.inverse() * S * V;
 
-		// apply damage to diagonalized  matrix if in tension
+// apply damage to diagonalized  matrix if in tension
 		for (int dim = 0; dim < 3; dim++) {
 			if (S_diag(dim, dim) > 0.0) {
 				S_diag(dim, dim) *= (1.0 - pow(damage, 3.0));
 			}
 		}
 
-		// undiagonalize strain matrix
+// undiagonalize strain matrix
 		S_damaged = V * S_diag * V.inverse();
 	} else {
 		S_damaged = S;
@@ -2633,10 +2676,10 @@ double PairTlsph::SafeLookup(std::string str, int itype) {
 	//cout << "string passed to lookup: " << str << endl;
 	char msg[128];
 	if (matProp2.count(std::make_pair(str, itype)) == 1) {
-		//cout << "returning look up value %d " << matProp2[std::make_pair(str, itype)] << endl;
+//cout << "returning look up value %d " << matProp2[std::make_pair(str, itype)] << endl;
 		return matProp2[std::make_pair(str, itype)];
 	} else {
-		//sprintf(msg, "failed to lookup indentifier [%s] for particle type %d", str, itype);
+//sprintf(msg, "failed to lookup indentifier [%s] for particle type %d", str, itype);
 		error->all(FLERR, msg);
 	}
 	return 1.0;

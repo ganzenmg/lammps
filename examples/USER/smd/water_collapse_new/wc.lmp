@@ -1,16 +1,19 @@
 #processors      4 1 1
 variable        l0 equal 0.05
-variable        rho equal 1000
+variable        rho_water equal 1000
+variable        rho_obj equal 300
 variable        h equal 2.5*${l0}
 variable        c0 equal 10.0
 variable        visc equal 0.1
 variable        Cp equal 1.0
+variable        E equal 2*${c0}^2*${rho_water}
+variable        sigma_yield equal 1.0*${E}
+variable        contact_stiffness equal 0.5*${c0}^2*${rho_water}
 # ----
 variable        dt equal 0.125*${h}/${c0}
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
-variable        skin equal 0.5*${h} # Verlet list range
+variable        skin equal ${h} # Verlet list range
 variable        vol_one equal ${l0}^2
-variable        mass_one equal ${vol_one}*${rho}
 
 units		si
 dimension       2
@@ -23,31 +26,56 @@ comm_modify     vel yes
 newton          off
 
 region          box block 0 6 0 4 -0.01 0.01 units box
-create_box      1 box
-region          water block 0 1 0 4 EDGE EDGE units box
+create_box      3 box
+region          water block 0.25 1 0.25 4 EDGE EDGE units box
 region          bc block 0.15 5.85 0.15 4 -0.01 0.01 units box side out
 region          particles union 2 water bc
 lattice         sq ${l0}
-create_atoms    1 region particles
+create_atoms    1 region water
+create_atoms    3 region bc
+
+
+# create some objects
+#region          obj1 block 2 2.6 0.25 0.85 EDGE EDGE units box
+region          obj1 prism 2 2.6 0.25 0.85 EDGE EDGE 0.3 0 0 units box
+region          obj2 block 3 3.6 0.25 0.85 EDGE EDGE units box
+region          obj3 sphere 4.3 0.5 0 0.25 units box
+create_atoms    2 region obj1
+create_atoms    2 region obj2
+create_atoms    2 region obj3
 
 group           bc region bc
 group           water region water
+group           ulsph type 1
+group           tlsph type 2
 
-set             group all meso_rho ${rho}
+set             group all meso_rho ${rho_water}
 set             group all diameter ${h}
 set             group all contact_radius ${l0}
-set             group all mass ${mass_one}
-set             group all volume ${vol_one}
+set             group all volume  ${vol_one}
+set             group all density ${rho_water}
+set             group tlsph density ${rho_obj}
 
-pair_style      ulsph
-pair_coeff      1 1 *COMMON ${rho} ${c0} ${visc} ${Cp} &
+pair_style      hybrid/overlay ulsph tlsph smd/hertz
+pair_coeff      1 1 ulsph *COMMON ${rho_water} ${c0} ${visc} ${Cp} &
 		*EOS_TAIT 7.0 &
 	        *END
+pair_coeff      2 2 tlsph *COMMON ${rho_obj} ${E} 0.3 0.56  0.0  00 1.0 &
+                *LINEAR_STRENGTH &
+		*EOS_LINEAR &
+                *END
+pair_coeff      3 3 none
+pair_coeff      1 2 smd/hertz ${contact_stiffness}
+pair_coeff      1 3 smd/hertz ${contact_stiffness}
+pair_coeff      2 3 smd/hertz ${contact_stiffness}
+pair_coeff      2 2 smd/hertz ${contact_stiffness}
+
+fix             gfix all gravity -9.81 vector 0 1 0 # add gravity. This fix also computes potential energy of mass in gravity field.
 
 compute         eint all smd/internal_energy
 compute         rho all smd/rho
 compute         alleint all reduce sum c_eint
-variable        etot equal ke+c_alleint
+variable        etot equal ke+c_alleint+f_gfix
 compute         contact_radius all smd/contact_radius
 compute         fS all smd/ulsph_stress
 compute         aS all stress/atom NULL pair
@@ -68,21 +96,18 @@ thermo          100
 thermo_style    custom step ke pe v_etot c_alleint
 thermo_modify   lost ignore
 
-#fix             rhofix all smd/adjust_rho 1000 1
-#run             1000
-#unfix           rhofix
-
-fix             dtfix all smd/adjust_dt 5 0.1
+fix             dtfix all smd/adjust_dt 0.1
 
 thermo          100
 thermo_style    custom step ke pe v_etot c_alleint f_dtfix dt
 thermo_modify   lost ignore
 
-fix             gfix water gravity -9.81 vector 0 1 0 # add gravity. This fix also computes potential energy of mass in gravity field.
+
 fix             bc_fix bc setforce 0 0 0
-fix             integration_fix_resin all smd/integrate_ulsph adjust_radius 1.2
+fix             integration_fix_ulsph ulsph smd/integrate_ulsph adjust_radius 1.2
+fix             integration_fix tlsph smd/integrate_tlsph xsph
 fix             10 all balance 50 0.9 rcb
-run             20000
+run             200000
 
 
 #>>========>>========>>========>>========>>========>>========>>========>>========

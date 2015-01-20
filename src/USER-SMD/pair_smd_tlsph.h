@@ -153,8 +153,9 @@ protected:
 
 	enum {
 		LINEAR_DEFGRAD, LINEAR_STRENGTH, LINEAR_PLASTICITY, STRENGTH_JOHNSON_COOK,
+		STRENGTH_NONE,
 		EOS_LINEAR, EOS_SHOCK, EOS_POLYNOMIAL,
-		NONE
+		EOS_NONE
 	};
 
 	// C++ std dictionary to hold material model settings per particle type

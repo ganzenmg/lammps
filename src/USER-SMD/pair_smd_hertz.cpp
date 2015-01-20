@@ -9,7 +9,6 @@
  *
  * ----------------------------------------------------------------------- */
 
-
 /* ----------------------------------------------------------------------
  LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
  http://lammps.sandia.gov, Sandia National Laboratories
@@ -94,13 +93,12 @@ void PairHertz::compute(int eflag, int vflag) {
 
 	double **f = atom->f;
 	double **x = atom->x;
-	double **v = atom->vest;
-	double *rmass = atom->rmass;
-	double *de = atom->de;
+	double **x0 = atom->x0;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
 	double *radius = atom->contact_radius;
-	double q1, rho0, c0, mu_ij, visc_magnitude, delVdotDelR, f_visc, wfd, rcutSq, hrSq, deltaE;
+	double rcutSq;
+	double delx0, dely0, delz0, rSq0;
 
 	int newton_pair = force->newton_pair;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
@@ -117,7 +115,7 @@ void PairHertz::compute(int eflag, int vflag) {
 		ytmp = x[i][1];
 		ztmp = x[i][2];
 		itype = type[i];
-		ri = 1.0 * radius[i];
+		ri = 1.5 * radius[i];
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 
@@ -127,8 +125,6 @@ void PairHertz::compute(int eflag, int vflag) {
 
 			jtype = type[j];
 
-			if (itype == type[j]) continue;
-
 			delx = xtmp - x[j][0];
 			dely = ytmp - x[j][1];
 			delz = ztmp - x[j][2];
@@ -137,13 +133,27 @@ void PairHertz::compute(int eflag, int vflag) {
 			}
 			rsq = delx * delx + dely * dely + delz * delz;
 
-			rj = 1.0 * radius[j];
-
-
+			rj = 1.5 * radius[j];
 			rcut = ri + rj;
 			rcutSq = rcut * rcut;
 
 			if (rsq < rcutSq) {
+
+				/*
+				 * self contact option:
+				 * if pair of particles was initially close enough to interact via a bulk continuum mechanism (e.g. SPH), exclude pair from contact forces.
+				 * this approach should work well if no updates of the reference configuration are performed.
+				 */
+
+				if (itype == jtype) {
+					delx0 = x0[j][0] - x0[i][0];
+					dely0 = x0[j][1] - x0[i][1];
+					delz0 = x0[j][2] - x0[i][2];
+					rSq0 = delx0 * delx0 + dely0 * dely0 + delz0 * delz0; // initial distance
+					if (rSq0 < rcutSq) {
+						continue;
+					}
+				}
 
 				r = sqrt(rsq);
 
@@ -164,9 +174,6 @@ void PairHertz::compute(int eflag, int vflag) {
 				 * contact viscosity -- needs to be done, see GRANULAR package for normal & shear damping
 				 * for now: no damping and thus no viscous energy deltaE
 				 */
-				deltaE = 0.0;
-
-
 
 				if (evflag) {
 					ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, delx, dely, delz);
@@ -175,13 +182,11 @@ void PairHertz::compute(int eflag, int vflag) {
 				f[i][0] += delx * fpair;
 				f[i][1] += dely * fpair;
 				f[i][2] += delz * fpair;
-				//de[i] += deltaE;
 
 				if (newton_pair || j < nlocal) {
 					f[j][0] -= delx * fpair;
 					f[j][1] -= dely * fpair;
 					f[j][2] -= delz * fpair;
-					//de[j] += deltaE;
 				}
 
 			}

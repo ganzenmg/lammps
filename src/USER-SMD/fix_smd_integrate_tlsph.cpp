@@ -246,9 +246,13 @@ void FixSMDIntegrateTlsph::initial_integrate(int vflag) {
 				vxsph_y = v[i][1] + 0.5 * smoothVelDifference[i](1);
 				vxsph_z = v[i][2] + 0.5 * smoothVelDifference[i](2);
 
-				vest[i][0] = v[i][0] + dtfm * f[i][0];
-				vest[i][1] = v[i][1] + dtfm * f[i][1];
-				vest[i][2] = v[i][2] + dtfm * f[i][2];
+//				vest[i][0] = v[i][0] + dtfm * f[i][0]; // this form leads to conservation problems with angular momentum
+//				vest[i][1] = v[i][1] + dtfm * f[i][1];
+//				vest[i][2] = v[i][2] + dtfm * f[i][2];
+
+				vest[i][0] = vxsph_x + dtfm * f[i][0];
+				vest[i][1] = vxsph_y + dtfm * f[i][1];
+				vest[i][2] = vxsph_z + dtfm * f[i][2];
 
 				x[i][0] += dtv * vxsph_x;
 				x[i][1] += dtv * vxsph_y;
@@ -280,6 +284,8 @@ void FixSMDIntegrateTlsph::final_integrate() {
 	double **f = atom->f;
 	double *e = atom->e;
 	double *de = atom->de;
+	double *rho = atom->rho;
+	double *drho = atom->drho;
 	double *rmass = atom->rmass;
 	int *mask = atom->mask;
 	int nlocal = atom->nlocal;
@@ -307,6 +313,8 @@ void FixSMDIntegrateTlsph::final_integrate() {
 			}
 
 			e[i] += dtv * de[i];
+			rho[i] += dtv * drho[i]; // ... and density
+
 
 		}
 	}
@@ -362,53 +370,53 @@ void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
 
 		if (mask[i] & groupbit) {
 
-				// need determinant of old deformation gradient associated with reference configuration
-				F0(0, 0) = defgrad0[i][0];
-				F0(0, 1) = defgrad0[i][1];
-				F0(0, 2) = defgrad0[i][2];
-				F0(1, 0) = defgrad0[i][3];
-				F0(1, 1) = defgrad0[i][4];
-				F0(1, 2) = defgrad0[i][5];
-				F0(2, 0) = defgrad0[i][6];
-				F0(2, 1) = defgrad0[i][7];
-				F0(2, 2) = defgrad0[i][8];
+			// need determinant of old deformation gradient associated with reference configuration
+			F0(0, 0) = defgrad0[i][0];
+			F0(0, 1) = defgrad0[i][1];
+			F0(0, 2) = defgrad0[i][2];
+			F0(1, 0) = defgrad0[i][3];
+			F0(1, 1) = defgrad0[i][4];
+			F0(1, 2) = defgrad0[i][5];
+			F0(2, 0) = defgrad0[i][6];
+			F0(2, 1) = defgrad0[i][7];
+			F0(2, 2) = defgrad0[i][8];
 
-				// re-set x0 coordinates
-				x0[i][0] = x[i][0];
-				x0[i][1] = x[i][1];
-				x0[i][2] = x[i][2];
+			// re-set x0 coordinates
+			x0[i][0] = x[i][0];
+			x0[i][1] = x[i][1];
+			x0[i][2] = x[i][2];
 
-				// compute current total deformation gradient
-				Ftotal = F0 * Fincr[i];	// this is the total deformation gradient: reference deformation times incremental deformation
+			// compute current total deformation gradient
+			Ftotal = F0 * Fincr[i];	// this is the total deformation gradient: reference deformation times incremental deformation
 
-				// store the current deformation gradient the reference deformation gradient
-				defgrad0[i][0] = Ftotal(0, 0);
-				defgrad0[i][1] = Ftotal(0, 1);
-				defgrad0[i][2] = Ftotal(0, 2);
-				defgrad0[i][3] = Ftotal(1, 0);
-				defgrad0[i][4] = Ftotal(1, 1);
-				defgrad0[i][5] = Ftotal(1, 2);
-				defgrad0[i][6] = Ftotal(2, 0);
-				defgrad0[i][7] = Ftotal(2, 1);
-				defgrad0[i][8] = Ftotal(2, 2);
+			// store the current deformation gradient the reference deformation gradient
+			defgrad0[i][0] = Ftotal(0, 0);
+			defgrad0[i][1] = Ftotal(0, 1);
+			defgrad0[i][2] = Ftotal(0, 2);
+			defgrad0[i][3] = Ftotal(1, 0);
+			defgrad0[i][4] = Ftotal(1, 1);
+			defgrad0[i][5] = Ftotal(1, 2);
+			defgrad0[i][6] = Ftotal(2, 0);
+			defgrad0[i][7] = Ftotal(2, 1);
+			defgrad0[i][8] = Ftotal(2, 2);
 
-				/*
-				 * Adjust particle volume as the reference configuration is changed.
-				 * We safeguard against excessive deformations by limiting the adjustment range
-				 * to the intervale J \in [0.9..1.1]
-				 */
-				J = Fincr[i].determinant();
-				J = MAX(J, 0.9);
-				J = MIN(J, 1.1);
-				vfrac[i] *= J;
+			/*
+			 * Adjust particle volume as the reference configuration is changed.
+			 * We safeguard against excessive deformations by limiting the adjustment range
+			 * to the intervale J \in [0.9..1.1]
+			 */
+			J = Fincr[i].determinant();
+			J = MAX(J, 0.9);
+			J = MIN(J, 1.1);
+			vfrac[i] *= J;
 
-				if (adjust_radius_flag) {
-					radius[i] *= pow(J, 1. / domain->dimension);
-				}
+			if (adjust_radius_flag) {
+				radius[i] *= pow(J, 1. / domain->dimension);
+			}
 
-				//do not allow radius to grow excessively
-				//radius[i] = MIN(radius[i], 10.0 * contact_radius[i]); // this only makes sense for well defined contact radii with compact regular initial node spacings
-				//radius[i] = MAX(radius[i], 2.0 * contact_radius[i]);
+			//do not allow radius to grow excessively
+			//radius[i] = MIN(radius[i], 10.0 * contact_radius[i]); // this only makes sense for well defined contact radii with compact regular initial node spacings
+			//radius[i] = MAX(radius[i], 2.0 * contact_radius[i]);
 
 		}
 

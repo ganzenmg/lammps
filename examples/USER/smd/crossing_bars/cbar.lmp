@@ -34,6 +34,8 @@ pair_coeff      2 2 tlsph *COMMON ${rho} ${E} ${nu} 1.06  0.0  100 1.0 &
                 *LINEAR_PLASTICITY ${sigma_yield} &
 		*EOS_LINEAR &
                 *END
+pair_coeff      1 1 smd/hertz ${E}
+pair_coeff      2 2 smd/hertz ${E}
 pair_coeff      1 2 smd/hertz ${E}
 
 compute         S all smd/tlsph_stress # Cauchy stress tensor
@@ -49,12 +51,13 @@ dump_modify     dump_id first yes
 velocity        bar1 set 0.0 0.0  ${vel} sum no units box 
 velocity        bar2 set 0.0 0.0 -${vel} sum no units box 
 
-fix             integration_fix all smd/integrate_tlsph update xsph adjust_radius
-fix             dtfix all smd/adjust_dt 5 0.1
+fix             integration_fix all smd/integrate_tlsph xsph adjust_radius
+fix             dtfix all smd/adjust_dt 0.1
+fix             balance_fix all balance 1000 1.05 rcb
 
 thermo 100
-thermo_style    custom step dt time ke pe
+thermo_style    custom step dt f_dtfix ke pe
 
 balance         1.0 rcb
 
-run             30000
+run             100

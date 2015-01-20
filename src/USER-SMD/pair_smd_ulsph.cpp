@@ -51,7 +51,6 @@ using namespace Eigen;
 
 #define COMPUTE_CORRECTED_DERIVATIVES false
 
-
 PairULSPH::PairULSPH(LAMMPS *lmp) :
 		Pair(lmp) {
 
@@ -712,152 +711,183 @@ void PairULSPH::settings(int narg, char **arg) {
  ------------------------------------------------------------------------- */
 
 void PairULSPH::coeff(int narg, char **arg) {
-	int ioffset, iarg, iNextKwd, itype;
+	int ioffset, iarg, iNextKwd, itype, jtype;
 	char str[128];
 	std::string s, t;
 
 	if (narg < 3) {
-		sprintf(str, "number of arguments for pair tlsph is too small!");
+		sprintf(str, "number of arguments for pair ulsph is too small!");
 		error->all(FLERR, str);
 	}
 	if (!allocated)
 		allocate();
 
 	/*
-	 * check that parameters are given only in i,i form
-	 */
-	if (force->inumeric(FLERR, arg[0]) != force->inumeric(FLERR, arg[1])) {
-		sprintf(str, "ULSPH coefficients can only be specified between particles of same type!");
-		error->all(FLERR, str);
-	}
-
-	itype = force->inumeric(FLERR, arg[0]);
-
-	if (comm->me == 0)
-		printf("\n******************SMD / ULSPH PROPERTIES OF PARTICLE TYPE %d **************************\n", itype);
-
-	/*
-	 * read parameters which are common -- regardless of material / eos model
+	 * if parameters are give in i,i form, i.e., no a cross interaction, set material parameters
 	 */
 
-	ioffset = 2;
-	if (strcmp(arg[ioffset], "*COMMON") != 0) {
-		sprintf(str, "common keyword missing!");
-		error->all(FLERR, str);
-	} else {
-		printf("common keyword found\n");
-	}
+	if (force->inumeric(FLERR, arg[0]) == force->inumeric(FLERR, arg[1])) {
+		//sprintf(str, "ULSPH coefficients can only be specified between particles of same type!");
+		//error->all(FLERR, str);
 
-	t = string("*");
-	iNextKwd = -1;
-	for (iarg = ioffset + 1; iarg < narg; iarg++) {
-		s = string(arg[iarg]);
-		if (s.compare(0, t.length(), t) == 0) {
-			iNextKwd = iarg;
-			break;
-		}
-	}
+		itype = force->inumeric(FLERR, arg[0]);
 
-	printf("keyword following *COMMON is %s\n", arg[iNextKwd]);
+		if (comm->me == 0)
+			printf("\n******************SMD / ULSPH PROPERTIES OF PARTICLE TYPE %d **************************\n", itype);
 
-	if (iNextKwd < 0) {
-		sprintf(str, "no *KEYWORD terminates *COMMON");
-		error->all(FLERR, str);
-	}
+		/*
+		 * read parameters which are common -- regardless of material / eos model
+		 */
 
-	if (iNextKwd - ioffset != 4 + 1) {
-		sprintf(str, "expected 7 arguments following *COMMON but got %d\n", iNextKwd - ioffset - 1);
-		error->all(FLERR, str);
-	}
-
-	matProp2[std::make_pair("rho_ref", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
-	matProp2[std::make_pair("c_ref", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
-	matProp2[std::make_pair("viscosity_q1", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
-	matProp2[std::make_pair("heat_capacity", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
-
-	matProp2[std::make_pair("bulk_modulus", itype)] = SafeLookup("c_ref", itype) * SafeLookup("c_ref", itype)
-			* SafeLookup("rho_ref", itype);
-
-	if (comm->me == 0) {
-		printf("\n material unspecific properties for SMD/ULSPH definition of particle type %d:\n", itype);
-		printf("%40s : %g\n", "reference density", SafeLookup("rho_ref", itype));
-		printf("%40s : %g\n", "reference speed of sound", SafeLookup("c_ref", itype));
-		printf("%40s : %g\n", "linear viscosity coefficient", SafeLookup("viscosity_q1", itype));
-		printf("%40s : %g\n", "heat capacity [energy / (mass * temperature)]", SafeLookup("heat_capacity", itype));
-		printf("%40s : %g\n", "bulk modulus", SafeLookup("bulk_modulus", itype));
-	}
-
-	/*
-	 * read following material cards
-	 */
-
-	if (comm->me == 0) {
-		printf("next kwd is %s\n", arg[iNextKwd]);
-	}
-	eos[itype] = NONE;
-
-	while (true) {
-		if (strcmp(arg[iNextKwd], "*END") == 0) {
-			if (comm->me == 0) {
-				sprintf(str, "found *END");
-				error->message(FLERR, str);
-			}
-			break;
+		ioffset = 2;
+		if (strcmp(arg[ioffset], "*COMMON") != 0) {
+			sprintf(str, "common keyword missing!");
+			error->all(FLERR, str);
+		} else {
+			printf("common keyword found\n");
 		}
 
-		ioffset = iNextKwd;
-		if (strcmp(arg[ioffset], "*EOS_TAIT") == 0) {
-
-			/*
-			 * Tait EOS
-			 */
-
-			eos[itype] = EOS_TAIT;
-			printf("reading *EOS_TAIT\n");
-
-			t = string("*");
-			iNextKwd = -1;
-			for (iarg = ioffset + 1; iarg < narg; iarg++) {
-				s = string(arg[iarg]);
-				if (s.compare(0, t.length(), t) == 0) {
-					iNextKwd = iarg;
-					break;
-				}
+		t = string("*");
+		iNextKwd = -1;
+		for (iarg = ioffset + 1; iarg < narg; iarg++) {
+			s = string(arg[iarg]);
+			if (s.compare(0, t.length(), t) == 0) {
+				iNextKwd = iarg;
+				break;
 			}
+		}
 
-			if (iNextKwd < 0) {
-				sprintf(str, "no *KEYWORD terminates *EOS_TAIT");
-				error->all(FLERR, str);
-			}
+		printf("keyword following *COMMON is %s\n", arg[iNextKwd]);
 
-			if (iNextKwd - ioffset != 1 + 1) {
-				sprintf(str, "expected 1 arguments following *EOS_TAIT but got %d\n", iNextKwd - ioffset - 1);
-				error->all(FLERR, str);
-			}
-
-			matProp2[std::make_pair("tait_exponent", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
-
-			if (comm->me == 0) {
-				printf("\n%60s\n", "Tait EOS");
-				printf("%60s : %g\n", "Exponent", SafeLookup("tait_exponent", itype));
-			}
-		} // end Tait EOS
-
-		else {
-			sprintf(str, "unknown *KEYWORD: %s", arg[ioffset]);
+		if (iNextKwd < 0) {
+			sprintf(str, "no *KEYWORD terminates *COMMON");
 			error->all(FLERR, str);
 		}
 
+		if (iNextKwd - ioffset != 4 + 1) {
+			sprintf(str, "expected 7 arguments following *COMMON but got %d\n", iNextKwd - ioffset - 1);
+			error->all(FLERR, str);
+		}
+
+		matProp2[std::make_pair("rho_ref", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+		matProp2[std::make_pair("c_ref", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
+		matProp2[std::make_pair("viscosity_q1", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+		matProp2[std::make_pair("heat_capacity", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
+
+		matProp2[std::make_pair("bulk_modulus", itype)] = SafeLookup("c_ref", itype) * SafeLookup("c_ref", itype)
+				* SafeLookup("rho_ref", itype);
+
+		if (comm->me == 0) {
+			printf("\n material unspecific properties for SMD/ULSPH definition of particle type %d:\n", itype);
+			printf("%40s : %g\n", "reference density", SafeLookup("rho_ref", itype));
+			printf("%40s : %g\n", "reference speed of sound", SafeLookup("c_ref", itype));
+			printf("%40s : %g\n", "linear viscosity coefficient", SafeLookup("viscosity_q1", itype));
+			printf("%40s : %g\n", "heat capacity [energy / (mass * temperature)]", SafeLookup("heat_capacity", itype));
+			printf("%40s : %g\n", "bulk modulus", SafeLookup("bulk_modulus", itype));
+		}
+
+		/*
+		 * read following material cards
+		 */
+
+		if (comm->me == 0) {
+			printf("next kwd is %s\n", arg[iNextKwd]);
+		}
+		eos[itype] = NONE;
+
+		while (true) {
+			if (strcmp(arg[iNextKwd], "*END") == 0) {
+				if (comm->me == 0) {
+					sprintf(str, "found *END");
+					error->message(FLERR, str);
+				}
+				break;
+			}
+
+			ioffset = iNextKwd;
+			if (strcmp(arg[ioffset], "*EOS_TAIT") == 0) {
+
+				/*
+				 * Tait EOS
+				 */
+
+				eos[itype] = EOS_TAIT;
+				printf("reading *EOS_TAIT\n");
+
+				t = string("*");
+				iNextKwd = -1;
+				for (iarg = ioffset + 1; iarg < narg; iarg++) {
+					s = string(arg[iarg]);
+					if (s.compare(0, t.length(), t) == 0) {
+						iNextKwd = iarg;
+						break;
+					}
+				}
+
+				if (iNextKwd < 0) {
+					sprintf(str, "no *KEYWORD terminates *EOS_TAIT");
+					error->all(FLERR, str);
+				}
+
+				if (iNextKwd - ioffset != 1 + 1) {
+					sprintf(str, "expected 1 arguments following *EOS_TAIT but got %d\n", iNextKwd - ioffset - 1);
+					error->all(FLERR, str);
+				}
+
+				matProp2[std::make_pair("tait_exponent", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+
+				if (comm->me == 0) {
+					printf("\n%60s\n", "Tait EOS");
+					printf("%60s : %g\n", "Exponent", SafeLookup("tait_exponent", itype));
+				}
+			} // end Tait EOS
+
+			else {
+				sprintf(str, "unknown *KEYWORD: %s", arg[ioffset]);
+				error->all(FLERR, str);
+			}
+
+		}
+
+		/*
+		 * copy data which is looked up in inner pairwise loops from slow maps to fast arrays
+		 */
+
+		Q1[itype] = SafeLookup("viscosity_q1", itype);
+		rho0[itype] = SafeLookup("rho_ref", itype);
+
+		setflag[itype][itype] = 1;
+	} else {
+		/*
+		 * we are reading a cross-interaction line for particle types i, j
+		 */
+
+		itype = force->inumeric(FLERR, arg[0]);
+		jtype = force->inumeric(FLERR, arg[1]);
+
+		if (strcmp(arg[2], "*CROSS") != 0) {
+			sprintf(str, "ulsph cross interaction between particle type %d and %d requested, however, *CROSS keyword is missing", itype, jtype);
+			error->all(FLERR, str);
+		}
+
+		if (setflag[itype][itype] != 1) {
+			sprintf(str,
+					"ulsph cross interaction between particle type %d and %d requested, however, properties of type %d  have not yet been specified",
+					itype, jtype, itype);
+			error->all(FLERR, str);
+		}
+
+		if (setflag[jtype][jtype] != 1) {
+			sprintf(str,
+					"ulsph cross interaction between particle type %d and %d requested, however, properties of type %d  have not yet been specified",
+					itype, jtype, jtype);
+			error->all(FLERR, str);
+		}
+
+		setflag[itype][jtype] = 1;
+		setflag[jtype][itype] = 1;
+
 	}
-
-	/*
-	 * copy data which is looked up in inner pairwise loops from slow maps to fast arrays
-	 */
-
-	Q1[itype] = SafeLookup("viscosity_q1", itype);
-	rho0[itype] = SafeLookup("rho_ref", itype);
-
-	setflag[itype][itype] = 1;
 }
 
 /* ----------------------------------------------------------------------
