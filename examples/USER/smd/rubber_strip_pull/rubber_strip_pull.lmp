@@ -65,15 +65,13 @@ fix             botfix bot setforce 0 0 0
 # define variables for outputting stress/strain curve. obtain stress as average of top and
 # bottom forces and divide by the initial cross section area (20 mm * 1 mm)
 fix             dtfix all smd/adjust_dt 0.1
-variable        time equal f_dtfix
 variable        stress equal 0.5*(f_botfix[2]-f_topfix[2])/20 
-variable        strain equal (2.0*${vel}*v_time/20) # strain: relative elongation
-variable        dt equal dt
+variable        strain equal (2.0*${vel}*f_dtfix/20) # strain: relative elongation
 fix             integration_fix all smd/integrate_tlsph update xsph #adjust_radius
-fix             stress_curve all print 10 "${time} ${dt} ${strain} ${stress}" file stress_strain.dat screen no
+fix             stress_curve all print 10 "${strain} ${stress}" file stress_strain.dat screen no
 
 
 thermo 100
-thermo_style    custom step dt v_time v_strain
+thermo_style    custom step dt f_dtfix v_strain
 
 run             20000

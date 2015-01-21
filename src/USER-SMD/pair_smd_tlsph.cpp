@@ -239,7 +239,7 @@ void PairTlsph::PreCompute() {
 
 				/* build matrices */
 				Ktmp = g * dx0.transpose();
-				Ftmp = dx * g.transpose();
+				Ftmp = (dx - dx0) * g.transpose();
 				Fdottmp = dv * g.transpose();
 
 				K[i] += volj * Ktmp;
@@ -292,9 +292,8 @@ void PairTlsph::PreCompute() {
 					//K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
 				}
 
-				//	K[i].setIdentity();
-
 				Fincr[i] *= K[i]; // use shape matrix to obtain first-order corrected SPH approximation
+				Fincr[i] += eye;
 				Fdot[i] *= K[i];
 
 				/*
@@ -389,6 +388,9 @@ void PairTlsph::PreCompute() {
 			} // end if mol[i] > 0
 
 			if (mol[i] < 0) {
+
+
+
 				d[i].setZero();
 				D[i].setZero();
 				Fdot[i].setZero();
@@ -600,6 +602,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
 				hg_err = gamma.norm() / r0;
+
 				hourglass_error[i] += volj * wf * hg_err;
 
 				/*
@@ -620,7 +623,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 //				} else {
 //					f_hg.setZero();
 //				}
-				/* SPH-like formulation */
+				/* SPH-like hourglass formulation */
 
 				if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-3) {
 
@@ -632,7 +635,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					if (delVdotDelR * delta < 0.0) {
 						hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
 					} else {
-						hg_mag = 0.0;
+						hg_mag = 0.0*hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure;
 					}
 					f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
 
@@ -661,7 +664,6 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				}
 
 				// sum stress, viscous, and hourglass forces
-				//cout << "fstress: " << f_stress << endl;
 				sumForces = f_stress + f_visc + f_hg;
 
 				// energy rate -- project velocity onto force vector
@@ -2698,4 +2700,42 @@ bool PairTlsph::CheckKeywordPresent(std::string str, int itype) {
 		error->all(FLERR, msg);
 	}
 	return false;
+}
+
+/* ----------------------------------------------------------------------
+ Limit eigenvalues of a matrix to upper and lower bounds.
+ ------------------------------------------------------------------------- */
+
+Matrix3d PairTlsph::LimitEigenvalues(Matrix3d S, double limitEigenvalue) {
+
+	/*
+	 * compute Eigenvalues of matrix S
+	 */
+	SelfAdjointEigenSolver<Matrix3d> es;
+	es.compute(S);
+
+	double max_eigenvalue = es.eigenvalues().maxCoeff();
+	double min_eigenvalue = es.eigenvalues().minCoeff();
+	double amax_eigenvalue = fabs(max_eigenvalue);
+	double amin_eigenvalue = fabs(min_eigenvalue);
+
+	if ((amax_eigenvalue > limitEigenvalue) || (amin_eigenvalue > limitEigenvalue)) {
+		if (amax_eigenvalue > amin_eigenvalue) { // need to scale with max_eigenvalue
+			double scale = amax_eigenvalue / limitEigenvalue;
+			Matrix3d V = es.eigenvectors();
+			Matrix3d S_diag = V.inverse() * S * V; // diagonalized input matrix
+			S_diag /= scale;
+			Matrix3d S_scaled = V * S_diag * V.inverse(); // undiagonalize matrix
+			return S_scaled;
+		} else { // need to scale using min_eigenvalue
+			double scale = amin_eigenvalue / limitEigenvalue;
+			Matrix3d V = es.eigenvectors();
+			Matrix3d S_diag = V.inverse() * S * V; // diagonalized input matrix
+			S_diag /= scale;
+			Matrix3d S_scaled = V * S_diag * V.inverse(); // undiagonalize matrix
+			return S_scaled;
+		}
+	} else { // limiting does not apply
+		return S;
+	}
 }

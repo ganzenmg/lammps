@@ -78,6 +78,7 @@ public:
 
 	void SmoothField();
 	void SmoothFieldXSPH();
+	Matrix3d LimitEigenvalues(Matrix3d S, double limitEigenvalue);
 
 	/*
 	 * strength models

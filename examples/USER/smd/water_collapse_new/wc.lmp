@@ -1,19 +1,24 @@
-#processors      4 1 1
-variable        l0 equal 0.05
-variable        rho_water equal 1000
-variable        rho_obj equal 300
-variable        h equal 2.5*${l0}
-variable        c0 equal 10.0
-variable        visc equal 0.1
-variable        Cp equal 1.0
-variable        E equal 2*${c0}^2*${rho_water}
-variable        sigma_yield equal 1.0*${E}
-variable        contact_stiffness equal 0.5*${c0}^2*${rho_water}
-# ----
-variable        dt equal 0.125*${h}/${c0}
-print           "sound speed is ${c0}, CFL timestep is ${dt}"
+# USER-SMD Example No. 3
+# A column of water is placed in a container and allowed to collapse unter the
+# influence of gravity. Several solid objects are also placed in the container.
+# The water flow pushes the solid objects around until the sytem comes to halt due to
+# viscous damping. The solid objects have a lower mass density than water and finally float on
+# the water surface.
+#
+# Water is modelled using the Updated Lagrangian formalism. Solid bodies are modelled using the
+# Total Lagrangian formalism. Contact forces between container, solid bodies, and water prevent
+# mutual penetration of these physical entities.
+
+variable        l0 equal 0.05 # initial particle lattice spacing
+variable        rho_water equal 1000 # mass density water
+variable        rho_obj equal 300 # mass density solid objects
+variable        h equal 2.5*${l0} # SPH kernel diameter
+variable        c0 equal 10.0 # speed of sound for water
+variable        E equal 2.0e5 # Young's modulus for solid objects
+variable        sigma_yield equal 0.1*${E} # plastic yield stress for solid objects
+variable        contact_stiffness equal 0.5*${c0}^2*${rho_water} # contact force amplitude
 variable        skin equal ${h} # Verlet list range
-variable        vol_one equal ${l0}^2
+variable        vol_one equal ${l0}^2 # initial particle volume for 2d simulation
 
 units		si
 dimension       2
@@ -21,47 +26,45 @@ boundary        sm sm p
 atom_style      smd
 comm_style      tiled
 neighbor        ${skin} bin
-neigh_modify    every 5 delay 0 check yes # only build neighbor list if particle has moved half the skin distance
+neigh_modify    every 5 delay 0 check yes
 comm_modify     vel yes
 newton          off
 
+# create simulation box, a container, and a water column
 region          box block 0 6 0 4 -0.01 0.01 units box
 create_box      3 box
 region          water block 0.25 1 0.25 4 EDGE EDGE units box
-region          bc block 0.15 5.85 0.15 4 -0.01 0.01 units box side out
-region          particles union 2 water bc
+region          container block 0.15 5.85 0.15 4 -0.01 0.01 units box side out # container 
 lattice         sq ${l0}
 create_atoms    1 region water
-create_atoms    3 region bc
+group           water type 1
+create_atoms    3 region container
+group           container type 3
 
-
-# create some objects
-#region          obj1 block 2 2.6 0.25 0.85 EDGE EDGE units box
+# create some solid objects to be pushed around
 region          obj1 prism 2 2.6 0.25 0.85 EDGE EDGE 0.3 0 0 units box
 region          obj2 block 3 3.6 0.25 0.85 EDGE EDGE units box
 region          obj3 sphere 4.3 0.5 0 0.25 units box
 create_atoms    2 region obj1
 create_atoms    2 region obj2
 create_atoms    2 region obj3
+group           solids type 2
 
-group           bc region bc
-group           water region water
-group           ulsph type 1
-group           tlsph type 2
-
+# initialize particle properties
 set             group all meso_rho ${rho_water}
 set             group all diameter ${h}
 set             group all contact_radius ${l0}
 set             group all volume  ${vol_one}
 set             group all density ${rho_water}
-set             group tlsph density ${rho_obj}
+set             group solids density ${rho_obj}
 
+# set pair styles
 pair_style      hybrid/overlay ulsph tlsph smd/hertz
-pair_coeff      1 1 ulsph *COMMON ${rho_water} ${c0} ${visc} ${Cp} &
+pair_coeff      1 1 ulsph *COMMON ${rho_water} ${c0} 0.1 1 &
 		*EOS_TAIT 7.0 &
 	        *END
-pair_coeff      2 2 tlsph *COMMON ${rho_obj} ${E} 0.3 0.56  0.0  00 1.0 &
-                *LINEAR_STRENGTH &
+pair_coeff      2 2 tlsph *COMMON ${rho_obj} ${E} 0.3 0.5 0.0 10 1.0 &
+                *LINEAR_PLASTICITY ${sigma_yield} &
 		*EOS_LINEAR &
                 *END
 pair_coeff      3 3 none
@@ -70,44 +73,30 @@ pair_coeff      1 3 smd/hertz ${contact_stiffness}
 pair_coeff      2 3 smd/hertz ${contact_stiffness}
 pair_coeff      2 2 smd/hertz ${contact_stiffness}
 
-fix             gfix all gravity -9.81 vector 0 1 0 # add gravity. This fix also computes potential energy of mass in gravity field.
-
 compute         eint all smd/internal_energy
-compute         rho all smd/rho
 compute         alleint all reduce sum c_eint
-variable        etot equal ke+c_alleint+f_gfix
 compute         contact_radius all smd/contact_radius
-compute         fS all smd/ulsph_stress
-compute         aS all stress/atom NULL pair
-compute         nn all smd/ulsph_num_neighs
+compute         S solids smd/tlsph_stress
+compute         nn water smd/ulsph_num_neighs
+compute         epl solids smd/plastic_strain
+compute         hgerr solids smd/hourglass_error
 
-#
-variable        nrun equal round(10.0/${dt})
-print "running for ${nrun} steps"
 
-variable        dumpFreq equal 100 #round(${nrun}/100)
-dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
-                fx fy vx vy c_eint &
-                c_contact_radius mol c_rho &
-                c_fS[1] c_fS[2] c_fS[4] mass radius c_nn
-dump_modify     dump_id first yes
 
-thermo          100
-thermo_style    custom step ke pe v_etot c_alleint
-thermo_modify   lost ignore
-
-fix             dtfix all smd/adjust_dt 0.1
+fix             gfix all gravity -9.81 vector 0 1 0 # add gravity
+variable        etot equal ke+c_alleint+f_gfix # total energy of the system
+fix             dtfix all smd/adjust_dt 0.1 # compute stable time increment
+fix             integration_fix_water water smd/integrate_ulsph adjust_radius 1.2
+fix             integration_fix_solids solids smd/integrate_tlsph xsph
+fix             balance_fix all balance 1000 0.9 rcb # load balancing for MPI
 
 thermo          100
 thermo_style    custom step ke pe v_etot c_alleint f_dtfix dt
 thermo_modify   lost ignore
+dump            dump_id all custom 100 dump.LAMMPS id type x y z &
+                fx fy vx vy c_eint c_contact_radius mol &
+                c_S[1] c_S[2] c_S[4] mass radius c_epl c_hgerr
+dump_modify     dump_id first yes
 
-
-fix             bc_fix bc setforce 0 0 0
-fix             integration_fix_ulsph ulsph smd/integrate_ulsph adjust_radius 1.2
-fix             integration_fix tlsph smd/integrate_tlsph xsph
-fix             10 all balance 50 0.9 rcb
-run             200000
-
-
+run             30000
 #>>========>>========>>========>>========>>========>>========>>========>>========
