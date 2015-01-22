@@ -38,7 +38,7 @@ group           bot region bot # bottom row of particles
 
 pair_style      tlsph # activate Total-Lagrangian SPH
 #                           rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.06  0.0  100 1.0 &
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 1.00  0.0  100 1.0 &
                 *LINEAR_PLASTICITY 0.1 &
 		*FAILURE_MAX_PLASTIC_STRAIN 0.7 &
 		*EOS_LINEAR &
@@ -67,11 +67,11 @@ fix             botfix bot setforce 0 0 0
 fix             dtfix all smd/adjust_dt 0.1
 variable        stress equal 0.5*(f_botfix[2]-f_topfix[2])/20 
 variable        strain equal (2.0*${vel}*f_dtfix/20) # strain: relative elongation
-fix             integration_fix all smd/integrate_tlsph update xsph #adjust_radius
+fix             integration_fix all smd/integrate_tlsph update xsph adjust_radius
 fix             stress_curve all print 10 "${strain} ${stress}" file stress_strain.dat screen no
 
 
 thermo 100
-thermo_style    custom step dt f_dtfix v_strain
+thermo_style    custom step dt f_dtfix time v_strain
 
-run             20000
+run             10000
