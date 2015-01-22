@@ -1,0 +1,64 @@
+# TLSPH example: elongate a 2d strip of elastic material py pulling its ends apart
+
+# define initial parameters
+variable        l0 equal 1.0 # lattice spacing for creating particles
+variable        rho equal 1 # initial mass density
+variable        E equal 1.0 # Young's modulus
+variable        nu equal 0.3 # Poisson ratio
+variable        h equal 3.01*${l0} # SPH smoothing kernel diameter
+variable        vol_one equal ${l0}^2 # volume of one particle
+variable        mass_one equal ${vol_one}*${rho} # mass of one particle
+variable        skin equal 0.5*${l0} # Verlet list range
+
+units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
+dimension       2 # this is a 2d plane-strain simulation
+boundary        sm sm p # simulation box boundaries
+atom_style      smd 
+neighbor        ${skin} bin
+#neigh_modify    every 10 delay 0 check yes # re-build neighbor list every 10 steps
+neigh_modify once yes
+newton          off # required for SMD simulations!
+comm_modify     vel yes # required for SMD simulations!
+
+# create simulation box and particles
+lattice         sq ${l0}
+region          box block -10 10 -10 10 -0.01 0.01 units box
+create_box      1 box
+create_atoms    1 box
+set             group all mass ${mass_one}
+set             group all volume ${vol_one}
+set             group all diameter ${h} # set SPH kernel radius
+
+pair_style      tlsph # activate Total-Lagrangian SPH
+#                           rh0    E    nu    Q1    Q2   hg    Cp
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  000 1.0 &
+		*EOS_NONE &
+		*LINEAR_DEFGRAD &
+		*END
+
+compute         p all smd/plastic_strain
+compute         S all smd/tlsph_stress # Cauchy stress tensor
+compute         D all smd/tlsph_strain_rate
+compute         nn all smd/tlsph_num_neighs # number of neighbors for each particle
+compute         damage all smd/damage
+compute         F all smd/tlsph_defgrad
+
+
+dump            dump_id all custom 1 dump.LAMMPS id type x y z &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] c_nn c_p &
+		c_D[1] c_D[2] c_D[4] c_damage radius &
+		c_F[1] c_F[2] c_F[3] c_F[4] c_F[5] c_F[6] c_F[7] c_F[8] c_F[9] &
+		fx fy fz
+
+dump_modify     dump_id first yes
+
+thermo 1
+thermo_style    custom step dt
+
+# initial run
+run             2
+
+# deform box and run a few time steps
+change_box      all x scale 2.0 y scale 0.75 remap units box
+run             2
+

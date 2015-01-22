@@ -588,7 +588,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				// because hourglass control and artificial viscosity are evaluated using the current coordinates,
 				// call kernel and kernel gradient weights with current separation
-				barbara_kernel_and_derivative(h, r, wf, wfd);
+				spiky_kernel_and_derivative(h, r, wf, wfd);
 
 				delVdotDelR = dx.dot(dv);
 				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h); // m * m/s * m / m*m ==> units m/s
@@ -828,20 +828,20 @@ void PairTlsph::LinearStrengthDefgrad(double lambda, double mu, Matrix3d F, Matr
 //    tau = F * S * F.transpose(); // convert PK2 to Kirchhoff stress
 //    sigma = tau / F.determinant();
 
-	*T = sigma;
+	//*T = sigma;
 
 	/*
 	 * neo-hookean model due to Bonet
 	 */
 //    lambda = mu = 100.0;
 //    // left Cauchy-Green Tensor, b = F.F^T
-//    double J = F.determinant();
-//    double logJ = log(J);
-//    Matrix3d b;
-//    b = F * F.transpose();
-//
-//    sigma = (mu / J) * (b - eye) + (lambda / J) * logJ * eye;
-//    *T = sigma;
+    double J = F.determinant();
+    double logJ = log(J);
+    Matrix3d b;
+    b = F * F.transpose();
+
+    sigma = (mu / J) * (b - eye) + (lambda / J) * logJ * eye;
+    *T = sigma;
 }
 
 /* ----------------------------------------------------------------------
@@ -2143,6 +2143,15 @@ void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, doub
 	 * Spiky kernel
 	 */
 
+	//error->one(FLERR, "should not be here");
+
+	if ( r > h) {
+		wfd = 0.0;
+		wf = 0.0;
+		return;
+	}
+
+
 	if (domain->dimension == 2) {
 		double hr = h - r; // [m]
 		double n = 0.3141592654e0 * h * h * h * h * h; // [m^5]
@@ -2164,6 +2173,12 @@ void PairTlsph::barbara_kernel_and_derivative(const double h, const double r, do
 
 	double arg = (1.570796327 * (r + h)) / h;
 	double hsq = h * h;
+
+	if (r > h) {
+		char msg[128];
+		sprintf(msg, "r = %f > h = %f in kernel function", r, h);
+		error->one(FLERR, msg);
+	}
 
 	if (domain->dimension == 2) {
 		wf = (1.680351548 * (cos(arg) + 1.)) / hsq;
