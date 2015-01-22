@@ -635,7 +635,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					if (delVdotDelR * delta < 0.0) {
 						hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
 					} else {
-						hg_mag = 0.0*hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure;
+						hg_mag = 0.0;
 					}
 					f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
 
@@ -691,7 +691,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				// check if a particle has moved too much w.r.t another particles
 				if (r > r0) {
 					//if ((r - r0) > 0.75 * neighbor->skin) { works reasonably well, but let's base the update criterion on a per-particle length-scale
-					if ((r - r0) > 0.75 * h + 0.0 * neighbor->skin) {
+					if (r > h + 0.75 * neighbor->skin) {
 						//printf("current distance is %f, r0 distance is %f\n", r, r0);
 						updateFlag = 1;
 					}

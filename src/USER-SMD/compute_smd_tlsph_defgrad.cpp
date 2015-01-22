@@ -95,9 +95,9 @@ void ComputeSMDTLSPHDefgrad::compute_peratom() {
         error->all(FLERR, "compute smd/tlsph_defgrad failed to access detF array");
     }
 
-    Matrix3d *F = (Matrix3d *) force->pair->extract("smd/tlsph/Fincr_ptr", itmp);
+    Matrix3d *F = (Matrix3d *) force->pair->extract("smd/tlsph/F_ptr", itmp);
     if (F == NULL) {
-        error->all(FLERR, "compute smd/tlsph_defgrad failed to access Fincr array");
+        error->all(FLERR, "compute smd/tlsph_defgrad failed to access F array");
     }
 
     int *mask = atom->mask;

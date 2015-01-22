@@ -115,7 +115,7 @@ void PairHertz::compute(int eflag, int vflag) {
 		ytmp = x[i][1];
 		ztmp = x[i][2];
 		itype = type[i];
-		ri = 1.5 * radius[i];
+		ri = scale * radius[i];
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 
@@ -133,7 +133,7 @@ void PairHertz::compute(int eflag, int vflag) {
 			}
 			rsq = delx * delx + dely * dely + delz * delz;
 
-			rj = 1.5 * radius[j];
+			rj = scale * radius[j];
 			rcut = ri + rj;
 			rcutSq = rcut * rcut;
 
@@ -223,8 +223,17 @@ void PairHertz::allocate() {
  ------------------------------------------------------------------------- */
 
 void PairHertz::settings(int narg, char **arg) {
-	if (narg != 0)
+	if (narg != 1)
 		error->all(FLERR, "Illegal number of args for pair_style hertz");
+
+	scale = force->numeric(FLERR, arg[0]);
+	if (comm->me == 0) {
+		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
+		printf("SMD/HERTZ CONTACT SETTINGS:\n");
+		printf("... effective contact radius is scaled by %f\n", scale);
+		printf(">>========>>========>>========>>========>>========>>========>>========>>========\n");
+	}
+
 }
 
 /* ----------------------------------------------------------------------

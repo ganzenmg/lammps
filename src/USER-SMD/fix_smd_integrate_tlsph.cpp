@@ -113,7 +113,7 @@ FixSMDIntegrateTlsph::FixSMDIntegrateTlsph(LAMMPS *lmp, int narg, char **arg) :
 	}
 
 	if (comm->me == 0) {
-		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
+		printf(">>========>>========>>========>>========>>========>>========>>========>>========\n");
 	}
 
 	time_integrate = 1;
