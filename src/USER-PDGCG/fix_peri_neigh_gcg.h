@@ -26,6 +26,7 @@ namespace LAMMPS_NS {
 
 class FixPeriNeighGCG: public Fix {
 	friend class PairPeriGCG;
+	friend class PairPeriDefgrad;
 	friend class ComputePDGCGDamage;
 
 public:
