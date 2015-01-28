@@ -41,6 +41,7 @@
 #include "error.h"
 #include <stdio.h>
 #include <iostream>
+#include "smd_material_models.h"
 
 using namespace std;
 using namespace LAMMPS_NS;
@@ -535,54 +536,9 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 }
 
-/* ----------------------------------------------------------------------
- perfect gas EOS for use with linear elasticity
- input: gamma -- adiabatic index (ratio of specific heats)
- J -- determinant of deformation gradient
- volume0 -- reference configuration volume of particle
- energy -- energy of particle
- pInitial -- initial pressure of the particle
- d -- isotropic part of the strain rate tensor,
- dt -- time-step size
 
- output: final pressure pFinal, pressure rate p_rate
- ------------------------------------------------------------------------- */
-void PairULSPH::PerfectGasEOS(double gamma, double vol, double mass, double energy, double *pFinal__, double *c0) {
 
-	/*
-	 * perfect gas EOS is p = (gamma - 1) rho e
-	 */
 
-	*pFinal__ = (1.0 - gamma) * energy / vol;
-//printf("gamma = %f, vol%f, e=%g ==> p=%g\n", gamma, vol, energy, *pFinal__/1.0e-9);
-
-	if (energy > 0.0) {
-		*c0 = sqrt((gamma - 1.0) * energy / mass);
-	} else {
-		*c0 = 0.0;
-	}
-
-}
-
-/* ----------------------------------------------------------------------
- Tait EOS
-
- input: (1) reference sound speed
- (2) equilibrium mass density
- (3) current mass density
-
- output:(1) pressure
- (2) current speed of sound
- ------------------------------------------------------------------------- */
-void PairULSPH::TaitEOS(const double exponent, const double c0_reference, const double rho_reference, const double rho_current,
-		double &pressure, double &sound_speed) {
-
-	double B = rho_reference * c0_reference * c0_reference / exponent;
-	double tmp = pow(rho_current / rho_reference, exponent);
-	pressure = B * (tmp - 1.0);
-	double bulk_modulus = B * tmp * exponent; // computed as rho * d(pressure)/d(rho)
-	sound_speed = sqrt(bulk_modulus / rho_current);
-}
 
 /* ----------------------------------------------------------------------
  compute pressure
@@ -590,10 +546,8 @@ void PairULSPH::TaitEOS(const double exponent, const double c0_reference, const 
 void PairULSPH::ComputePressure() {
 	double *radius = atom->radius;
 	double *rho = atom->rho;
-	double *rmass = atom->rmass;
-	//double *e = atom->e;
 	int *type = atom->type;
-	double pFinal, ivol;
+	double pFinal;
 	int i, itype;
 	int nlocal = atom->nlocal;
 	Matrix3d D, W, V, sigma_diag;
@@ -624,7 +578,7 @@ void PairULSPH::ComputePressure() {
 
 				for (i = 0; i < nlocal; i++) {
 					if (type[i] == itype) {
-						TaitEOS(var1, var2, var3, rho[i], pFinal, c0[i]);
+						TaitEOS_density(var1, var2, var3, rho[i], pFinal, c0[i]);
 						stressTensor[i].setZero();
 						stressTensor[i](0, 0) = pFinal;
 						stressTensor[i](1, 1) = pFinal;

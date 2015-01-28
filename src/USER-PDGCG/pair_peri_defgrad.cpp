@@ -252,12 +252,12 @@ void PairPeriDefgrad::compute(int eflag, int vflag) {
 			/*
 			 * artificial stress
 			 */
-			double wf0;
-			kernel_and_derivative(h, 0.75, wf0, wfd);
-//
-			weight = pow(wf/wf0,4.0);
-			f_artstress = 0.01 * weight * vfrac[i] * vfrac[j] * (PK1_as[i] + PK1_as[j]) * dx0;
-			f_stress += f_artstress;
+//			double wf0;
+//			kernel_and_derivative(h, 0.75, wf0, wfd);
+////
+//			weight = pow(wf/wf0,4.0);
+//			f_artstress = 0.01 * weight * vfrac[i] * vfrac[j] * (PK1_as[i] + PK1_as[j]) * dx0;
+//			f_stress += f_artstress;
 
 			f[i][0] += f_stress(0);
 			f[i][1] += f_stress(1);
@@ -270,10 +270,17 @@ void PairPeriDefgrad::compute(int eflag, int vflag) {
 void PairPeriDefgrad::kernel_and_derivative(double h, double r, double &wf, double &wfd) {
 
 	double hr = h - r; // [m]
-	double n = 0.3141592654e0 * h * h * h * h * h; // [m^5]
-	wfd = -3.0e0 * hr * hr / n; // [m*m/m^5] = [1/m^3] ==> correct for dW/dr in 2D
-	wf = -0.333333333333e0 * hr * wfd; // [m/m^3] ==> [1/m^2] correct for W in 2D
-	wf = wfd;
+//	double n = 0.3141592654e0 * h * h * h * h * h; // [m^5]
+//	wfd = -3.0e0 * hr * hr / n; // [m*m/m^5] = [1/m^3] ==> correct for dW/dr in 2D
+//	wf = -0.333333333333e0 * hr * wfd; // [m/m^3] ==> [1/m^2] correct for W in 2D
+//	wf = wfd;
+
+	//wf = pow(hr/h,4); // works well for the tensile instability problem
+
+	// Wendland C5
+	double q = 2.0 * r/h;
+	wf = pow(1.0 - 0.5*q, 4) * (2.0 * q + 1.0);
+
 
 //	double arg = (1.570796327 * (r + h)) / h;
 //	double hsq = h * h;

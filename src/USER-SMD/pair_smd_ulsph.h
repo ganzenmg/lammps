@@ -64,14 +64,6 @@ public:
     void PreCompute_DensitySummation();
     Matrix3d Deviator(Matrix3d);
 
-    /*
-     * EOS models
-     */
-    void PerfectGasEOS(double, double, double, double, double *, double *);
-    void TaitEOS(const double exponent, const double c0_reference,
-                 const double rho_reference, const double rho_current,
-                 double &pressure, double &sound_speed);
-
 protected:
 
     double *rho0; // reference mass density per type

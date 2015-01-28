@@ -6,7 +6,7 @@ variable        rho equal 1 # initial mass density
 variable        E equal 1.0 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
 variable        sigma_yield equal 0.051 # plastic yield stress for bar 2
-variable        skin equal 2.0*${l0} # Verlet list range
+variable        skin equal 4.0*${l0} # Verlet list range
 variable        vel equal 100.0 # pull velocity
 
 units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
@@ -29,7 +29,7 @@ set             group left type 1
 set             group right type 2
 set             group all contact_radius 1.0
 
-pair_style      hybrid/overlay tlsph smd/hertz 1.5 # activate Total-Lagrangian SPH
+pair_style      hybrid/overlay tlsph smd/hertz 1.0 # activate Total-Lagrangian SPH
 #                                 rh0    E    nu    Q1    Q2   hg    Cp
 pair_coeff      1 1 tlsph *COMMON ${rho} ${E} ${nu} 0.56  0.0  100 1.0 &
                 *LINEAR_STRENGTH &
@@ -52,7 +52,7 @@ compute         alleint all reduce sum c_eint
 variable        etot equal c_alleint+ke+pe
 
 dump            dump_id all custom 100 dump.LAMMPS id type x y z &
-                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] c_nn c_cr proc c_p
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] c_nn c_cr proc c_p radius
 dump_modify     dump_id first yes
 
 # apply velocity boundary condition to top and bottom rows of particles

@@ -22,10 +22,6 @@
  See the README file in the top-level LAMMPS directory.
  ------------------------------------------------------------------------- */
 
-/* ----------------------------------------------------------------------
- Contributing author: Mike Parks (SNL)
- ------------------------------------------------------------------------- */
-
 #include "math.h"
 #include "float.h"
 #include "stdlib.h"
@@ -50,10 +46,10 @@
 #include "fix_smd_integrate_tlsph.h"
 #include <Eigen/SVD>
 #include <Eigen/Eigen>
+#include "smd_material_models.h"
 using namespace Eigen;
 using namespace std;
 using namespace LAMMPS_NS;
-using namespace MathSpecial;
 
 #define JAUMANN false
 #define DETF_MIN 0.1 // maximum compression deformation allowed
@@ -389,8 +385,6 @@ void PairTlsph::PreCompute() {
 
 			if (mol[i] < 0) {
 
-
-
 				d[i].setZero();
 				D[i].setZero();
 				Fdot[i].setZero();
@@ -710,278 +704,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 		virial_fdotr_compute();
 }
 
-/* ----------------------------------------------------------------------
- shock EOS
- input:
- current density rho
- reference density rho0
- current energy density e
- reference energy density e0
- reference speed of sound c0
- shock Hugoniot parameter S
- Grueneisen parameter Gamma
- initial pressure pInitial
- time step dt
 
- output:
- pressure rate p_rate
- final pressure pFinal
-
- ------------------------------------------------------------------------- */
-void PairTlsph::ShockEOS(double rho, double rho0, double e, double e0, double c0, double S, double Gamma, double pInitial,
-		double dt, double &pFinal, double &p_rate) {
-
-	double mu = rho / rho0 - 1.0;
-	double pH = rho0 * square(c0) * mu * (1.0 + mu) / square(1.0 - (S - 1.0) * mu);
-
-	pFinal = -(pH + rho * Gamma * (e - e0));
-
-	//printf("shock EOS: rho = %g, rho0 = %g, Gamma=%f, c0=%f, S=%f, e=%f, e0=%f\n", rho, rho0, Gamma, c0, S, e, e0);
-	//printf("pFinal = %f\n", pFinal);
-	p_rate = (pFinal - pInitial) / dt;
-
-}
-
-/* ----------------------------------------------------------------------
- polynomial EOS
- input:
- current density rho
- reference density rho0
- coefficients 0 .. 6
- initial pressure pInitial
- time step dt
-
- output:
- pressure rate p_rate
- final pressure pFinal
-
- ------------------------------------------------------------------------- */
-void PairTlsph::polynomialEOS(double rho, double rho0, double e, double C0, double C1, double C2, double C3, double C4, double C5,
-		double C6, double pInitial, double dt, double &pFinal, double &p_rate) {
-
-	double mu = rho / rho0 - 1.0;
-
-	pFinal = C0 + C1 * mu + C2 * mu * mu + C3 * mu * mu * mu + (C4 + C5 * mu + C6 * mu * mu) * e;
-	pFinal = -pFinal;
-
-	//printf("pFinal = %f\n", pFinal);
-	p_rate = (pFinal - pInitial) / dt;
-
-}
-
-/* ----------------------------------------------------------------------
- linear EOS for use with linear elasticity
- input: initial pressure pInitial, isotropic part of the strain rate d, time-step dt
- output: final pressure pFinal, pressure rate p_rate
- ------------------------------------------------------------------------- */
-void PairTlsph::LinearEOS(double lambda, double pInitial, double d, double dt, double &pFinal, double &p_rate) {
-
-	/*
-	 * pressure rate
-	 */
-	p_rate = lambda * d;
-
-	pFinal = pInitial + dt * p_rate; // increment pressure using pressure rate
-
-}
-
-/* ----------------------------------------------------------------------
- linear strength model for use with linear elasticity
- input: lambda, mu : Lame parameters
- input: sigmaInitial_dev, d_dev: initial stress deviator, deviatoric part of the strain rate tensor
- input: dt: time-step
- output:  sigmaFinal_dev, sigmaFinal_dev_rate__: final stress deviator and its rate.
- ------------------------------------------------------------------------- */
-void PairTlsph::LinearStrength(double mu, Matrix3d sigmaInitial_dev, Matrix3d d_dev, double dt, Matrix3d *sigmaFinal_dev__,
-		Matrix3d *sigma_dev_rate__) {
-
-	/*
-	 * deviatoric rate of unrotated stress
-	 */
-	*sigma_dev_rate__ = 2.0 * mu * d_dev;
-
-	/*
-	 * elastic update to the deviatoric stress
-	 */
-	*sigmaFinal_dev__ = sigmaInitial_dev + dt * *sigma_dev_rate__;
-}
-
-/* ----------------------------------------------------------------------
- linear strength model for use with linear elasticity
- input: lambda, mu : Lame parameters
- input: F: deformation gradient
- output:  total stress tensor, deviator + pressure
- ------------------------------------------------------------------------- */
-void PairTlsph::LinearStrengthDefgrad(double lambda, double mu, Matrix3d F, Matrix3d *T) {
-	Matrix3d E, PK2, eye, sigma, S, tau;
-
-	eye.setIdentity();
-
-	E = 0.5 * (F * F.transpose() - eye); // strain measure E = 0.5 * (B - I) = 0.5 * (F * F^T - I)
-	tau = lambda * E.trace() * eye + 2.0 * mu * E; // Kirchhoff stress, work conjugate to above strain
-	sigma = tau / F.determinant(); // convert Kirchhoff stress to Cauchy stress
-
-//printf("l=%f, mu=%f, sigma xy = %f\n", lambda, mu, sigma(0,1));
-
-//    E = 0.5 * (F.transpose() * F - eye); // Green-Lagrange Strain E = 0.5 * (C - I)
-//    S = lambda * E.trace() * eye + 2.0 * mu * Deviator(E); // PK2 stress
-//    tau = F * S * F.transpose(); // convert PK2 to Kirchhoff stress
-//    sigma = tau / F.determinant();
-
-	//*T = sigma;
-
-	/*
-	 * neo-hookean model due to Bonet
-	 */
-//    lambda = mu = 100.0;
-//    // left Cauchy-Green Tensor, b = F.F^T
-    double J = F.determinant();
-    double logJ = log(J);
-    Matrix3d b;
-    b = F * F.transpose();
-
-    sigma = (mu / J) * (b - eye) + (lambda / J) * logJ * eye;
-    *T = sigma;
-}
-
-/* ----------------------------------------------------------------------
- linear strength model for use with linear elasticity
- input: lambda, mu : Lame parameters
- input: sigmaInitial_dev, d_dev: initial stress deviator, deviatoric part of the strain rate tensor
- input: dt: time-step
- output:  sigmaFinal_dev, sigmaFinal_dev_rate__: final stress deviator and its rate.
- ------------------------------------------------------------------------- */
-void PairTlsph::LinearPlasticStrength(double G, double yieldStress, Matrix3d sigmaInitial_dev, Matrix3d d_dev, double dt,
-		Matrix3d *sigmaFinal_dev__, Matrix3d *sigma_dev_rate__, double *plastic_strain_increment) {
-
-	Matrix3d sigmaTrial_dev, dev_rate;
-	double J2;
-
-	/*
-	 * deviatoric rate of unrotated stress
-	 */
-	dev_rate = 2.0 * G * d_dev;
-
-	/*
-	 * perform a trial elastic update to the deviatoric stress
-	 */
-	sigmaTrial_dev = sigmaInitial_dev + dt * dev_rate; // increment stress deviator using deviatoric rate
-
-	/*
-	 * check yield condition
-	 */
-	J2 = sqrt(3. / 2.) * sigmaTrial_dev.norm();
-
-	if (J2 < yieldStress) {
-		/*
-		 * no yielding has occured.
-		 * final deviatoric stress is trial deviatoric stress
-		 */
-		*sigma_dev_rate__ = dev_rate;
-		*sigmaFinal_dev__ = sigmaTrial_dev;
-		*plastic_strain_increment = 0.0;
-		//printf("no yield\n");
-
-	} else {
-		//printf("yiedl\n");
-		/*
-		 * yielding has occured
-		 */
-		*plastic_strain_increment = (J2 - yieldStress) / (3.0 * G);
-
-		/*
-		 * new deviatoric stress:
-		 * obtain by scaling the trial stress deviator
-		 */
-		*sigmaFinal_dev__ = (yieldStress / J2) * sigmaTrial_dev;
-
-		/*
-		 * new deviatoric stress rate
-		 */
-		*sigma_dev_rate__ = *sigmaFinal_dev__ - sigmaInitial_dev;
-		//printf("yielding has occured.\n");
-	}
-}
-
-/* ----------------------------------------------------------------------
- linear strength model for use with linear elasticity
- input:
- G : shear modulus
- cp : heat capacity
- espec : energy / mass
- A : initial yield stress under quasi-static / room temperature conditions
- B : proportionality factor for plastic strain dependency
- a : exponent for plastic strain dpendency
- C : proportionality factor for logarithmic plastic strain rate dependency
- epdot0 : dimensionality factor for plastic strain rate dependency
- T : current temperature
- T0 : reference (room) temperature
- Tmelt : melting temperature
- input: sigmaInitial_dev, d_dev: initial stress deviator, deviatoric part of the strain rate tensor
- input: dt: time-step
- output:  sigmaFinal_dev, sigmaFinal_dev_rate__: final stress deviator and its rate.
- ------------------------------------------------------------------------- */
-void PairTlsph::JohnsonCookStrength(double G, double cp, double espec, double A, double B, double a, double C, double epdot0,
-		double T0, double Tmelt, double M, double dt, double ep, double epdot, Matrix3d sigmaInitial_dev, Matrix3d d_dev,
-		Matrix3d &sigmaFinal_dev__, Matrix3d &sigma_dev_rate__, double &plastic_strain_increment) {
-
-	Matrix3d sigmaTrial_dev, dev_rate;
-	double J2, yieldStress;
-
-	double deltaT = espec / cp;
-	double TH = deltaT / (Tmelt - T0);
-	TH = MAX(TH, 0.0);
-	double epdot_ratio = epdot / epdot0;
-	epdot_ratio = MAX(epdot_ratio, 1.0);
-	//printf("current temperature delta is %f, TH=%f\n", deltaT, TH);
-
-	yieldStress = (A + B * pow(ep, a)) * (1.0 + C * log(epdot_ratio)) * (1.0 - pow(TH, M));
-
-	/*
-	 * deviatoric rate of unrotated stress
-	 */
-	dev_rate = 2.0 * G * d_dev;
-
-	/*
-	 * perform a trial elastic update to the deviatoric stress
-	 */
-	sigmaTrial_dev = sigmaInitial_dev + dt * dev_rate; // increment stress deviator using deviatoric rate
-
-	/*
-	 * check yield condition
-	 */
-	J2 = sqrt(3. / 2.) * sigmaTrial_dev.norm();
-
-	if (J2 < yieldStress) {
-		/*
-		 * no yielding has occured.
-		 * final deviatoric stress is trial deviatoric stress
-		 */
-		sigma_dev_rate__ = dev_rate;
-		sigmaFinal_dev__ = sigmaTrial_dev;
-		plastic_strain_increment = 0.0;
-		//printf("no yield\n");
-
-	} else {
-		//printf("yiedl\n");
-		/*
-		 * yielding has occured
-		 */
-		plastic_strain_increment = (J2 - yieldStress) / (3.0 * G);
-
-		/*
-		 * new deviatoric stress:
-		 * obtain by scaling the trial stress deviator
-		 */
-		sigmaFinal_dev__ = (yieldStress / J2) * sigmaTrial_dev;
-
-		/*
-		 * new deviatoric stress rate
-		 */
-		sigma_dev_rate__ = sigmaFinal_dev__ - sigmaInitial_dev;
-		//printf("yielding has occured.\n");
-	}
-}
 
 /* ----------------------------------------------------------------------
  assemble unrotated stress tensor using deviatoric and pressure components.
@@ -1003,9 +726,9 @@ void PairTlsph::AssembleStress() {
 	int i, itype;
 	int nlocal = atom->nlocal;
 	double dt = update->dt;
-	double M, p_wave_speed, mass_specific_energy, vol_specific_energy, rho;
+	double M, p_wave_speed, mass_specific_energy, vol_specific_energy, rho, damage_increment;
 	Matrix3d sigma_rate, eye, sigmaInitial, sigmaFinal, T, Jaumann_rate, sigma_rate_check;
-	Matrix3d d_dev, sigmaInitial_dev, sigmaFinal_dev, sigma_dev_rate, E, sigma_damaged;
+	Matrix3d d_dev, sigmaInitial_dev, sigmaFinal_dev, sigma_dev_rate, strain, sigma_damaged;
 	Vector3d x0i, xi, xp;
 
 	eye.setIdentity();
@@ -1019,7 +742,8 @@ void PairTlsph::AssembleStress() {
 			if (mol[i] > 0) { // only do the following if particle has not failed -- mol < 0 means particle has failed
 
 				/*
-				 * initial stress state: given by the unrotateted Kirchhoff stress.
+				 * initial stress state: given by the unrotateted Cauchy stress.
+				 * Assemble Eigen 3d matrix from stored stress state
 				 */
 				sigmaInitial(0, 0) = tlsph_stress[i][0];
 				sigmaInitial(0, 1) = tlsph_stress[i][1];
@@ -1033,99 +757,34 @@ void PairTlsph::AssembleStress() {
 
 				pInitial = sigmaInitial.trace() / 3.0; // initial pressure, isotropic part of initial stress
 				sigmaInitial_dev = PairTlsph::Deviator(sigmaInitial);
-				d_iso = d[i].trace();
-				d_dev = PairTlsph::Deviator(d[i]);
+				d_iso = d[i].trace(); // volumetric part of stretch rate
+				d_dev = PairTlsph::Deviator(d[i]); // deviatoric part of stretch rate
+				strain = 0.5 * (Fincr[i].transpose() * Fincr[i] - eye);
 
-				mass_specific_energy = e[i] / rmass[i];
-				rho = rmass[i] / (detF[i] * vfrac[i]);
-				vol_specific_energy = mass_specific_energy * rho;
+				mass_specific_energy = e[i] / rmass[i]; // energy per unit mass
+				rho = rmass[i] / (detF[i] * vfrac[i]); // current mass density
+				vol_specific_energy = mass_specific_energy * rho; // energy per current volume
 
 				/*
-				 * pressure
+				 * pressure: compute pressure rate p_rate and final pressure pFinal
 				 */
 
-				//printf("eos = %d\n", eos[itype]);
-				switch (eos[itype]) {
-				case EOS_LINEAR:
-					LinearEOS(SafeLookup("bulk_modulus", itype), pInitial, d_iso, dt, pFinal, p_rate);
-					break;
-				case EOS_NONE:
-					pFinal = 0.0;
-					p_rate = 0.0;
-					break;
-				case EOS_SHOCK:
-					//  rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
-					ShockEOS(rho, rho0[itype], mass_specific_energy, 0.0, SafeLookup("eos_shock_c0", itype),
-							SafeLookup("eos_shock_s", itype), SafeLookup("eos_shock_gamma", itype), pInitial, dt, pFinal, p_rate);
-					break;
-				case EOS_POLYNOMIAL:
-					polynomialEOS(rho, rho0[itype], vol_specific_energy, SafeLookup("eos_polynomial_c0", itype),
-							SafeLookup("eos_polynomial_c1", itype), SafeLookup("eos_polynomial_c2", itype),
-							SafeLookup("eos_polynomial_c3", itype), SafeLookup("eos_polynomial_c4", itype),
-							SafeLookup("eos_polynomial_c5", itype), SafeLookup("eos_polynomial_c6", itype), pInitial, dt, pFinal,
-							p_rate);
-
-					break;
-				default:
-					error->one(FLERR, "unknown EOS.");
-					break;
-				}
+				ComputePressure(i, pInitial, d_iso, pFinal, p_rate);
 
 				/*
 				 * material strength
 				 */
 
 				if (damage[i] < 1.0) {
+					ComputeStressDeviator(i, sigmaInitial_dev, d_dev, sigmaFinal_dev, sigma_dev_rate, plastic_strain_increment);
 
-					switch (strengthModel[itype]) {
-					case LINEAR_STRENGTH:
-						//printf("mu0 is %f\n", mu0[itype]);
-						//LinearStrength(SafeLookup("lame_mu", itype), sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
+					eff_plastic_strain[i] += plastic_strain_increment;
 
-						sigma_dev_rate = 2.0 * SafeLookup("lame_mu", itype) * d_dev;
-						sigmaFinal_dev = sigmaInitial_dev + dt * sigma_dev_rate;
-
-						break;
-					case LINEAR_DEFGRAD:
-						LinearStrengthDefgrad(SafeLookup("lame_lambda", itype), SafeLookup("lame_mu", itype), Fincr[i],
-								&sigmaFinal_dev);
-						eff_plastic_strain[i] = 0.0;
-						p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
-						sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
-						R[i].setIdentity();
-						break;
-					case LINEAR_PLASTICITY:
-						LinearPlasticStrength(SafeLookup("lame_mu", itype), SafeLookup("yield_stress0", itype), sigmaInitial_dev,
-								d_dev, dt, &sigmaFinal_dev, &sigma_dev_rate, &plastic_strain_increment);
-						eff_plastic_strain[i] += plastic_strain_increment;
-
-						eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
-						eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
-						break;
-					case STRENGTH_JOHNSON_COOK:
-						JohnsonCookStrength(SafeLookup("lame_mu", itype), SafeLookup("heat_capacity", itype), mass_specific_energy,
-								SafeLookup("JC_A", itype), SafeLookup("JC_B", itype), SafeLookup("JC_a", itype),
-								SafeLookup("JC_C", itype), SafeLookup("JC_epdot0", itype), SafeLookup("JC_T0", itype),
-								SafeLookup("JC_Tmelt", itype), SafeLookup("JC_M", itype), dt, eff_plastic_strain[i],
-								eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev, sigmaFinal_dev, sigma_dev_rate,
-								plastic_strain_increment);
-
-						eff_plastic_strain[i] += plastic_strain_increment;
-
-						eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
-						eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
-
-						break;
-					case STRENGTH_NONE:
-						sigmaFinal_dev.setZero();
-						sigma_dev_rate.setZero();
-						break;
-					default:
-						error->one(FLERR, "unknown strength model.");
-						break;
-					}
+					eff_plastic_strain_rate[i] -= eff_plastic_strain_rate[i] / PLASTIC_STRAIN_AVERAGE_WINDOW;
+					eff_plastic_strain_rate[i] += (plastic_strain_increment / dt) / PLASTIC_STRAIN_AVERAGE_WINDOW;
 				} else {
 					sigmaFinal_dev.setZero(); // damage[i] >= 1, therefore it cannot carry shear stress
+					sigma_dev_rate.setZero();
 				}
 
 				/*
@@ -1134,81 +793,26 @@ void PairTlsph::AssembleStress() {
 				sigmaFinal = pFinal * eye + sigmaFinal_dev; // this is the stress that is kept
 
 				/*
-				 * this is the stress which is used for the force computation in this timestep.
-				 * It is degraded by the damage / failure models below.
-				 */
-				sigma_damaged = sigmaFinal;
-
-				/*
-				 * assemble stress rate
-				 */
-				sigma_rate = p_rate * eye + sigma_dev_rate;
-
-				/*
-				 *  failure criteria
+				 *  Damage due to failure criteria.
 				 */
 
 				if (damage[i] < 1.0) {
 
-					if (CheckKeywordPresent("failure_max_principal_stress", itype)) {
-						/*
-						 * maximum stress failure criterion:
-						 */
-						IsotropicMaxStressDamage(sigmaFinal, SafeLookup("failure_max_principal_stress", itype), dt,
-								signal_vel0[itype], radius[i], damage[i], sigma_damaged);
-					}
-					if (CheckKeywordPresent("failure_max_principal_strain", itype)) {
-						/*
-						 * maximum strain failure criterion:
-						 */
-						E = 0.5 * (Fincr[i] * Fincr[i].transpose() - eye);
-						IsotropicMaxStrainDamage(E, sigmaFinal, SafeLookup("failure_max_principal_strain", itype), dt,
-								signal_vel0[itype], radius[i], damage[i], sigma_damaged);
-					}
+					ComputeDamage(i, strain, pFinal, sigmaFinal, sigmaFinal_dev, sigma_damaged, damage_increment);
 
-					if (CheckKeywordPresent("failure_max_plastic_strain", itype)) {
-						/*
-						 * plastic strain damage does not happen instantaneously.
-						 * Rather, take time which signal_velocity takes to go over a distance h
-						 */
+					damage[i] += damage_increment;
+					damage[i] = MIN(damage[i], 1.0);
 
-						if (eff_plastic_strain[i] >= 0.99 * SafeLookup("failure_max_plastic_strain", itype)) {
-							damage[i] += dt / (100.0 * radius[i] / signal_vel0[itype]);
-							damage[i] = MAX(damage[i], 1.0);
-							eff_plastic_strain[i] = SafeLookup("failure_max_plastic_strain", itype);
-						}
-						if (pFinal < 0.0) { // compression: particle can carry compressive load but reduced shear
-							sigma_damaged = pFinal * eye + (1.0 - damage[i]) * sigmaFinal_dev;
-						} else { // tension: particle has reduced tensile and shear load bearing capability
-							sigma_damaged = (1.0 - damage[i]) * (pFinal * eye + sigmaFinal_dev);
-						}
-					}
-
-					if (CheckKeywordPresent("failure_JC_d1", itype)) {
-
-						if (plastic_strain_increment > 0.0) {
-							if (damage[i] < 1.0) {
-								double jc_failure_strain = JohnsonCookFailureStrain(pFinal, sigmaFinal_dev,
-										SafeLookup("failure_JC_d1", itype), SafeLookup("failure_JC_d2", itype),
-										SafeLookup("failure_JC_d3", itype), SafeLookup("failure_JC_d4", itype),
-										SafeLookup("failure_JC_epdot0", itype), eff_plastic_strain_rate[i]);
-
-								//cout << "plastic strain increment is " << plastic_strain_increment << "  jc fs is " << jc_failure_strain << endl;
-								if (eff_plastic_strain[i] / jc_failure_strain > 1.0) {
-									damage[i] = 1.0;
-								}
-							}
-
-						}
-					}
 				} // end if damage[i] < 1.0
 
-				if (damage[i] >= 1.0) {
-					if (pFinal < 0.0) {
-						sigma_damaged = pFinal * eye;
-					} else {
-						sigma_damaged.setZero();
-					}
+				/*
+				 * Apply damage
+				 */
+
+				if (pFinal < 0.0) { // compression: particle can carry compressive load but reduced shear
+					sigma_damaged = pFinal * eye + (1.0 - damage[i]) * sigmaFinal_dev;
+				} else { // tension: particle has reduced tensile and shear load bearing capability
+					sigma_damaged = (1.0 - damage[i]) * (pFinal * eye + sigmaFinal_dev);
 				}
 
 				if (JAUMANN) {
@@ -2144,13 +1748,11 @@ void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, doub
 	 */
 
 	//error->one(FLERR, "should not be here");
-
-	if ( r > h) {
+	if (r > h) {
 		wfd = 0.0;
 		wf = 0.0;
 		return;
 	}
-
 
 	if (domain->dimension == 2) {
 		double hr = h - r; // [m]
@@ -2286,99 +1888,6 @@ double PairTlsph::TestMatricesEqual(Matrix3d A, Matrix3d B, double eps) {
 	return norm;
 }
 
-/* ----------------------------------------------------------------------
- isotropic damage model based on max strain
- ------------------------------------------------------------------------- */
-
-void PairTlsph::IsotropicMaxStressDamage(Matrix3d S, double maxStress, double dt, double soundspeed, double characteristicLength,
-		double &damage, Matrix3d &S_damaged) {
-
-	/*
-	 * compute Eigenvalues of stress matrix
-	 */
-	SelfAdjointEigenSolver<Matrix3d> es;
-	es.compute(S);
-
-	double max_eigenvalue = es.eigenvalues().maxCoeff();
-
-	if (max_eigenvalue > maxStress) {
-		damage = damage + dt * 0.4 * soundspeed / characteristicLength;
-		damage = MIN(damage, 1.0);
-	}
-
-	/* apply damage model */
-	if (damage > 0.0) {
-		Matrix3d V = es.eigenvectors();
-
-// diagonalize stress matrix
-		Matrix3d S_diag = V.inverse() * S * V;
-
-		for (int dim = 0; dim < 3; dim++) {
-			if (S_diag(dim, dim) > 0.0) {
-				S_diag(dim, dim) *= (1.0 - pow(damage, 3.0));
-			}
-		}
-
-// undiagonalize stress matrix
-		S_damaged = V * S_diag * V.inverse();
-	} else {
-		S_damaged = S;
-	}
-}
-
-void PairTlsph::IsotropicMaxStrainDamage(Matrix3d E, Matrix3d S, double maxStrain, double dt, double soundspeed,
-		double characteristicLength, double &damage, Matrix3d &S_damaged) {
-
-	/*
-	 * compute Eigenvalues of strain matrix
-	 */
-	SelfAdjointEigenSolver<Matrix3d> es;
-	es.compute(E); // compute eigenvalue and eigenvectors of strain
-
-	double max_eigenvalue = es.eigenvalues().maxCoeff();
-
-	if (max_eigenvalue > maxStrain) {
-		damage = damage + dt * 0.04 * soundspeed / characteristicLength;
-//printf("failing strain at %f\n", max_eigenvalue);
-		damage = MIN(damage, 1.0);
-	}
-
-	/* apply damage model to stress matrix */
-	if (damage > 0.0) {
-		es.compute(S);
-		Matrix3d V = es.eigenvectors(); // compute eigenvalue and eigenvectors of stress
-
-// diagonalize stress matrix
-		Matrix3d S_diag = V.inverse() * S * V;
-
-// apply damage to diagonalized  matrix if in tension
-		for (int dim = 0; dim < 3; dim++) {
-			if (S_diag(dim, dim) > 0.0) {
-				S_diag(dim, dim) *= (1.0 - pow(damage, 3.0));
-			}
-		}
-
-// undiagonalize strain matrix
-		S_damaged = V * S_diag * V.inverse();
-	} else {
-		S_damaged = S;
-	}
-}
-
-double PairTlsph::JohnsonCookFailureStrain(double p, Matrix3d Sdev, double d1, double d2, double d3, double d4, double epdot0,
-		double epdot) {
-
-	double vm = sqrt(3. / 2.) * Sdev.norm(); // von-Mises equivalent stress
-	double epdot_ratio = epdot / epdot0;
-	epdot_ratio = MAX(epdot_ratio, 1.0);
-	double result = d1 + d2 * exp(d3 * vm / p); // * (1.0 + d4 * log(epdot_ratio)); // rest left out for now
-	if (result > 0.0) {
-		return result;
-	} else {
-		return 1.0e22;
-	}
-
-}
 
 /* ----------------------------------------------------------------------
  compute effectiveP-wave speed
@@ -2752,5 +2261,163 @@ Matrix3d PairTlsph::LimitEigenvalues(Matrix3d S, double limitEigenvalue) {
 		}
 	} else { // limiting does not apply
 		return S;
+	}
+}
+
+/* ----------------------------------------------------------------------
+ compute pressure. Called from AssembleStress().
+ ------------------------------------------------------------------------- */
+void PairTlsph::ComputePressure(const int i, const double pInitial, const double d_iso, double &pFinal, double &p_rate) {
+	double *rmass = atom->rmass;
+	double *vfrac = atom->vfrac;
+	double *e = atom->e;
+	int *type = atom->type;
+	double dt = update->dt;
+
+	int itype;
+
+	itype = type[i];
+
+	double mass_specific_energy = e[i] / rmass[i]; // energy per unit mass
+	double rho = rmass[i] / (detF[i] * vfrac[i]); // current mass density
+	double vol_specific_energy = mass_specific_energy * rho; // energy per current volume
+
+	switch (eos[itype]) {
+	case EOS_LINEAR:
+		LinearEOS(SafeLookup("bulk_modulus", itype), pInitial, d_iso, dt, pFinal, p_rate);
+		break;
+	case EOS_NONE:
+		pFinal = 0.0;
+		p_rate = 0.0;
+		break;
+	case EOS_SHOCK:
+		//  rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
+		ShockEOS(rho, rho0[itype], mass_specific_energy, 0.0, SafeLookup("eos_shock_c0", itype), SafeLookup("eos_shock_s", itype),
+				SafeLookup("eos_shock_gamma", itype), pInitial, dt, pFinal, p_rate);
+		break;
+	case EOS_POLYNOMIAL:
+		polynomialEOS(rho, rho0[itype], vol_specific_energy, SafeLookup("eos_polynomial_c0", itype),
+				SafeLookup("eos_polynomial_c1", itype), SafeLookup("eos_polynomial_c2", itype),
+				SafeLookup("eos_polynomial_c3", itype), SafeLookup("eos_polynomial_c4", itype),
+				SafeLookup("eos_polynomial_c5", itype), SafeLookup("eos_polynomial_c6", itype), pInitial, dt, pFinal, p_rate);
+
+		break;
+	default:
+		error->one(FLERR, "unknown EOS.");
+		break;
+	}
+}
+
+/* ----------------------------------------------------------------------
+ Compute stress deviator. Called from AssembleStress().
+ ------------------------------------------------------------------------- */
+void PairTlsph::ComputeStressDeviator(const int i, const Matrix3d sigmaInitial_dev, const Matrix3d d_dev, Matrix3d &sigmaFinal_dev,
+		Matrix3d &sigma_dev_rate, double &plastic_strain_increment) {
+	double *eff_plastic_strain = atom->eff_plastic_strain;
+	double *eff_plastic_strain_rate = atom->eff_plastic_strain_rate;
+	int *type = atom->type;
+	double *rmass = atom->rmass;
+	//double *vfrac = atom->vfrac;
+	double *e = atom->e;
+	double dt = update->dt;
+	int itype;
+
+	double mass_specific_energy = e[i] / rmass[i]; // energy per unit mass
+	plastic_strain_increment = 0.0;
+	itype = type[i];
+
+	switch (strengthModel[itype]) {
+	case LINEAR_STRENGTH:
+		//printf("mu0 is %f\n", mu0[itype]);
+		//LinearStrength(SafeLookup("lame_mu", itype), sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
+
+		sigma_dev_rate = 2.0 * SafeLookup("lame_mu", itype) * d_dev;
+		sigmaFinal_dev = sigmaInitial_dev + dt * sigma_dev_rate;
+
+		break;
+	case LINEAR_DEFGRAD:
+		//LinearStrengthDefgrad(SafeLookup("lame_lambda", itype), SafeLookup("lame_mu", itype), Fincr[i], &sigmaFinal_dev);
+		//eff_plastic_strain[i] = 0.0;
+		//p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
+		//sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
+		error->one(FLERR, "LINEAR_DEFGRAD is only for debugging purposes and currently deactivated.");
+		R[i].setIdentity();
+		break;
+	case LINEAR_PLASTICITY:
+		LinearPlasticStrength(SafeLookup("lame_mu", itype), SafeLookup("yield_stress0", itype), sigmaInitial_dev, d_dev, dt,
+				sigmaFinal_dev, sigma_dev_rate, plastic_strain_increment);
+		break;
+	case STRENGTH_JOHNSON_COOK:
+		JohnsonCookStrength(SafeLookup("lame_mu", itype), SafeLookup("heat_capacity", itype), mass_specific_energy,
+				SafeLookup("JC_A", itype), SafeLookup("JC_B", itype), SafeLookup("JC_a", itype), SafeLookup("JC_C", itype),
+				SafeLookup("JC_epdot0", itype), SafeLookup("JC_T0", itype), SafeLookup("JC_Tmelt", itype),
+				SafeLookup("JC_M", itype), dt, eff_plastic_strain[i], eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev,
+				sigmaFinal_dev, sigma_dev_rate, plastic_strain_increment);
+		break;
+	case STRENGTH_NONE:
+		sigmaFinal_dev.setZero();
+		sigma_dev_rate.setZero();
+		break;
+	default:
+		error->one(FLERR, "unknown strength model.");
+		break;
+	}
+
+}
+
+/* ----------------------------------------------------------------------
+ Compute damage. Called from AssembleStress().
+ ------------------------------------------------------------------------- */
+void PairTlsph::ComputeDamage(const int i, const Matrix3d strain, const double pFinal, const Matrix3d sigmaFinal, const Matrix3d sigmaFinal_dev, Matrix3d &sigma_damaged, double &damage_increment) {
+	double *eff_plastic_strain = atom->eff_plastic_strain;
+	double *eff_plastic_strain_rate = atom->eff_plastic_strain_rate;
+	int *type = atom->type;
+	double *radius = atom->radius;
+	double dt = update->dt;
+	int itype = type[i];
+	bool damage_flag = false;
+
+	if (CheckKeywordPresent("failure_max_principal_stress", itype)) {
+		/*
+		 * maximum stress failure criterion:
+		 */
+		damage_flag = IsotropicMaxStressDamage(strain, SafeLookup("failure_max_principal_stress", itype));
+	}
+	if (CheckKeywordPresent("failure_max_principal_strain", itype)) {
+		/*
+		 * maximum strain failure criterion:
+		 */
+		damage_flag = IsotropicMaxStrainDamage(strain, SafeLookup("failure_max_principal_strain", itype));
+	}
+
+	if (CheckKeywordPresent("failure_max_plastic_strain", itype)) {
+
+		if (eff_plastic_strain[i] >= 0.99 * SafeLookup("failure_max_plastic_strain", itype)) {
+			damage_flag = true;
+		}
+
+	}
+
+	if (CheckKeywordPresent("failure_JC_d1", itype)) {
+
+		double jc_failure_strain = JohnsonCookFailureStrain(pFinal, sigmaFinal_dev, SafeLookup("failure_JC_d1", itype),
+				SafeLookup("failure_JC_d2", itype), SafeLookup("failure_JC_d3", itype), SafeLookup("failure_JC_d4", itype),
+				SafeLookup("failure_JC_epdot0", itype), eff_plastic_strain_rate[i]);
+
+		//cout << "plastic strain increment is " << plastic_strain_increment << "  jc fs is " << jc_failure_strain << endl;
+		if (eff_plastic_strain[i] / jc_failure_strain > 1.0) {
+			damage_flag = true;
+		}
+	}
+
+	/*
+	 * Damage does not happen instantaneously but rather takes time which signal_velocity takes to go over a distance h.
+	 * Therefore compute a damage increment which is time-integrated in AssembleStress().
+	 */
+
+	if (damage_flag == true) {
+		damage_increment = dt * signal_vel0[itype] / (10.0 * radius[i]);
+	} else {
+		damage_increment = 0.0;
 	}
 }
