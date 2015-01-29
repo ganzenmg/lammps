@@ -47,6 +47,7 @@
 #include <Eigen/SVD>
 #include <Eigen/Eigen>
 #include "smd_material_models.h"
+#include "smd_kernels.h"
 using namespace Eigen;
 using namespace std;
 using namespace LAMMPS_NS;
@@ -227,11 +228,10 @@ void PairTlsph::PreCompute() {
 				dv = vj - vi;
 				dvint = vintj - vinti;
 
-				// kernel function
-				barbara_kernel_and_derivative(h, r0, wf, wfd);
-
-				// uncorrected kernel gradient
-				g = (wfd / r0) * dx0;
+				// uncorrected kernel gradient -- we use Wendland C5 here, Barbara kernel derivative in combination with g = (wfd / r0) * dx0 is also good
+				// can also use non-normalized kernel for other quantities as we normalize a posteriori with the Shepard weight
+				wf = SMD_Kernels::Kernel_Wendland_Quintic_NotNormalized(r0, h);
+				g = wf * dx0;
 
 				/* build matrices */
 				Ktmp = g * dx0.transpose();
@@ -559,16 +559,12 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				dx = xj - xi;
 				dv = vj - vi;
 
-				// derivative of kernel function and reference distance
-				// kernel function
-				barbara_kernel_and_derivative(h, r0, wf, wfd);
-				//printf("wf = %f, wfd = %f\n", wf, wfd);
-
 				// current distance
 				r = dx.norm();
 
-				// uncorrected kernel gradient
-				g = (wfd / r0) * dx0;
+				// uncorrected kernel gradient -- we use Wendland C5 here, Barbara kernel derivative in combination with g = (wfd / r0) * dx0 is also good
+				wf = SMD_Kernels::Kernel_Wendland_Quintic_NotNormalized(r0, h);
+				g = wf * dx0;
 
 				/*
 				 * force contribution -- note that the kernel gradient correction has been absorbed into PK1
