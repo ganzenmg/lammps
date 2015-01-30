@@ -1,0 +1,89 @@
+variable        h equal 0.5 # set a length scale ... needed for neighborlist build
+# define material parameters for plate
+variable        E equal 1.0 # Young's modulus
+variable        rho equal 2700.0e-9 # Aluminium mass density
+variable        sigy equal 0.03 # plastic yield stress
+variable        contact_stiffness equal 0.5*${E}
+#
+units		si
+dimension       3
+boundary        sm sm sm
+atom_style      smd
+comm_style      tiled
+neighbor        ${h} bin
+neigh_modify    every 10 delay 0 check yes one 10000
+comm_modify     vel yes
+newton          off
+atom_modify     map array
+
+# read non-uniform plate geometry obtained from FEM -mesh
+read_data       scratch_adjusted.data
+group           plate type 3
+
+# create a group to hold the bottom layer of plate particles
+region          bot block EDGE EDGE EDGE EDGE EDGE 0.51 units box
+group           bot region bot
+
+# create an indentor
+region          cone cone z 0 20 0.1 6.0 6.0 16.0 units box
+lattice         fcc 0.5
+create_atoms    2 region cone
+group           indentor type 2
+set             group indentor diameter 0.5
+set             group indentor contact_radius 0.5
+set             group plate density 2700.0e-9
+group           tlsph type 3
+
+
+# pair style: Total-Lagrangian SPH plus contact forces between plate and indentor
+pair_style      hybrid/overlay tlsph smd/hertz 1.0
+pair_coeff      * * none
+#                                  rh0    E    nu   Q1   Q2  hg Cp
+pair_coeff      3 3 tlsph *COMMON  ${rho} ${E} 0.3  0.1  0.0 10 910 &
+			  *EOS_LINEAR &
+			  *LINEAR_PLASTICITY ${sigy} &
+                          *END 
+pair_coeff      2 3 smd/hertz ${contact_stiffness}
+
+# computes
+compute         E plate smd/tlsph_strain
+compute         P plate smd/plastic_strain
+compute         S plate smd/tlsph_stress
+compute         d plate smd/damage
+compute         nn plate smd/tlsph_num_neighs
+compute         contact_radius all smd/contact_radius
+compute         eint all smd/internal_energy
+compute         alleint all reduce sum c_eint
+variable        etot equal ke+c_alleint+pe
+balance         1.0 rcb
+
+# fixes for time integration etc.
+fix             bottom_fix bot setforce 0 0 0 # hold bottome of plate stationary
+fix             indentor_fix indentor setforce 0 0 0 # remove forces due other particles from indentor, so it follows a prescribed motion
+fix             dtfix all smd/adjust_dt 0.1
+fix             integration_fix all smd/integrate_tlsph update xsph
+
+# dump
+variable        dumpFreq equal 200
+dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
+                c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
+                fx fy fz vx vy vz c_P c_eint proc &
+                c_contact_radius c_nn mol c_d mass radius
+dump_modify     dump_id first yes
+#
+thermo          10
+thermo_style    custom step ke pe v_etot c_alleint f_dtfix dt
+#
+# output force on indentor
+variable        f_indent_x equal f_indentor_fix[1]
+variable        f_indent_y equal f_indentor_fix[2]
+variable        f_indent_z equal f_indentor_fix[3]
+variable        tot_time equal f_dtfix
+fix             output_fix all print 10 "${tot_time} ${f_indent_x} ${f_indent_y} ${f_indent_z}" file time_force.dat screen no
+
+# prescribe indentor velocity and run
+velocity        indentor set 0 0 -100 sum no units box # lower indentor
+run             1000
+velocity        indentor set 100 0 0 sum no units box # move indentor along plate
+run             20000
