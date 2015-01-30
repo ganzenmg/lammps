@@ -19,7 +19,7 @@
 
 using namespace LAMMPS_NS;
 
-#define EXTRA 1000
+#define EXTRA 10000
 
 /* ----------------------------------------------------------------------
    allocate and initialize array or hash table for global -> local map
@@ -115,6 +115,10 @@ void Atom::map_clear()
   if (map_style == 1) {
     int nall = nlocal + nghost;
     for (int i = 0; i < nall; i++) {
+    	if (i >= max_same) {
+    		printf("i=%d, nall =%d, bound=%d\n", i, nall, max_same);
+    		error->one(FLERR, "trying to access sametag outside bounds");
+    	}
       sametag[i] = -1;
       map_array[tag[i]] = -1;
     }
