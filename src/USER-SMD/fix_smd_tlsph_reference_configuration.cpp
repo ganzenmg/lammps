@@ -94,7 +94,6 @@ void FixSMD_TLSPH_ReferenceConfiguration::init() {
 void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
 	//return;
 
-
 	//printf("in FixSMD_TLSPH_ReferenceConfiguration::pre_exchange()\n");
 	double **defgrad0 = atom->tlsph_fold;
 	double *radius = atom->radius;
@@ -179,7 +178,7 @@ void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
 				J = MIN(J, 1.1);
 				vfrac[i] *= J;
 
-				radius[i] *= pow(J, 1.0/domain->dimension);
+				radius[i] *= pow(J, 1.0 / domain->dimension);
 			}
 		}
 
@@ -291,24 +290,26 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 	}
 
 // bond statistics
-	n = 0;
-	for (i = 0; i < nlocal; i++) {
-		n += npartner[i];
-	}
-	int nall;
-	MPI_Allreduce(&n, &nall, 1, MPI_INT, MPI_SUM, world);
-
-	if (comm->me == 0) {
-		if (screen) {
-			fprintf(screen, "TLSPH neighbors:\n");
-			fprintf(screen, "  max # of neighbors/atom = %d\n", maxpartner);
-			fprintf(screen, "  total # of neighbors = %d\n", nall);
-			fprintf(screen, "  neighbors/atom = %g\n", (double) nall / atom->natoms);
+	if (update->ntimestep == 0) {
+		n = 0;
+		for (i = 0; i < nlocal; i++) {
+			n += npartner[i];
 		}
-		if (logfile) {
-			fprintf(logfile, "TLSPH neighbors:\n");
-			fprintf(logfile, "  total # of neighbors = %d\n", nall);
-			fprintf(logfile, "  neighbors/atom = %g\n", (double) nall / atom->natoms);
+		int nall;
+		MPI_Allreduce(&n, &nall, 1, MPI_INT, MPI_SUM, world);
+
+		if (comm->me == 0) {
+			if (screen) {
+				fprintf(screen, "TLSPH neighbors:\n");
+				fprintf(screen, "  max # of neighbors/atom = %d\n", maxpartner);
+				fprintf(screen, "  total # of neighbors = %d\n", nall);
+				fprintf(screen, "  neighbors/atom = %g\n", (double) nall / atom->natoms);
+			}
+			if (logfile) {
+				fprintf(logfile, "TLSPH neighbors:\n");
+				fprintf(logfile, "  total # of neighbors = %d\n", nall);
+				fprintf(logfile, "  neighbors/atom = %g\n", (double) nall / atom->natoms);
+			}
 		}
 	}
 
@@ -332,13 +333,15 @@ double FixSMD_TLSPH_ReferenceConfiguration::memory_usage() {
  ------------------------------------------------------------------------- */
 
 void FixSMD_TLSPH_ReferenceConfiguration::grow_arrays(int nmax) {
-	printf("in FixSMD_TLSPH_ReferenceConfiguration::grow_arrays\n");
-	memory->destroy(npartner);
-	memory->destroy(partner);
-	npartner = NULL;
-	partner = NULL;
-	memory->create(npartner, nmax, "tlsph:npartner");
-	memory->create(partner, nmax, maxpartner, "tlsph:partner");
+	//printf("in FixSMD_TLSPH_ReferenceConfiguration::grow_arrays\n");
+	memory->grow(npartner, nmax, "peri_neigh:npartner");
+	memory->grow(partner, nmax, maxpartner, "peri_neigh:partner");
+//	memory->destroy(npartner);
+//	memory->destroy(partner);
+//	npartner = NULL;
+//	partner = NULL;
+//	memory->create(npartner, nmax, "tlsph:npartner");
+//	memory->create(partner, nmax, maxpartner, "tlsph:partner");
 }
 
 /* ----------------------------------------------------------------------

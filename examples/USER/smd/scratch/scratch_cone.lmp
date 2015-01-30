@@ -61,7 +61,7 @@ balance         1.0 rcb
 fix             bottom_fix bot setforce 0 0 0 # hold bottome of plate stationary
 fix             indentor_fix indentor setforce 0 0 0 # remove forces due other particles from indentor, so it follows a prescribed motion
 fix             dtfix all smd/adjust_dt 0.1
-fix             integration_fix all smd/integrate_tlsph update xsph
+fix             integration_fix all smd/integrate_tlsph xsph
 
 # dump
 variable        dumpFreq equal 200

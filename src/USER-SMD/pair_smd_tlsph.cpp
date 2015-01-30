@@ -48,6 +48,8 @@
 #include <Eigen/SVD>
 #include <Eigen/Eigen>
 #include "smd_material_models.h"
+#include "smd_kernels.h"
+using namespace SMD_Kernels;
 using namespace Eigen;
 using namespace std;
 using namespace LAMMPS_NS;
@@ -56,7 +58,7 @@ using namespace LAMMPS_NS;
 #define JAUMANN false
 #define DETF_MIN 0.1 // maximum compression deformation allowed
 #define DETF_MAX 40.0 // maximum tension deformation allowed
-#define TLSPH_DEBUG 1
+#define TLSPH_DEBUG 0
 #define PLASTIC_STRAIN_AVERAGE_WINDOW 100.0
 
 /* ---------------------------------------------------------------------- */
@@ -237,7 +239,8 @@ void PairTlsph::PreCompute() {
 
 			r0Sq = dx0.squaredNorm();
 			h = irad + radius[j];
-			if (r0Sq < h * h) {
+			if (true) {
+			//if (r0Sq < h * h) {
 
 				// initialize Eigen data structures from LAMMPS data structures
 				xj << x[j][0], x[j][1], x[j][2];
@@ -255,10 +258,13 @@ void PairTlsph::PreCompute() {
 				dvint = vintj - vinti;
 
 				// kernel function
-				barbara_kernel_and_derivative(h, r0, wf, wfd);
-
+				//barbara_kernel_and_derivative(h, r0, wf, wfd);
 				// uncorrected kernel gradient
-				g = (wfd / r0) * dx0;
+				//g = (wfd / r0) * dx0;
+
+				//wf = wfd = Kernel_Wendland_Quintic_NotNormalized(r0, h);
+				wf = wfd = 1.0 / r0;
+				g = wf * dx0;
 
 				/* build matrices */
 				Ktmp = g * dx0.transpose();
@@ -526,6 +532,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	else
 		evflag = vflag_fdotr = 0;
 
+	double cut_comm = MAX(neighbor->cutneighmax,comm->cutghostuser); // cutoff radius within which ghost atoms are communicated.
+
 	/*
 	 * iterate over pairs of particles i, j and assign forces using PK1 stress tensor
 	 */
@@ -605,7 +613,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 			r0Sq = dx0.squaredNorm();
 			h = radius[i] + radius[j];
-			if (r0Sq < h * h) {
+			if (true) {
+			//if (r0Sq < h * h) {
 
 				hMin = MIN(hMin, h);
 				r0 = sqrt(r0Sq);
@@ -624,14 +633,16 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				// derivative of kernel function and reference distance
 				// kernel function
-				barbara_kernel_and_derivative(h, r0, wf, wfd);
+				//barbara_kernel_and_derivative(h, r0, wf, wfd);
 				//printf("wf = %f, wfd = %f\n", wf, wfd);
+				wf = wfd = 1.0/r0;
 
 				// current distance
 				r = dx.norm();
 
 				// uncorrected kernel gradient
-				g = (wfd / r0) * dx0;
+				//g = (wfd / r0) * dx0;
+				g = wf * dx0;
 
 				/*
 				 * force contribution -- note that the kernel gradient correction has been absorbed into PK1
@@ -748,12 +759,16 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				// check if a particle has moved too much w.r.t another particles
 				if (r > r0) {
-					//if ((r - r0) > 0.75 * neighbor->skin) { works reasonably well, but let's base the update criterion on a per-particle length-scale
+#ifndef	 USE_REF_FIX
 					if (r > h + 0.75 * neighbor->skin) {
+#else
+					if ((dx - dx0).norm() > cut_comm) {
+#endif
 						//printf("current distance is %f, r0 distance is %f\n", r, r0);
 						updateFlag = 1;
 					}
 				}
+
 			}
 		}
 	}
@@ -1676,7 +1691,7 @@ void PairTlsph::init_style() {
 	MPI_Allreduce(&onerad_frozen[1], &maxrad_frozen[1], atom->ntypes,
 	MPI_DOUBLE, MPI_MAX, world);
 
-//#ifdef USE_REF_FIX
+#ifdef USE_REF_FIX
 	// if first init, create Fix needed for storing reference configuration neighbors
 	if (fix_tlsph_reference_configuration == NULL) {
 		char **fixarg = new char*[3];
@@ -1698,7 +1713,7 @@ void PairTlsph::init_style() {
 			ifix_tlsph = i;
 	if (ifix_tlsph == -1)
 		error->all(FLERR, "Fix SMD_TLSPH_NEIGHBORS does not exist");
-//#endif
+#endif
 
 }
 
