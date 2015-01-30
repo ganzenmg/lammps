@@ -89,6 +89,7 @@ public:
 
 protected:
 	void allocate();
+	char *suffix;
 
 	/*
 	 * per-type arrays
@@ -107,8 +108,6 @@ protected:
 	/*
 	 * per atom arrays
 	 */
-
-
 	Matrix3d *K, *PK1, *Fdot, *Fincr;
 	Matrix3d *d; // unrotated rate-of-deformation tensor
 	Matrix3d *R; // rotation matrix
@@ -142,7 +141,7 @@ protected:
 	int ifix_tlsph;
 	int not_first;
 
-	class FixSMDIntegrateTlsph *fix_tlsph_time_integration;
+	class FixSMD_TLSPH_ReferenceConfiguration *fix_tlsph_reference_configuration;
 
 private:
 	double SafeLookup(std::string str, int itype);

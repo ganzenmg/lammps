@@ -18,7 +18,8 @@ atom_style      smd
 neighbor        ${skin} bin
 neigh_modify    every 10 delay 0 check yes # re-build neighbor list every 10 steps
 newton          off # required for SMD simulations!
-comm_modify     vel yes # required for SMD simulations!
+comm_modify     vel yes cutoff 15.0# required for SMD simulations!
+atom_modify     map array
 
 # create simulation box and particles
 lattice         sq ${l0}
@@ -28,13 +29,13 @@ create_atoms    1 box
 set             group all mass ${mass_one}
 set             group all volume ${vol_one}
 set             group all diameter ${h} # set SPH kernel radius
-#displace_atoms  all random 0.1 0.1 0.0 2321
 
 # create particle groups for applying displacement boundary conditions
 region          top block EDGE EDGE 9.0 EDGE  EDGE EDGE units box
 region          bot block EDGE EDGE EDGE -9.1 EDGE EDGE units box
 group           top region top # top row of particles
 group           bot region bot # bottom row of particles
+group           tlsph union all
 
 pair_style      tlsph # activate Total-Lagrangian SPH
 #                           rh0    E    nu    Q1    Q2   hg    Cp
@@ -50,7 +51,7 @@ compute         D all smd/tlsph_strain_rate
 compute         nn all smd/tlsph_num_neighs # number of neighbors for each particle
 compute         damage all smd/damage
 
-dump            dump_id all custom 1 dump.LAMMPS id type x y z &
+dump            dump_id all custom 1000 dump.LAMMPS id type x y z &
                 c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] c_nn c_p &
 		c_D[1] c_D[2] c_D[4] c_damage radius
 
@@ -67,8 +68,8 @@ fix             botfix bot setforce 0 0 0
 fix             dtfix all smd/adjust_dt 0.1
 variable        stress equal 0.5*(f_botfix[2]-f_topfix[2])/20 
 variable        strain equal (2.0*${vel}*f_dtfix/20) # strain: relative elongation
-fix             integration_fix all smd/integrate_tlsph update xsph adjust_radius
-fix             stress_curve all print 10 "${strain} ${stress}" file stress_strain.dat screen no
+fix             integration_fix all smd/integrate_tlsph xsph adjust_radius
+#fix             stress_curve all print 10 "${strain} ${stress}" file stress_strain.dat screen no
 
 
 thermo 100

@@ -27,6 +27,7 @@
 #include "stdlib.h"
 #include "string.h"
 #include "pair_smd_tlsph.h"
+#include "fix_smd_tlsph_reference_configuration.h"
 #include "atom.h"
 #include "domain.h"
 #include "force.h"
@@ -43,15 +44,15 @@
 #include <iostream>
 #include "math_special.h"
 #include <map>
-#include "fix_smd_integrate_tlsph.h"
+#include "update.h"
 #include <Eigen/SVD>
 #include <Eigen/Eigen>
 #include "smd_material_models.h"
-#include "smd_kernels.h"
 using namespace Eigen;
 using namespace std;
 using namespace LAMMPS_NS;
 
+#define USE_REF_FIX 1
 #define JAUMANN false
 #define DETF_MIN 0.1 // maximum compression deformation allowed
 #define DETF_MAX 40.0 // maximum tension deformation allowed
@@ -86,6 +87,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 	not_first = 0;
 
 	comm_forward = 20; // this pair style communicates 20 doubles to ghost atoms : PK1 tensor + F tensor + shepardWeight
+	fix_tlsph_reference_configuration = NULL;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -152,6 +154,8 @@ void PairTlsph::PreCompute() {
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
 	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
+	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
 
 	eye.setIdentity();
 
@@ -173,15 +177,26 @@ void PairTlsph::PreCompute() {
 	numneigh = list->numneigh;
 	firstneigh = list->firstneigh;
 
-	for (ii = 0; ii < inum; ii++) {
-		i = ilist[ii];
+	//printf("nlocal is: %d\n", nlocal);
+
+#ifdef USE_REF_FIX
+	for (i = 0; i < nlocal; i++) { // for bonds approach
+#else
+			for (ii = 0; ii < inum; ii++) { // for NL approach
+				i = ilist[ii];
+#endif
 
 		if (mol[i] < 0) { // valid SPH particle have mol > 0
 			continue;
 		}
 
+#ifdef USE_REF_FIX
+		jnum = npartner[i];
+#else
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
+#endif
+
 		irad = radius[i];
 		voli = vfrac[i];
 
@@ -192,8 +207,19 @@ void PairTlsph::PreCompute() {
 		vinti << vint[i][0], vint[i][1], vint[i][2];
 
 		for (jj = 0; jj < jnum; jj++) {
+
+#ifdef 		USE_REF_FIX
+			if (partner[i][jj] == 0)
+				continue;
+			j = atom->map(partner[i][jj]);
+			if (j < 0) { //			// check if lost a partner without first breaking bond
+				partner[i][jj] = 0;
+				continue;
+			}
+#else
 			j = jlist[jj];
 			j &= NEIGHMASK;
+#endif
 
 			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
 				continue;
@@ -228,10 +254,11 @@ void PairTlsph::PreCompute() {
 				dv = vj - vi;
 				dvint = vintj - vinti;
 
-				// uncorrected kernel gradient -- we use Wendland C5 here, Barbara kernel derivative in combination with g = (wfd / r0) * dx0 is also good
-				// can also use non-normalized kernel for other quantities as we normalize a posteriori with the Shepard weight
-				wf = SMD_Kernels::Kernel_Wendland_Quintic_NotNormalized(r0, h);
-				g = wf * dx0;
+				// kernel function
+				barbara_kernel_and_derivative(h, r0, wf, wfd);
+
+				// uncorrected kernel gradient
+				g = (wfd / r0) * dx0;
 
 				/* build matrices */
 				Ktmp = g * dx0.transpose();
@@ -245,6 +272,7 @@ void PairTlsph::PreCompute() {
 				smoothVelDifference[i] += volj * wf * dvint;
 				numNeighsRefConfig[i]++;
 
+#ifndef USE_REF_FIX
 				if (j < nlocal) {
 					K[j] += voli * Ktmp;
 					Fincr[j] += voli * Ftmp;
@@ -253,6 +281,7 @@ void PairTlsph::PreCompute() {
 					smoothVelDifference[j] -= voli * wf * dvint;
 					numNeighsRefConfig[j]++;
 				}
+#endif
 
 			} // end if check distance
 		} // end loop over j
@@ -264,6 +293,10 @@ void PairTlsph::PreCompute() {
 
 	for (i = 0; i < nlocal; i++) {
 
+//		if (numNeighsRefConfig[i] != npartner[i]) {
+//			printf("recounted=%d, npartner=%d\n", numNeighsRefConfig[i],  npartner[i]);
+//			error->one(FLERR, "");
+//		}
 		itype = type[i];
 		if (setflag[itype][itype] == 1) { // we only do the subsequent calculation if pair style is defined for this particle
 
@@ -441,6 +474,10 @@ void PairTlsph::compute(int eflag, int vflag) {
 //		SmoothField();
 //	}
 
+	if (update->ntimestep == 0) {
+		return;
+	}
+
 	PairTlsph::PreCompute();
 	PairTlsph::AssembleStress();
 
@@ -454,6 +491,11 @@ void PairTlsph::compute(int eflag, int vflag) {
 }
 
 void PairTlsph::ComputeForces(int eflag, int vflag) {
+
+	//if (update->ntimestep == 0) { // return if this is the 0th timestep as reference configuration is only defined after 0th timestep
+	//	return;
+	//}
+
 	int *mol = atom->molecule;
 	double **x = atom->x;
 	double **v = atom->vest;
@@ -476,6 +518,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	Vector3d fi, fj, dx0, dx, dv, f_stress, f_hg, dxp_i, dxp_j, gamma, g, gamma_i, gamma_j;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
+	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
 
 	if (eflag || vflag)
 		ev_setup(eflag, vflag);
@@ -496,16 +540,25 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	hMin = 1.0e22;
 	dtRelative = 1.0e22;
 
-	for (ii = 0; ii < inum; ii++) {
-		i = ilist[ii];
+#ifdef USE_REF_FIX
+	for (i = 0; i < nlocal; i++) { // for bonds approach
+#else
+			for (ii = 0; ii < inum; ii++) { // for NL approach
+				i = ilist[ii];
+#endif
 
 		if (mol[i] < 0) {
 			continue; // Particle i is not a valid SPH particle (anymore). Skip all interactions with this particle.
 		}
 
 		itype = type[i];
+
+#ifdef USE_REF_FIX
+		jnum = npartner[i];
+#else
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
+#endif
 
 		// initialize Eigen data structures from LAMMPS data structures
 		for (iDim = 0; iDim < 3; iDim++) {
@@ -516,8 +569,18 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 		voli = vfrac[i];
 
 		for (jj = 0; jj < jnum; jj++) {
+#ifdef 		USE_REF_FIX
+			if (partner[i][jj] == 0)
+				continue;
+			j = atom->map(partner[i][jj]);
+			if (j < 0) { //			// check if lost a partner without first breaking bond
+				partner[i][jj] = 0;
+				continue;
+			}
+#else
 			j = jlist[jj];
 			j &= NEIGHMASK;
+#endif
 
 			if (mol[j] < 0) {
 				continue; // Particle j is not a valid SPH particle (anymore). Skip all interactions with this particle.
@@ -559,12 +622,16 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				dx = xj - xi;
 				dv = vj - vi;
 
+				// derivative of kernel function and reference distance
+				// kernel function
+				barbara_kernel_and_derivative(h, r0, wf, wfd);
+				//printf("wf = %f, wfd = %f\n", wf, wfd);
+
 				// current distance
 				r = dx.norm();
 
-				// uncorrected kernel gradient -- we use Wendland C5 here, Barbara kernel derivative in combination with g = (wfd / r0) * dx0 is also good
-				wf = SMD_Kernels::Kernel_Wendland_Quintic_NotNormalized(r0, h);
-				g = wf * dx0;
+				// uncorrected kernel gradient
+				g = (wfd / r0) * dx0;
 
 				/*
 				 * force contribution -- note that the kernel gradient correction has been absorbed into PK1
@@ -664,7 +731,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				f[i][1] += sumForces(1);
 				f[i][2] += sumForces(2);
 				de[i] += deltaE;
-
+#ifndef USE_REF_FIX
 				if (j < nlocal) {
 					f[j][0] -= sumForces(0);
 					f[j][1] -= sumForces(1);
@@ -672,6 +739,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					de[j] += deltaE;
 					hourglass_error[j] += voli * wf * hg_err;
 				}
+#endif
 
 				// tally atomistic stress tensor
 				if (evflag) {
@@ -699,8 +767,6 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	if (vflag_fdotr)
 		virial_fdotr_compute();
 }
-
-
 
 /* ----------------------------------------------------------------------
  assemble unrotated stress tensor using deviatoric and pressure components.
@@ -1583,6 +1649,10 @@ double PairTlsph::init_one(int i, int j) {
 void PairTlsph::init_style() {
 	int i;
 
+	if (force->newton_pair == 1) {
+		error->all(FLERR, "Pair style tlsph requires newton pair off");
+	}
+
 // request a granular neighbor list
 	int irequest = neighbor->request(this);
 	neighbor->requests[irequest]->half = 0;
@@ -1605,6 +1675,30 @@ void PairTlsph::init_style() {
 	MPI_DOUBLE, MPI_MAX, world);
 	MPI_Allreduce(&onerad_frozen[1], &maxrad_frozen[1], atom->ntypes,
 	MPI_DOUBLE, MPI_MAX, world);
+
+//#ifdef USE_REF_FIX
+	// if first init, create Fix needed for storing reference configuration neighbors
+	if (fix_tlsph_reference_configuration == NULL) {
+		char **fixarg = new char*[3];
+		fixarg[0] = (char *) "SMD_TLSPH_NEIGHBORS";
+		fixarg[1] = (char *) "tlsph";
+		fixarg[2] = (char *) "SMD_TLSPH_NEIGHBORS";
+		modify->add_fix(3, fixarg, suffix);
+		delete[] fixarg;
+		fix_tlsph_reference_configuration = (FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[modify->nfix - 1];
+		fix_tlsph_reference_configuration->pair = this;
+	}
+
+	// find associated SMD_TLSPH_NEIGHBORS fix that must exist
+	// could have changed locations in fix list since created
+
+	ifix_tlsph = -1;
+	for (int i = 0; i < modify->nfix; i++)
+		if (strcmp(modify->fix[i]->style, "SMD_TLSPH_NEIGHBORS") == 0)
+			ifix_tlsph = i;
+	if (ifix_tlsph == -1)
+		error->all(FLERR, "Fix SMD_TLSPH_NEIGHBORS does not exist");
+//#endif
 
 }
 
@@ -1883,7 +1977,6 @@ double PairTlsph::TestMatricesEqual(Matrix3d A, Matrix3d B, double eps) {
 	}
 	return norm;
 }
-
 
 /* ----------------------------------------------------------------------
  compute effectiveP-wave speed
@@ -2364,7 +2457,8 @@ void PairTlsph::ComputeStressDeviator(const int i, const Matrix3d sigmaInitial_d
 /* ----------------------------------------------------------------------
  Compute damage. Called from AssembleStress().
  ------------------------------------------------------------------------- */
-void PairTlsph::ComputeDamage(const int i, const Matrix3d strain, const double pFinal, const Matrix3d sigmaFinal, const Matrix3d sigmaFinal_dev, Matrix3d &sigma_damaged, double &damage_increment) {
+void PairTlsph::ComputeDamage(const int i, const Matrix3d strain, const double pFinal, const Matrix3d sigmaFinal,
+		const Matrix3d sigmaFinal_dev, Matrix3d &sigma_damaged, double &damage_increment) {
 	double *eff_plastic_strain = atom->eff_plastic_strain;
 	double *eff_plastic_strain_rate = atom->eff_plastic_strain_rate;
 	int *type = atom->type;
