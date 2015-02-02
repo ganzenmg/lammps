@@ -149,7 +149,7 @@ void PerfectGasEOS(const double gamma, const double vol, const double mass, cons
 	 * perfect gas EOS is p = (gamma - 1) rho e
 	 */
 
-	pFinal__ = (1.0 - gamma) * energy / vol;
+	pFinal__ = - (1.0 - gamma) * energy / vol;
 //printf("gamma = %f, vol%f, e=%g ==> p=%g\n", gamma, vol, energy, *pFinal__/1.0e-9);
 
 	if (energy > 0.0) {

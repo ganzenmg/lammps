@@ -83,7 +83,7 @@ protected:
     Matrix3d *stressTensor, *L;
 
     enum {
-        NONE, PERFECT_GAS, EOS_TAIT, VISCOSITY_LINEAR
+        NONE, EOS_PERFECT_GAS, EOS_TAIT, VISCOSITY_LINEAR
     };
 
     double dtCFL;

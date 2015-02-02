@@ -465,19 +465,17 @@ void PairULSPH::compute(int eflag, int vflag) {
 				 * Monaghan–Balsara form of the artificial viscosity
 				 */
 
-				delVdotDelR = dx.dot(dv);
-				if (delVdotDelR != 0.0) { // we divide by r, so guard against divide by zero
-					mu_ij = h * delVdotDelR / (rSq + 0.1 * h * h);
-					c_ij = 0.5 * (c0[i] + c0[j]);
-					rho_ij = 0.5 * (rho[i] + rho[j]);
-
-					visc_magnitude = 0.5 * (Q1[itype] + Q1[jtype]) * c_ij * mu_ij / rho_ij;
-					f_visc = rmass[i] * rmass[j] * visc_magnitude * g;
-
-					//printf("mu=%g, c=%g, rho=%g, magnitude=%g\n", mu_ij, c_ij, rho_ij, f_visc.norm());
-				} else {
-					f_visc.setZero();
+				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
+				c_ij = 0.5 * (c0[i] + c0[j]);
+				if (fabs(delVdotDelR) > 0.1 * c_ij) { // limit delVdotDelR to a fraction of speed of sound
+					double s = copysign(1, delVdotDelR);
+					delVdotDelR = s * 0.1 * c_ij;
 				}
+
+				mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
+				rho_ij = 0.5 * (rho[i] + rho[j]);
+				visc_magnitude = 0.5 * (Q1[itype] + Q1[jtype]) * c_ij * mu_ij / rho_ij;
+				f_visc = rmass[i] * rmass[j] * visc_magnitude * g;
 
 				sumForces = f_stress + f_visc;
 
@@ -536,16 +534,14 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 }
 
-
-
-
-
 /* ----------------------------------------------------------------------
  compute pressure
  ------------------------------------------------------------------------- */
 void PairULSPH::ComputePressure() {
 	double *radius = atom->radius;
 	double *rho = atom->rho;
+	double *rmass = atom->rmass;
+	double *e = atom->e;
 	int *type = atom->type;
 	double pFinal;
 	int i, itype;
@@ -556,7 +552,7 @@ void PairULSPH::ComputePressure() {
 	dtCFL = 1.0e22;
 	eye.setIdentity();
 
-	double var1, var2, var3;
+	double var1, var2, var3, vol;
 
 	/*
 	 * iterate over particle types first, only use SafeLookup (slow!) once for each type, store the result.
@@ -567,10 +563,6 @@ void PairULSPH::ComputePressure() {
 	for (itype = 1; itype < ntypes + 1; itype++) {
 		if (setflag[itype][itype] == 1) {
 			switch (eos[itype]) {
-			case PERFECT_GAS:
-				error->one(FLERR, "not yet implemented");
-				//PerfectGasEOS(C1[itype][itype], ivol, rmass[i], e[i], &pFinal, &c0[i]);
-				break;
 			case EOS_TAIT:
 				var1 = SafeLookup("tait_exponent", itype);
 				var2 = SafeLookup("c_ref", itype);
@@ -579,6 +571,20 @@ void PairULSPH::ComputePressure() {
 				for (i = 0; i < nlocal; i++) {
 					if (type[i] == itype) {
 						TaitEOS_density(var1, var2, var3, rho[i], pFinal, c0[i]);
+						stressTensor[i].setZero();
+						stressTensor[i](0, 0) = pFinal;
+						stressTensor[i](1, 1) = pFinal;
+						stressTensor[i](2, 2) = pFinal;
+					}
+				}
+				break;
+			case EOS_PERFECT_GAS:
+				var1 = SafeLookup("perfect_gas_gamma", itype);
+
+				for (i = 0; i < nlocal; i++) {
+					if (type[i] == itype) {
+						vol = rmass[i] / rho[i];
+						PerfectGasEOS(var1, vol, rmass[i], e[i], pFinal, c0[i]);
 						stressTensor[i].setZero();
 						stressTensor[i](0, 0) = pFinal;
 						stressTensor[i](1, 1) = pFinal;
@@ -796,6 +802,44 @@ void PairULSPH::coeff(int narg, char **arg) {
 				}
 			} // end Tait EOS
 
+			ioffset = iNextKwd;
+			if (strcmp(arg[ioffset], "*EOS_PERFECT_GAS") == 0) {
+
+				/*
+				 * Tait EOS
+				 */
+
+				eos[itype] = EOS_PERFECT_GAS;
+				printf("reading *EOS_PERFECT_GAS\n");
+
+				t = string("*");
+				iNextKwd = -1;
+				for (iarg = ioffset + 1; iarg < narg; iarg++) {
+					s = string(arg[iarg]);
+					if (s.compare(0, t.length(), t) == 0) {
+						iNextKwd = iarg;
+						break;
+					}
+				}
+
+				if (iNextKwd < 0) {
+					sprintf(str, "no *KEYWORD terminates *EOS_PERFECT_GAS");
+					error->all(FLERR, str);
+				}
+
+				if (iNextKwd - ioffset != 1 + 1) {
+					sprintf(str, "expected 1 arguments following *EOS_PERFECT_GAS but got %d\n", iNextKwd - ioffset - 1);
+					error->all(FLERR, str);
+				}
+
+				matProp2[std::make_pair("perfect_gas_gamma", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+
+				if (comm->me == 0) {
+					printf("\n%60s\n", "Perfect Gas EOS");
+					printf("%60s : %g\n", "Heat Capacity Ratio Gamma", SafeLookup("perfect_gas_gamma", itype));
+				}
+			} // end Perfect Gas EOS
+
 			else {
 				sprintf(str, "unknown *KEYWORD: %s", arg[ioffset]);
 				error->all(FLERR, str);
@@ -820,7 +864,8 @@ void PairULSPH::coeff(int narg, char **arg) {
 		jtype = force->inumeric(FLERR, arg[1]);
 
 		if (strcmp(arg[2], "*CROSS") != 0) {
-			sprintf(str, "ulsph cross interaction between particle type %d and %d requested, however, *CROSS keyword is missing", itype, jtype);
+			sprintf(str, "ulsph cross interaction between particle type %d and %d requested, however, *CROSS keyword is missing",
+					itype, jtype);
 			error->all(FLERR, str);
 		}
 
