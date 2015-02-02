@@ -63,7 +63,6 @@ public:
 	void *extract(const char *, int &);
 	int pack_forward_comm(int, int *, double *, int, int *);
 	void unpack_forward_comm(int, int, double *);
-	void spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
 	void barbara_kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
 	Matrix3d pseudo_inverse_SVD(Matrix3d);
 	void PolDec(Matrix3d &, Matrix3d *, Matrix3d *);
@@ -80,9 +79,10 @@ public:
 	void ComputeStressDeviator(const int i, const Matrix3d sigmaInitial_dev, const Matrix3d d_dev, Matrix3d &sigmaFinal_dev,
 			Matrix3d &sigma_dev_rate, double &plastic_strain_increment);
 	void ComputeDamage(const int i, const Matrix3d strain, const double pFinal, const Matrix3d sigmaFinal, const Matrix3d sigmaFinal_dev, Matrix3d &sigma_damaged, double &damage_increment);
+	void spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
 
-	void SmoothField();
-	void SmoothFieldXSPH();
+	//void SmoothField();
+	//void SmoothFieldXSPH();
 	Matrix3d LimitEigenvalues(Matrix3d S, double limitEigenvalue);
 
 
@@ -125,12 +125,15 @@ protected:
 	double dtCFL;
 	double dtRelative; // relative velocity of two particles, divided by sound speed
 	int updateFlag;
+	double update_threshold; // updateFlage is set to one if the relative displacement of a pair exceeds update_threshold
+	double cut_comm;
 
 	enum {
 		LINEAR_DEFGRAD, LINEAR_STRENGTH, LINEAR_PLASTICITY, STRENGTH_JOHNSON_COOK,
 		STRENGTH_NONE,
 		EOS_LINEAR, EOS_SHOCK, EOS_POLYNOMIAL,
-		EOS_NONE
+		EOS_NONE,
+		UPDATE_CONSTANT_THRESHOLD, UPDATE_PAIRWISE_RATIO
 	};
 
 	// C++ std dictionary to hold material model settings per particle type
@@ -140,6 +143,7 @@ protected:
 
 	int ifix_tlsph;
 	int not_first;
+	int update_method;
 
 	class FixSMD_TLSPH_ReferenceConfiguration *fix_tlsph_reference_configuration;
 

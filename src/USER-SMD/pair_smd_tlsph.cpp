@@ -88,8 +88,10 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 	updateFlag = 0;
 	not_first = 0;
 
-	comm_forward = 20; // this pair style communicates 20 doubles to ghost atoms : PK1 tensor + F tensor + shepardWeight
+	comm_forward = 21; // this pair style communicates 20 doubles to ghost atoms : PK1 tensor + F tensor + shepardWeight
 	fix_tlsph_reference_configuration = NULL;
+
+	cut_comm = MAX(neighbor->cutneighmax, comm->cutghostuser); // cutoff radius within which ghost atoms are communicated.
 }
 
 /* ---------------------------------------------------------------------- */
@@ -147,17 +149,28 @@ void PairTlsph::PreCompute() {
 	double **vint = atom->v; // Velocity-Verlet algorithm velocities
 	int *tag = atom->tag;
 	int *type = atom->type;
+	int nlocal = atom->nlocal;
+	int jnum, jj, i, j, itype;
+
+#ifdef USE_REF_FIX
+	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
+	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
+#else
+	int inum, ii;
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
-	int nlocal = atom->nlocal;
-	int inum, jnum, ii, jj, i, j, itype;
-	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
+	// set up neighbor list variables
+	inum = list->inum;
+	ilist = list->ilist;
+	numneigh = list->numneigh;
+	firstneigh = list->firstneigh;
+#endif
+
+	double r0, r0Sq, wf, h, irad, voli, volj;
 	Vector3d dx0, dx, dv, g;
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
 	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
-	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
-	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
 
 	eye.setIdentity();
 
@@ -172,12 +185,6 @@ void PairTlsph::PreCompute() {
 		smoothVelDifference[i].setZero();
 		hourglass_error[i] = 0.0;
 	}
-
-	// set up neighbor list variables
-	inum = list->inum;
-	ilist = list->ilist;
-	numneigh = list->numneigh;
-	firstneigh = list->firstneigh;
 
 	//printf("nlocal is: %d\n", nlocal);
 
@@ -240,7 +247,7 @@ void PairTlsph::PreCompute() {
 			r0Sq = dx0.squaredNorm();
 			h = irad + radius[j];
 			if (true) {
-			//if (r0Sq < h * h) {
+				//if (r0Sq < h * h) {
 
 				// initialize Eigen data structures from LAMMPS data structures
 				xj << x[j][0], x[j][1], x[j][2];
@@ -257,14 +264,8 @@ void PairTlsph::PreCompute() {
 				dv = vj - vi;
 				dvint = vintj - vinti;
 
-				// kernel function
-				//barbara_kernel_and_derivative(h, r0, wf, wfd);
-				// uncorrected kernel gradient
-				//g = (wfd / r0) * dx0;
-
-				//wf = wfd = Kernel_Wendland_Quintic_NotNormalized(r0, h);
-				wf = wfd = 1.0 / r0;
-				g = wf * dx0;
+				wf = Kernel_Wendland_Quintic_NotNormalized(r0, h);
+				g = wf * dx0 / r0;
 
 				/* build matrices */
 				Ktmp = g * dx0.transpose();
@@ -512,37 +513,40 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
 	double *plastic_strain = atom->eff_plastic_strain;
+	double *damage = atom->damage;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
-	int i, j, ii, jj, jnum, itype, iDim, inum;
+	int i, j, jj, jnum, itype, iDim;
 	double r, hg_mag, wf, wfd, h, r0, r0Sq, voli, volj;
 	double delVdotDelR, visc_magnitude, deltaE, mu_ij, hg_err;
 	double delta, stress_force_magnitude, hourglass_force_magnitude;
 	char str[128];
-	int *ilist, *jlist, *numneigh;
-	int **firstneigh;
 	Vector3d fi, fj, dx0, dx, dv, f_stress, f_hg, dxp_i, dxp_j, gamma, g, gamma_i, gamma_j;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+
+#ifdef USE_REF_FIX
 	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
 	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
+#else
+	int inum, ii;
+	int *ilist, *jlist, *numneigh;
+	int **firstneigh;
+	// set up neighbor list variables
+	inum = list->inum;
+	ilist = list->ilist;
+	numneigh = list->numneigh;
+	firstneigh = list->firstneigh;
+#endif
 
 	if (eflag || vflag)
 		ev_setup(eflag, vflag);
 	else
 		evflag = vflag_fdotr = 0;
 
-	double cut_comm = MAX(neighbor->cutneighmax,comm->cutghostuser); // cutoff radius within which ghost atoms are communicated.
-
 	/*
 	 * iterate over pairs of particles i, j and assign forces using PK1 stress tensor
 	 */
-
-	// set up neighbor list variables
-	inum = list->inum;
-	ilist = list->ilist;
-	numneigh = list->numneigh;
-	firstneigh = list->firstneigh;
 
 	updateFlag = 0;
 	hMin = 1.0e22;
@@ -614,7 +618,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 			r0Sq = dx0.squaredNorm();
 			h = radius[i] + radius[j];
 			if (true) {
-			//if (r0Sq < h * h) {
+				//if (r0Sq < h * h) {
 
 				hMin = MIN(hMin, h);
 				r0 = sqrt(r0Sq);
@@ -631,18 +635,12 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				dx = xj - xi;
 				dv = vj - vi;
 
-				// derivative of kernel function and reference distance
-				// kernel function
-				//barbara_kernel_and_derivative(h, r0, wf, wfd);
-				//printf("wf = %f, wfd = %f\n", wf, wfd);
-				wf = wfd = 1.0/r0;
-
 				// current distance
 				r = dx.norm();
 
 				// uncorrected kernel gradient
-				//g = (wfd / r0) * dx0;
-				g = wf * dx0;
+				wf = Kernel_Wendland_Quintic_NotNormalized(r0, h);
+				g = wf * dx0 / r0;
 
 				/*
 				 * force contribution -- note that the kernel gradient correction has been absorbed into PK1
@@ -654,9 +652,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				 * artificial viscosity
 				 */
 
-				// because hourglass control and artificial viscosity are evaluated using the current coordinates,
-				// call kernel and kernel gradient weights with current separation
-				spiky_kernel_and_derivative(h, r, wf, wfd);
+				// call a different kernel and its gradient weights for artificial viscosity and hourglass correction
+				spiky_kernel_and_derivative(h, r0, wf, wfd);
 
 				delVdotDelR = dx.dot(dv);
 				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h); // m * m/s * m / m*m ==> units m/s
@@ -694,7 +691,6 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				/* SPH-like hourglass formulation */
 
 				if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-3) {
-
 					/*
 					 * viscous hourglass formulation
 					 */
@@ -731,6 +727,10 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					f_hg = 100.0 * stress_force_magnitude * (f_hg / hourglass_force_magnitude);
 				}
 
+				if (MAX(damage[i], damage[j]) > 0.0) {
+					f_hg.setZero();
+				}
+
 				// sum stress, viscous, and hourglass forces
 				sumForces = f_stress + f_visc + f_hg;
 
@@ -757,18 +757,22 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					ev_tally_xyz(i, j, nlocal, 0, 0.0, 0.0, sumForces(0), sumForces(1), sumForces(2), dx(0), dx(1), dx(2));
 				}
 
-				// check if a particle has moved too much w.r.t another particles
+				// check if a particle has moved too much w.r.t another particle
 				if (r > r0) {
-#ifndef	 USE_REF_FIX
-					if (r > h + 0.75 * neighbor->skin) {
-#else
-					if ((dx - dx0).norm() > cut_comm) {
-#endif
-						//printf("current distance is %f, r0 distance is %f\n", r, r0);
-						updateFlag = 1;
+					if (update_method == UPDATE_CONSTANT_THRESHOLD) {
+						if (r - r0 > update_threshold) {
+							updateFlag = 1;
+						}
+					} else if (update_method == UPDATE_PAIRWISE_RATIO) {
+						if ((r - r0) / h > update_threshold) {
+							updateFlag = 1;
+						}
 					}
-				}
 
+//					if (r > h + 0.75 * neighbor->skin) {
+//						updateFlag = 1;
+//					}
+				}
 			}
 		}
 	}
@@ -1005,6 +1009,7 @@ void PairTlsph::allocate() {
 	onerad_frozen = new double[n + 1];
 	maxrad_dynamic = new double[n + 1];
 	maxrad_frozen = new double[n + 1];
+
 }
 
 /* ----------------------------------------------------------------------
@@ -1012,8 +1017,77 @@ void PairTlsph::allocate() {
  ------------------------------------------------------------------------- */
 
 void PairTlsph::settings(int narg, char **arg) {
-	if (narg != 0)
-		error->all(FLERR, "Illegal pair_style command");
+
+	if (comm->me == 0) {
+		printf(
+				"\n>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========\n");
+		printf("TLSPH settings\n");
+	}
+
+	/*
+	 * default value for update_threshold for updates of reference configuration:
+	 * The maximum relative displacement which is tracked by the construction of LAMMPS' neighborlists
+	 * is the folowing.
+	 */
+	update_threshold = cut_comm;
+	update_method = UPDATE_CONSTANT_THRESHOLD;
+
+	int iarg = 0;
+
+	while (true) {
+
+		if (iarg >= narg) {
+			break;
+		}
+
+		if (strcmp(arg[iarg], "*UPDATE_CONSTANT") == 0) {
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected number following *UPDATE_CONSTANT keyword");
+			}
+
+			update_method = UPDATE_CONSTANT_THRESHOLD;
+			update_threshold = force->numeric(FLERR, arg[iarg]);
+
+		} else if (strcmp(arg[iarg], "*UPDATE_PAIRWISE") == 0) {
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected number following *UPDATE_PAIRWISE keyword");
+			}
+
+			update_method = UPDATE_PAIRWISE_RATIO;
+			update_threshold = force->numeric(FLERR, arg[iarg]);
+
+		} else {
+			char msg[128];
+			sprintf(msg, "Illegal keyword for smd/integrate_tlsph: %s\n", arg[iarg]);
+			error->all(FLERR, msg);
+		}
+
+		iarg++;
+	}
+
+	if ((update_threshold > cut_comm) && (update_method == UPDATE_CONSTANT_THRESHOLD)) {
+		if (comm->me == 0) {
+			printf("\n                ***** WARNING ***\n");
+			printf("requested reference configuration update threshold is %g length units\n", update_threshold);
+			printf("This value exceeds the maximum value %g beyond which TLSPH displacements can be tracked at current settings.\n", cut_comm);
+			printf("Expect loss of neighbors!\n");
+		}
+	}
+
+	if (comm->me == 0) {
+
+		if (update_method == UPDATE_CONSTANT_THRESHOLD) {
+			printf("... will update reference configuration if magnitude of relative displacement exceeds %g length units\n", update_threshold);
+		} else if (update_method == UPDATE_PAIRWISE_RATIO) {
+			printf("... will update reference configuration if ratio pairwise distance / smoothing length  exceeds %g\n", update_threshold);
+		}
+		printf(
+				">>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========\n");
+
+	}
+
 }
 
 /* ----------------------------------------------------------------------
@@ -1042,7 +1116,8 @@ void PairTlsph::coeff(int narg, char **arg) {
 	itype = force->inumeric(FLERR, arg[0]);
 
 	if (comm->me == 0) {
-		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
+		printf(
+				"\n>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========\n");
 		printf("SMD / TLSPH PROPERTIES OF PARTICLE TYPE %d:\n", itype);
 	}
 
@@ -1123,7 +1198,8 @@ void PairTlsph::coeff(int narg, char **arg) {
 		if (strcmp(arg[iNextKwd], "*END") == 0) {
 			if (comm->me == 0) {
 				printf("found *END keyword");
-				printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n\n");
+				printf(
+						"\n>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========\n\n");
 			}
 			break;
 		}
@@ -1776,6 +1852,7 @@ void *PairTlsph::extract(const char *str, int &i) {
 int PairTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	int i, j, m;
 	int *mol = atom->molecule;
+	double *damage = atom->damage;
 
 //printf("in PairTlsph::pack_forward_comm\n");
 
@@ -1804,6 +1881,7 @@ int PairTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 
 		buf[m++] = shepardWeight[j]; // 19
 		buf[m++] = mol[j];
+		buf[m++] = damage[j];
 
 	}
 	return m;
@@ -1814,6 +1892,7 @@ int PairTlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 void PairTlsph::unpack_forward_comm(int n, int first, double *buf) {
 	int i, m, last;
 	int *mol = atom->molecule;
+	double *damage = atom->damage;
 
 //printf("in PairTlsph::unpack_forward_comm\n");
 
@@ -1843,59 +1922,8 @@ void PairTlsph::unpack_forward_comm(int n, int first, double *buf) {
 
 		shepardWeight[i] = buf[m++];
 		mol[i] = static_cast<int>(buf[m++]);
+		damage[i] = buf[m++];
 	}
-}
-
-void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
-
-	/*
-	 * Spiky kernel
-	 */
-
-	//error->one(FLERR, "should not be here");
-	if (r > h) {
-		wfd = 0.0;
-		wf = 0.0;
-		return;
-	}
-
-	if (domain->dimension == 2) {
-		double hr = h - r; // [m]
-		double n = 0.3141592654e0 * h * h * h * h * h; // [m^5]
-		wfd = -3.0e0 * hr * hr / n; // [m*m/m^5] = [1/m^3] ==> correct for dW/dr in 2D
-		wf = -0.333333333333e0 * hr * wfd; // [m/m^3] ==> [1/m^2] correct for W in 2D
-	} else {
-		double hr = h - r; // [m]
-		wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
-		wf = -0.333333333333e0 * hr * wfd; // [m/m^4] ==> [1/m^3] correct for W in 3D
-	}
-
-}
-
-void PairTlsph::barbara_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
-
-	/*
-	 * Barbara kernel
-	 */
-
-	double arg = (1.570796327 * (r + h)) / h;
-	double hsq = h * h;
-
-	if (r > h) {
-		char msg[128];
-		sprintf(msg, "r = %f > h = %f in kernel function", r, h);
-		error->one(FLERR, msg);
-	}
-
-	if (domain->dimension == 2) {
-		wf = (1.680351548 * (cos(arg) + 1.)) / hsq;
-		wfd = -2.639490040 * sin(arg) / (hsq * h);
-	} else {
-		wf = 2.051578323 * (cos(arg) + 1.) / (hsq * h);
-		wfd = -3.222611694 * sin(arg) / (hsq * hsq);
-//error->one(FLERR, "not implemented yet");
-	}
-
 }
 
 /*
@@ -2045,262 +2073,262 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 
 }
 
-/* ----------------------------------------------------------------------
- smooth stress field
- ------------------------------------------------------------------------- */
-
-void PairTlsph::SmoothField() {
-	int *mol = atom->molecule;
-	double *vfrac = atom->vfrac;
-	double *radius = atom->radius;
-	double **x0 = atom->x0;
-	double **tlsph_stress = atom->tlsph_stress;
-	int *ilist, *jlist, *numneigh;
-	int **firstneigh;
-	int nlocal = atom->nlocal;
-	int inum, jnum, ii, jj, i, j;
-	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
-	Vector3d dx0;
-	Matrix3d stress;
-	Matrix3d *average_stress;
-	double *norm;
-	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
-	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
-
-// allocate storage
-	average_stress = new Matrix3d[nlocal];
-	norm = new double[nlocal];
-
-// zero accumulators
-	stress.setZero();
-	for (i = 0; i < nlocal; i++) {
-		stress(0, 0) = tlsph_stress[i][0];
-		stress(0, 1) = tlsph_stress[i][1];
-		stress(0, 2) = tlsph_stress[i][2];
-		stress(1, 1) = tlsph_stress[i][3];
-		stress(1, 2) = tlsph_stress[i][4];
-		stress(2, 2) = tlsph_stress[i][5];
-
-		h = 2.0 * radius[i];
-		r0 = 0.0;
-
-		barbara_kernel_and_derivative(h, r0, wf, wfd);
-		average_stress[i] = wf * vfrac[i] * stress;
-		norm[i] = wf * vfrac[i];
-	}
-
-// set up neighbor list variables
-	inum = list->inum;
-	ilist = list->ilist;
-	numneigh = list->numneigh;
-	firstneigh = list->firstneigh;
-
-	for (ii = 0; ii < inum; ii++) {
-		i = ilist[ii];
-
-		if (mol[i] < 0) { // valid SPH particle have mol > 0
-			continue;
-		}
-
-		jlist = firstneigh[i];
-		jnum = numneigh[i];
-		irad = radius[i];
-		voli = vfrac[i];
-		x0i << x0[i][0], x0[i][1], x0[i][2];
-
-		for (jj = 0; jj < jnum; jj++) {
-			j = jlist[jj];
-			j &= NEIGHMASK;
-
-			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
-				continue;
-			}
-
-			if (mol[i] != mol[j]) {
-				continue;
-			}
-
-			x0j << x0[j][0], x0[j][1], x0[j][2];
-			dx0 = x0j - x0i;
-
-			if (periodic)
-				domain->minimum_image(dx0(0), dx0(1), dx0(2));
-
-			r0Sq = dx0.squaredNorm();
-			h = irad + radius[j];
-			if (r0Sq < h * h) {
-
-				r0 = sqrt(r0Sq);
-				volj = vfrac[j];
-
-				stress(0, 0) = tlsph_stress[j][0];
-				stress(0, 1) = tlsph_stress[j][1];
-				stress(0, 2) = tlsph_stress[j][2];
-				stress(1, 1) = tlsph_stress[j][3];
-				stress(1, 2) = tlsph_stress[j][4];
-				stress(2, 2) = tlsph_stress[j][5];
-
-				// kernel function
-				barbara_kernel_and_derivative(h, r0, wf, wfd);
-
-				average_stress[i] += wf * volj * stress;
-				norm[i] += volj * wf;
-
-				if (j < nlocal) {
-
-					stress(0, 0) = tlsph_stress[i][0];
-					stress(0, 1) = tlsph_stress[i][1];
-					stress(0, 2) = tlsph_stress[i][2];
-					stress(1, 1) = tlsph_stress[i][3];
-					stress(1, 2) = tlsph_stress[i][4];
-					stress(2, 2) = tlsph_stress[i][5];
-
-					average_stress[j] += wf * voli * stress;
-					norm[j] += voli * wf;
-				}
-
-			} // end if check distance
-		} // end loop over j
-	} // end loop over i
-
-	for (i = 0; i < nlocal; i++) {
-		stress = average_stress[i] / norm[i];
-
-		tlsph_stress[i][0] = stress(0, 0);
-		tlsph_stress[i][1] = stress(0, 1);
-		tlsph_stress[i][2] = stress(0, 2);
-		tlsph_stress[i][3] = stress(1, 1);
-		tlsph_stress[i][4] = stress(1, 2);
-		tlsph_stress[i][5] = stress(2, 2);
-
-	}
-
-	delete[] average_stress;
-	delete[] norm;
-
-}
-
-/* ----------------------------------------------------------------------
- XSPH-like smoothing of stress field
- ------------------------------------------------------------------------- */
-
-void PairTlsph::SmoothFieldXSPH() {
-	int *mol = atom->molecule;
-	double *vfrac = atom->vfrac;
-	double *radius = atom->radius;
-	double **x0 = atom->x0;
-	double **tlsph_stress = atom->tlsph_stress;
-	int *ilist, *jlist, *numneigh;
-	int **firstneigh;
-	int nlocal = atom->nlocal;
-	int inum, jnum, ii, jj, i, j;
-	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
-	Vector3d dx0;
-	Matrix3d stress_i, stress_j;
-	Matrix3d *stress_difference;
-	double *norm;
-	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
-	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
-
-// allocate storage
-	stress_difference = new Matrix3d[nlocal];
-	norm = new double[nlocal];
-
-// zero accumulators
-	stress_i.setZero();
-	for (i = 0; i < nlocal; i++) {
-		stress_difference[i].setZero();
-		norm[i] = 0.0;
-	}
-
-// set up neighbor list variables
-	inum = list->inum;
-	ilist = list->ilist;
-	numneigh = list->numneigh;
-	firstneigh = list->firstneigh;
-
-	for (ii = 0; ii < inum; ii++) {
-		i = ilist[ii];
-
-		if (mol[i] < 0) { // valid SPH particle have mol > 0
-			continue;
-		}
-
-		jlist = firstneigh[i];
-		jnum = numneigh[i];
-		irad = radius[i];
-		voli = vfrac[i];
-		x0i << x0[i][0], x0[i][1], x0[i][2];
-
-		stress_i(0, 0) = tlsph_stress[i][0];
-		stress_i(0, 1) = tlsph_stress[i][1];
-		stress_i(0, 2) = tlsph_stress[i][2];
-		stress_i(1, 1) = tlsph_stress[i][3];
-		stress_i(1, 2) = tlsph_stress[i][4];
-		stress_i(2, 2) = tlsph_stress[i][5];
-
-		for (jj = 0; jj < jnum; jj++) {
-			j = jlist[jj];
-			j &= NEIGHMASK;
-
-			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
-				continue;
-			}
-
-			if (mol[i] != mol[j]) {
-				continue;
-			}
-
-			x0j << x0[j][0], x0[j][1], x0[j][2];
-			dx0 = x0j - x0i;
-
-			if (periodic)
-				domain->minimum_image(dx0(0), dx0(1), dx0(2));
-
-			r0Sq = dx0.squaredNorm();
-			h = irad + radius[j];
-			if (r0Sq < h * h) {
-
-				r0 = sqrt(r0Sq);
-				volj = vfrac[j];
-
-				stress_j(0, 0) = tlsph_stress[j][0];
-				stress_j(0, 1) = tlsph_stress[j][1];
-				stress_j(0, 2) = tlsph_stress[j][2];
-				stress_j(1, 1) = tlsph_stress[j][3];
-				stress_j(1, 2) = tlsph_stress[j][4];
-				stress_j(2, 2) = tlsph_stress[j][5];
-
-				// kernel function
-				barbara_kernel_and_derivative(h, r0, wf, wfd);
-
-				stress_difference[i] += wf * volj * (stress_j - stress_i);
-				norm[i] += volj * wf;
-
-				if (j < nlocal) {
-					stress_difference[j] += wf * voli * (stress_i - stress_j);
-					norm[j] += voli * wf;
-				}
-
-			} // end if check distance
-		} // end loop over j
-	} // end loop over i
-
-	for (i = 0; i < nlocal; i++) {
-		if (norm[i] > 0.0) {
-			tlsph_stress[i][0] += stress_difference[i](0, 0) / norm[i];
-			tlsph_stress[i][1] += stress_difference[i](0, 1) / norm[i];
-			tlsph_stress[i][2] += stress_difference[i](0, 2) / norm[i];
-			tlsph_stress[i][3] += stress_difference[i](1, 1) / norm[i];
-			tlsph_stress[i][4] += stress_difference[i](1, 2) / norm[i];
-			tlsph_stress[i][5] += stress_difference[i](2, 2) / norm[i];
-		}
-	}
-
-	delete[] stress_difference;
-	delete[] norm;
-
-}
+///* ----------------------------------------------------------------------
+// smooth stress field
+// ------------------------------------------------------------------------- */
+//
+//void PairTlsph::SmoothField() {
+//	int *mol = atom->molecule;
+//	double *vfrac = atom->vfrac;
+//	double *radius = atom->radius;
+//	double **x0 = atom->x0;
+//	double **tlsph_stress = atom->tlsph_stress;
+//	int *ilist, *jlist, *numneigh;
+//	int **firstneigh;
+//	int nlocal = atom->nlocal;
+//	int inum, jnum, ii, jj, i, j;
+//	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
+//	Vector3d dx0;
+//	Matrix3d stress;
+//	Matrix3d *average_stress;
+//	double *norm;
+//	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
+//	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+//
+//// allocate storage
+//	average_stress = new Matrix3d[nlocal];
+//	norm = new double[nlocal];
+//
+//// zero accumulators
+//	stress.setZero();
+//	for (i = 0; i < nlocal; i++) {
+//		stress(0, 0) = tlsph_stress[i][0];
+//		stress(0, 1) = tlsph_stress[i][1];
+//		stress(0, 2) = tlsph_stress[i][2];
+//		stress(1, 1) = tlsph_stress[i][3];
+//		stress(1, 2) = tlsph_stress[i][4];
+//		stress(2, 2) = tlsph_stress[i][5];
+//
+//		h = 2.0 * radius[i];
+//		r0 = 0.0;
+//
+//		barbara_kernel_and_derivative(h, r0, wf, wfd);
+//		average_stress[i] = wf * vfrac[i] * stress;
+//		norm[i] = wf * vfrac[i];
+//	}
+//
+//// set up neighbor list variables
+//	inum = list->inum;
+//	ilist = list->ilist;
+//	numneigh = list->numneigh;
+//	firstneigh = list->firstneigh;
+//
+//	for (ii = 0; ii < inum; ii++) {
+//		i = ilist[ii];
+//
+//		if (mol[i] < 0) { // valid SPH particle have mol > 0
+//			continue;
+//		}
+//
+//		jlist = firstneigh[i];
+//		jnum = numneigh[i];
+//		irad = radius[i];
+//		voli = vfrac[i];
+//		x0i << x0[i][0], x0[i][1], x0[i][2];
+//
+//		for (jj = 0; jj < jnum; jj++) {
+//			j = jlist[jj];
+//			j &= NEIGHMASK;
+//
+//			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
+//				continue;
+//			}
+//
+//			if (mol[i] != mol[j]) {
+//				continue;
+//			}
+//
+//			x0j << x0[j][0], x0[j][1], x0[j][2];
+//			dx0 = x0j - x0i;
+//
+//			if (periodic)
+//				domain->minimum_image(dx0(0), dx0(1), dx0(2));
+//
+//			r0Sq = dx0.squaredNorm();
+//			h = irad + radius[j];
+//			if (r0Sq < h * h) {
+//
+//				r0 = sqrt(r0Sq);
+//				volj = vfrac[j];
+//
+//				stress(0, 0) = tlsph_stress[j][0];
+//				stress(0, 1) = tlsph_stress[j][1];
+//				stress(0, 2) = tlsph_stress[j][2];
+//				stress(1, 1) = tlsph_stress[j][3];
+//				stress(1, 2) = tlsph_stress[j][4];
+//				stress(2, 2) = tlsph_stress[j][5];
+//
+//				// kernel function
+//				barbara_kernel_and_derivative(h, r0, wf, wfd);
+//
+//				average_stress[i] += wf * volj * stress;
+//				norm[i] += volj * wf;
+//
+//				if (j < nlocal) {
+//
+//					stress(0, 0) = tlsph_stress[i][0];
+//					stress(0, 1) = tlsph_stress[i][1];
+//					stress(0, 2) = tlsph_stress[i][2];
+//					stress(1, 1) = tlsph_stress[i][3];
+//					stress(1, 2) = tlsph_stress[i][4];
+//					stress(2, 2) = tlsph_stress[i][5];
+//
+//					average_stress[j] += wf * voli * stress;
+//					norm[j] += voli * wf;
+//				}
+//
+//			} // end if check distance
+//		} // end loop over j
+//	} // end loop over i
+//
+//	for (i = 0; i < nlocal; i++) {
+//		stress = average_stress[i] / norm[i];
+//
+//		tlsph_stress[i][0] = stress(0, 0);
+//		tlsph_stress[i][1] = stress(0, 1);
+//		tlsph_stress[i][2] = stress(0, 2);
+//		tlsph_stress[i][3] = stress(1, 1);
+//		tlsph_stress[i][4] = stress(1, 2);
+//		tlsph_stress[i][5] = stress(2, 2);
+//
+//	}
+//
+//	delete[] average_stress;
+//	delete[] norm;
+//
+//}
+//
+///* ----------------------------------------------------------------------
+// XSPH-like smoothing of stress field
+// ------------------------------------------------------------------------- */
+//
+//void PairTlsph::SmoothFieldXSPH() {
+//	int *mol = atom->molecule;
+//	double *vfrac = atom->vfrac;
+//	double *radius = atom->radius;
+//	double **x0 = atom->x0;
+//	double **tlsph_stress = atom->tlsph_stress;
+//	int *ilist, *jlist, *numneigh;
+//	int **firstneigh;
+//	int nlocal = atom->nlocal;
+//	int inum, jnum, ii, jj, i, j;
+//	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
+//	Vector3d dx0;
+//	Matrix3d stress_i, stress_j;
+//	Matrix3d *stress_difference;
+//	double *norm;
+//	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
+//	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+//
+//// allocate storage
+//	stress_difference = new Matrix3d[nlocal];
+//	norm = new double[nlocal];
+//
+//// zero accumulators
+//	stress_i.setZero();
+//	for (i = 0; i < nlocal; i++) {
+//		stress_difference[i].setZero();
+//		norm[i] = 0.0;
+//	}
+//
+//// set up neighbor list variables
+//	inum = list->inum;
+//	ilist = list->ilist;
+//	numneigh = list->numneigh;
+//	firstneigh = list->firstneigh;
+//
+//	for (ii = 0; ii < inum; ii++) {
+//		i = ilist[ii];
+//
+//		if (mol[i] < 0) { // valid SPH particle have mol > 0
+//			continue;
+//		}
+//
+//		jlist = firstneigh[i];
+//		jnum = numneigh[i];
+//		irad = radius[i];
+//		voli = vfrac[i];
+//		x0i << x0[i][0], x0[i][1], x0[i][2];
+//
+//		stress_i(0, 0) = tlsph_stress[i][0];
+//		stress_i(0, 1) = tlsph_stress[i][1];
+//		stress_i(0, 2) = tlsph_stress[i][2];
+//		stress_i(1, 1) = tlsph_stress[i][3];
+//		stress_i(1, 2) = tlsph_stress[i][4];
+//		stress_i(2, 2) = tlsph_stress[i][5];
+//
+//		for (jj = 0; jj < jnum; jj++) {
+//			j = jlist[jj];
+//			j &= NEIGHMASK;
+//
+//			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
+//				continue;
+//			}
+//
+//			if (mol[i] != mol[j]) {
+//				continue;
+//			}
+//
+//			x0j << x0[j][0], x0[j][1], x0[j][2];
+//			dx0 = x0j - x0i;
+//
+//			if (periodic)
+//				domain->minimum_image(dx0(0), dx0(1), dx0(2));
+//
+//			r0Sq = dx0.squaredNorm();
+//			h = irad + radius[j];
+//			if (r0Sq < h * h) {
+//
+//				r0 = sqrt(r0Sq);
+//				volj = vfrac[j];
+//
+//				stress_j(0, 0) = tlsph_stress[j][0];
+//				stress_j(0, 1) = tlsph_stress[j][1];
+//				stress_j(0, 2) = tlsph_stress[j][2];
+//				stress_j(1, 1) = tlsph_stress[j][3];
+//				stress_j(1, 2) = tlsph_stress[j][4];
+//				stress_j(2, 2) = tlsph_stress[j][5];
+//
+//				// kernel function
+//				barbara_kernel_and_derivative(h, r0, wf, wfd);
+//
+//				stress_difference[i] += wf * volj * (stress_j - stress_i);
+//				norm[i] += volj * wf;
+//
+//				if (j < nlocal) {
+//					stress_difference[j] += wf * voli * (stress_i - stress_j);
+//					norm[j] += voli * wf;
+//				}
+//
+//			} // end if check distance
+//		} // end loop over j
+//	} // end loop over i
+//
+//	for (i = 0; i < nlocal; i++) {
+//		if (norm[i] > 0.0) {
+//			tlsph_stress[i][0] += stress_difference[i](0, 0) / norm[i];
+//			tlsph_stress[i][1] += stress_difference[i](0, 1) / norm[i];
+//			tlsph_stress[i][2] += stress_difference[i](0, 2) / norm[i];
+//			tlsph_stress[i][3] += stress_difference[i](1, 1) / norm[i];
+//			tlsph_stress[i][4] += stress_difference[i](1, 2) / norm[i];
+//			tlsph_stress[i][5] += stress_difference[i](2, 2) / norm[i];
+//		}
+//	}
+//
+//	delete[] stress_difference;
+//	delete[] norm;
+//
+//}
 
 double PairTlsph::SafeLookup(std::string str, int itype) {
 	//cout << "string passed to lookup: " << str << endl;
@@ -2525,4 +2553,27 @@ void PairTlsph::ComputeDamage(const int i, const Matrix3d strain, const double p
 	} else {
 		damage_increment = 0.0;
 	}
+}
+void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
+
+	/*
+	 * Spiky kernel
+	 */
+
+	if (r >= h) {
+		//printf("r=%f > h=%f in Spiky kernel\n", r, h);
+		wf = wfd = 0.0;
+		return;
+	}
+
+	double hr = h - r; // [m]
+	if (domain->dimension == 2) {
+		double n = 0.3141592654e0 * h * h * h * h * h; // [m^5]
+		wfd = -3.0e0 * hr * hr / n; // [m*m/m^5] = [1/m^3] ==> correct for dW/dr in 2D
+		wf = -0.333333333333e0 * hr * wfd; // [m/m^3] ==> [1/m^2] correct for W in 2D
+	} else {
+		wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
+		wf = -0.333333333333e0 * hr * wfd; // [m/m^4] ==> [1/m^3] correct for W in 3D
+	}
+
 }

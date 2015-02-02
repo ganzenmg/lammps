@@ -178,7 +178,7 @@ void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
 				J = MIN(J, 1.1);
 				vfrac[i] *= J;
 
-				radius[i] *= pow(J, 1.0 / domain->dimension);
+				//radius[i] *= pow(J, 1.0 / domain->dimension);
 			}
 		}
 
@@ -206,7 +206,6 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 	grow_arrays(nmax);
 
 // zero npartner for all current atoms
-// clear 2 page data structures
 
 	for (i = 0; i < nlocal; i++)
 		npartner[i] = 0;
@@ -336,12 +335,6 @@ void FixSMD_TLSPH_ReferenceConfiguration::grow_arrays(int nmax) {
 	//printf("in FixSMD_TLSPH_ReferenceConfiguration::grow_arrays\n");
 	memory->grow(npartner, nmax, "peri_neigh:npartner");
 	memory->grow(partner, nmax, maxpartner, "peri_neigh:partner");
-//	memory->destroy(npartner);
-//	memory->destroy(partner);
-//	npartner = NULL;
-//	partner = NULL;
-//	memory->create(npartner, nmax, "tlsph:npartner");
-//	memory->create(partner, nmax, maxpartner, "tlsph:partner");
 }
 
 /* ----------------------------------------------------------------------
