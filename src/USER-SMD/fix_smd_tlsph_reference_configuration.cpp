@@ -46,8 +46,8 @@ FixSMD_TLSPH_ReferenceConfiguration::FixSMD_TLSPH_ReferenceConfiguration(LAMMPS 
 	partner = NULL;
 	grow_arrays(atom->nmax);
 	atom->add_callback(0);
-	atom->add_callback(1);
-	atom->add_callback(2); // for border communication
+	//atom->add_callback(1);
+	//atom->add_callback(2); // for border communication
 
 	// initialize npartner to 0 so neighbor list creation is OK the 1st time
 
@@ -174,11 +174,11 @@ void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
 				 * to the intervale J \in [0.9..1.1]
 				 */
 				J = Fincr[i].determinant();
-				J = MAX(J, 0.9);
-				J = MIN(J, 1.1);
+				J = MAX(J, 0.8);
+				J = MIN(J, 1.2);
 				vfrac[i] *= J;
 
-				//radius[i] *= pow(J, 1.0 / domain->dimension);
+				radius[i] *= pow(J, 1.0 / domain->dimension);
 			}
 		}
 
@@ -205,16 +205,11 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 	nmax = atom->nmax;
 	grow_arrays(nmax);
 
-// zero npartner for all current atoms
-
-	for (i = 0; i < nlocal; i++)
-		npartner[i] = 0;
-
 // 1st loop over neighbor list
 // calculate npartner for each owned atom
 // nlocal_neigh = nlocal when neigh list was built, may be smaller than nlocal
 
-	double **x = atom->x;
+	double **x0 = atom->x0;
 	double *radius = atom->radius;
 	int *type = atom->type;
 	tagint *tag = atom->tag;
@@ -223,6 +218,11 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 	ilist = list->ilist;
 	numneigh = list->numneigh;
 	firstneigh = list->firstneigh;
+
+	// zero npartner for all current atoms
+
+	for (i = 0; i < nlocal; i++)
+		npartner[i] = 0;
 
 	for (ii = 0; ii < inum; ii++) {
 		i = ilist[ii];
@@ -234,9 +234,9 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
 
-			delx = x[i][0] - x[j][0];
-			dely = x[i][1] - x[j][1];
-			delz = x[i][2] - x[j][2];
+			delx = x0[i][0] - x0[j][0];
+			dely = x0[i][1] - x0[j][1];
+			delz = x0[i][2] - x0[j][2];
 			rsq = delx * delx + dely * dely + delz * delz;
 			jtype = type[j];
 			h = radius[i] + radius[j];
@@ -271,9 +271,9 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
 
-			delx = x[i][0] - x[j][0];
-			dely = x[i][1] - x[j][1];
-			delz = x[i][2] - x[j][2];
+			delx = x0[i][0] - x0[j][0];
+			dely = x0[i][1] - x0[j][1];
+			delz = x0[i][2] - x0[j][2];
 			rsq = delx * delx + dely * dely + delz * delz;
 			jtype = type[j];
 			h = radius[i] + radius[j];
@@ -288,7 +288,7 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 		}
 	}
 
-// bond statistics
+	// bond statistics
 	if (update->ntimestep == 0) {
 		n = 0;
 		for (i = 0; i < nlocal; i++) {
@@ -457,7 +457,7 @@ int FixSMD_TLSPH_ReferenceConfiguration::pack_forward_comm(int n, int *list, dou
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
 
-//printf("in FixSMDIntegrateTlsph::pack_forward_comm\n");
+	//printf("FixSMD_TLSPH_ReferenceConfiguration:::pack_forward_comm\n");
 	m = 0;
 	for (i = 0; i < n; i++) {
 		j = list[i];
@@ -479,7 +479,6 @@ void FixSMD_TLSPH_ReferenceConfiguration::unpack_forward_comm(int n, int first, 
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
 
-//printf("in FixSMDIntegrateTlsph::unpack_forward_comm\n");
 	m = 0;
 	last = first + n;
 	for (i = first; i < last; i++) {

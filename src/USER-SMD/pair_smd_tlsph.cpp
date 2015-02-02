@@ -166,7 +166,7 @@ void PairTlsph::PreCompute() {
 	firstneigh = list->firstneigh;
 #endif
 
-	double r0, r0Sq, wf, h, irad, voli, volj;
+	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
 	Vector3d dx0, dx, dv, g;
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
 	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
@@ -247,6 +247,7 @@ void PairTlsph::PreCompute() {
 			r0Sq = dx0.squaredNorm();
 			h = irad + radius[j];
 			if (true) {
+
 				//if (r0Sq < h * h) {
 
 				// initialize Eigen data structures from LAMMPS data structures
@@ -264,8 +265,8 @@ void PairTlsph::PreCompute() {
 				dv = vj - vi;
 				dvint = vintj - vinti;
 
-				wf = Kernel_Wendland_Quintic_NotNormalized(r0, h);
-				g = wf * dx0 / r0;
+				barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
+				g = (wfd / r0) * dx0;
 
 				/* build matrices */
 				Ktmp = g * dx0.transpose();
@@ -639,8 +640,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				r = dx.norm();
 
 				// uncorrected kernel gradient
-				wf = Kernel_Wendland_Quintic_NotNormalized(r0, h);
-				g = wf * dx0 / r0;
+				barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
+				g = (wfd / r0) * dx0;
 
 				/*
 				 * force contribution -- note that the kernel gradient correction has been absorbed into PK1
@@ -655,11 +656,15 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				// call a different kernel and its gradient weights for artificial viscosity and hourglass correction
 				spiky_kernel_and_derivative(h, r0, wf, wfd);
 
-				delVdotDelR = dx.dot(dv);
-				mu_ij = h * delVdotDelR / (r * r + 0.1 * h * h); // m * m/s * m / m*m ==> units m/s
-				visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // this has units of pressure
-				//printf("visc_magnitude = %f, c_ij=%f, mu_ij=%f\n", visc_magnitude, c_ij, mu_ij);
-				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h);
+				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
+				if (fabs(delVdotDelR) > 0.01 * signal_vel0[itype]) { // limit delVdotDelR to a fraction of speed of sound
+					double s = copysign(1, delVdotDelR);
+					delVdotDelR = s * 0.01 * signal_vel0[itype];
+				}
+
+				mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
+				visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // units: m^5/(s^2 kg))
+				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h); // units: kg^2 * m^5/(s^2 kg) * m^-4 = kg m / s^2 = N
 
 				/*
 				 * hourglass deviation of particles i and j
@@ -670,33 +675,17 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 				hourglass_error[i] += volj * wf * hg_err;
 
-				/*
-				 * friction-like hourglass formulation
-				 */
-
-//				hg_mag = hg_coeff[itype] * hg_err; // hg_mag has no dimensions
-//				hg_mag *= voli * volj * wf * youngsmodulus[itype] / h; // hg_mag has dimensions [J/m] == [N]
-//				f_hg = hg_mag * gamma / (gamma.norm() + 0.1 * h);
-//				if (gamma.dot(dv) != 0.0) {
-//					hg_mag = hg_coeff[itype] * hg_err * gamma.dot(dv) / (gamma.norm() * dv.norm()); // hg_mag has no dimensions
-//					hg_mag *= voli * volj * wf * youngsmodulus[itype] / h; // hg_mag has dimensions [J/m] == [N]
-//					if (dv.norm() > 1.0e-16) {
-//						f_hg = hg_mag * dv / dv.norm();
-//					} else {
-//						f_hg.setZero();
-//					}
-//				} else {
-//					f_hg.setZero();
-//				}
 				/* SPH-like hourglass formulation */
 
 				if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-3) {
 					/*
 					 * viscous hourglass formulation
 					 */
-
 					delta = gamma.dot(dx);
 					if (delVdotDelR * delta < 0.0) {
+						if (hg_err > 0.1) { // limit hg_err
+							hg_err = 0.1;
+						}
 						hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
 					} else {
 						hg_mag = 0.0;
@@ -708,28 +697,22 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 					 * stiffness hourglass formulation
 					 */
 
-					delta = 0.5 * gamma.dot(dx) / (r + 0.1 * h); // delta has dimensions of [m]
+					double gamma_dot_dx = gamma.dot(dx);
+					double s = copysign(1, gamma_dot_dx);
+					if (fabs(gamma_dot_dx) > 0.1 * r) {
+						gamma_dot_dx = s * 0.1 * r; // limit stiffness based hourglass error
+					}
+
+					delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
 					hg_mag = hg_coeff[itype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
 					hg_mag *= -voli * volj * wf * youngsmodulus[itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
-					f_hg = (hg_mag / r) * dx;
+					f_hg = (hg_mag / (r + 0.01 * h)) * dx;
 					//printf("delta = %g, hg_mag = %g, coeff=%g, wf=%g, vi=%g, vj=%g, Ei=%f, Ej-%f\n",delta, hg_mag, hg_coeff[itype][jtype], wf, voli, volj,
 					//		youngsmodulus[itype], youngsmodulus[jtype]);
 
 				}
 
-				/*
-				 * scale hourglass forces if neccessary
-				 */
-
-				stress_force_magnitude = f_stress.norm();
-				hourglass_force_magnitude = f_hg.norm();
-				if (hourglass_force_magnitude > 100.0 * stress_force_magnitude) {
-					f_hg = 100.0 * stress_force_magnitude * (f_hg / hourglass_force_magnitude);
-				}
-
-				if (MAX(damage[i], damage[j]) > 0.0) {
-					f_hg.setZero();
-				}
+				f_hg *= (1.0 - MAX(damage[i], damage[j])); // reduce hourglass force between damaged particles
 
 				// sum stress, viscous, and hourglass forces
 				sumForces = f_stress + f_visc + f_hg;
@@ -768,10 +751,6 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 							updateFlag = 1;
 						}
 					}
-
-//					if (r > h + 0.75 * neighbor->skin) {
-//						updateFlag = 1;
-//					}
 				}
 			}
 		}
@@ -1029,6 +1008,8 @@ void PairTlsph::settings(int narg, char **arg) {
 	 * The maximum relative displacement which is tracked by the construction of LAMMPS' neighborlists
 	 * is the folowing.
 	 */
+
+	cut_comm = MAX(neighbor->cutneighmax, comm->cutghostuser); // cutoff radius within which ghost atoms are communicated.
 	update_threshold = cut_comm;
 	update_method = UPDATE_CONSTANT_THRESHOLD;
 
@@ -1071,7 +1052,8 @@ void PairTlsph::settings(int narg, char **arg) {
 		if (comm->me == 0) {
 			printf("\n                ***** WARNING ***\n");
 			printf("requested reference configuration update threshold is %g length units\n", update_threshold);
-			printf("This value exceeds the maximum value %g beyond which TLSPH displacements can be tracked at current settings.\n", cut_comm);
+			printf("This value exceeds the maximum value %g beyond which TLSPH displacements can be tracked at current settings.\n",
+					cut_comm);
 			printf("Expect loss of neighbors!\n");
 		}
 	}
@@ -1079,9 +1061,11 @@ void PairTlsph::settings(int narg, char **arg) {
 	if (comm->me == 0) {
 
 		if (update_method == UPDATE_CONSTANT_THRESHOLD) {
-			printf("... will update reference configuration if magnitude of relative displacement exceeds %g length units\n", update_threshold);
+			printf("... will update reference configuration if magnitude of relative displacement exceeds %g length units\n",
+					update_threshold);
 		} else if (update_method == UPDATE_PAIRWISE_RATIO) {
-			printf("... will update reference configuration if ratio pairwise distance / smoothing length  exceeds %g\n", update_threshold);
+			printf("... will update reference configuration if ratio pairwise distance / smoothing length  exceeds %g\n",
+					update_threshold);
 		}
 		printf(
 				">>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========\n");

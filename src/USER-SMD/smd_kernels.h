@@ -59,8 +59,10 @@ static inline void barbara_kernel_and_derivative(const double h, const double r,
 	double hsq = h * h;
 
 	if (r > h) {
-		printf("r = %f > h = %f in kernel function\n", r, h);
+		printf("r = %f > h = %f in barbara kernel function\n", r, h);
 		exit(1);
+		//wf = wfd = 0.0;
+		//return;
 	}
 
 	if (dimension == 2) {

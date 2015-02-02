@@ -60,7 +60,7 @@ set             group all density ${rho_water}
 set             group solids density ${rho_obj}
 
 # set pair styles
-pair_style      hybrid/overlay ulsph tlsph smd/hertz 1.5
+pair_style      hybrid/overlay ulsph tlsph *UPDATE_PAIRWISE 10.0 smd/hertz 1.5
 pair_coeff      1 1 ulsph *COMMON ${rho_water} ${c0} 0.1 1 &
 		*EOS_TAIT 7.0 &
 	        *END

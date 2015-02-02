@@ -63,13 +63,12 @@ public:
 	void *extract(const char *, int &);
 	int pack_forward_comm(int, int *, double *, int, int *);
 	void unpack_forward_comm(int, int, double *);
-	void barbara_kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
 	Matrix3d pseudo_inverse_SVD(Matrix3d);
 	void PolDec(Matrix3d &, Matrix3d *, Matrix3d *);
 	void AssembleStress();
 	Matrix3d Deviator(Matrix3d);
 
-	void CheckIntegration();
+	//void CheckIntegration();
 	void PreCompute();
 	void ComputeForces(int eflag, int vflag);
 	double TestMatricesEqual(Matrix3d, Matrix3d, double);
