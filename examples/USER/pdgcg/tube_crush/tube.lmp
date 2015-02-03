@@ -21,7 +21,7 @@ variable        skin equal 1.0 # Verlet list range
 units		si
 dimension       3
 boundary        sm sm sm
-atom_style      tlsph
+atom_style      smd
 neighbor        ${skin} bin
 comm_modify     vel yes
 newton          off
@@ -39,8 +39,8 @@ group           clamp region clamp
 pair_style      pdgcg/shells
 pair_coeff      * * ${E} ${kbend} ${smax} ${G0} ${visc} ${syield}
 
-compute         crad all sph2/contact_radius
-compute         eint all sph2/internal_energy
+compute         crad all smd/contact_radius
+compute         eint all smd/internal_energy
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
 compute         sumF clamp reduce sum fz

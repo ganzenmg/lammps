@@ -802,8 +802,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 				}
 			} // end Tait EOS
 
-			ioffset = iNextKwd;
-			if (strcmp(arg[ioffset], "*EOS_PERFECT_GAS") == 0) {
+			else if (strcmp(arg[ioffset], "*EOS_PERFECT_GAS") == 0) {
 
 				/*
 				 * Tait EOS
