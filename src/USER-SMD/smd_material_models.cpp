@@ -143,19 +143,21 @@ void TaitEOS_density(const double exponent, const double c0_reference, const dou
 
  output: final pressure pFinal, pressure rate p_rate
  ------------------------------------------------------------------------- */
-void PerfectGasEOS(const double gamma, const double vol, const double mass, const double energy, double &pFinal__, double &c0) {
+void PerfectGasEOS(const double gamma, const double vol, const double mass, const double energy, double &pFinal, double &c0) {
 
 	/*
 	 * perfect gas EOS is p = (gamma - 1) rho e
 	 */
 
-	pFinal__ = - (1.0 - gamma) * energy / vol;
+	if (energy > 0.0) {
+
+		pFinal = (1.0 - gamma) * energy / vol;
 //printf("gamma = %f, vol%f, e=%g ==> p=%g\n", gamma, vol, energy, *pFinal__/1.0e-9);
 
-	if (energy > 0.0) {
 		c0 = sqrt((gamma - 1.0) * energy / mass);
+
 	} else {
-		c0 = 0.0;
+		pFinal = c0 = 0.0;
 	}
 
 }

@@ -1,9 +1,14 @@
-/*
- * smd_kernel_functions.h
+/* ----------------------------------------------------------------------
  *
- *  Created on: Jan 28, 2015
- *      Author: ganzenmueller
- */
+ *                    *** Smooth Mach Dynamics ***
+ *
+ * This file is part of the USER-SMD package for LAMMPS.
+ * Copyright (2014) Georg C. Ganzenmueller, georg.ganzenmueller@emi.fhg.de
+ * Fraunhofer Ernst-Mach Institute for High-Speed Dynamics, EMI,
+ * Eckerstrasse 4, D-79104 Freiburg i.Br, Germany.
+ *
+ * ----------------------------------------------------------------------- */
+
 
 #ifndef SMD_KERNEL_FUNCTIONS_H_
 #define SMD_KERNEL_FUNCTIONS_H_

@@ -8,20 +8,21 @@
 # Total Lagrangian formalism. Contact forces between container, solid bodies, and ulsph prevent
 # mutual penetration of these physical entities.
 
-variable        l0 equal 0.1 # initial particle lattice spacing
+variable        l0 equal 0.5 # initial particle lattice spacing
 variable        rho_ulsph equal 1000 # mass density ulsph
 variable        rho_obj equal 300 # mass density solid objects
 variable        h equal 2.5*${l0} # SPH kernel diameter
 variable        c0 equal 10.0 # speed of sound for ulsph
 variable        E equal 2.0e5 # Young's modulus for solid objects
-variable        sigma_yield equal 0.05*${E} # plastic yield stress for solid objects
+variable        sigma_yield equal 0.01*${E} # plastic yield stress for solid objects
 variable        contact_stiffness equal 0.5*${c0}^2*${rho_ulsph} # contact force amplitude
 variable        skin equal ${h} # Verlet list range
 variable        vol_one equal ${l0}^2 # initial particle volume for 2d simulation
+variable        cr0 equal ${l0}/2
 
 units		si
-dimension       2
-boundary        sm sm p
+dimension       3
+boundary        sm sm sm
 atom_style      smd
 comm_style      tiled
 neighbor        ${skin} bin
@@ -31,11 +32,11 @@ newton          off
 atom_modify     map array
 
 # create simulation box, a container, and a ulsph column
-region          box block -5 5 -5 5 -0.01 0.01 units box
+region          box block -5 5 -5 5 -5 5 units box
 create_box      2 box
 region          solid sphere 0 0 0 4.5 units box
 region          gas sphere 0 0 0 3.5 units box
-lattice         sq ${l0}
+lattice         sc ${l0}
 create_atoms    1 region solid
 set             region gas type 2
 group           tlsph type 1
@@ -44,14 +45,14 @@ group           ulsph type 2
 # initialize particle properties
 set             group all meso_rho ${rho_ulsph}
 set             group all diameter ${h}
-set             group all contact_radius ${l0}
+set             group all contact_radius ${cr0}
 set             group all volume  ${vol_one}
 set             group all density ${rho_ulsph}
 set             group tlsph density ${rho_obj}
-set             group ulsph meso_e 100
+set             group ulsph meso_e 500
 
 # set pair styles
-pair_style      hybrid/overlay ulsph tlsph *UPDATE_PAIRWISE 1.0 smd/hertz 1.0
+pair_style      hybrid/overlay ulsph tlsph *UPDATE_PAIRWISE 1.0 smd/hertz 2.0
 pair_coeff      2 2 ulsph *COMMON ${rho_ulsph} ${c0} 0.1 1 &
 		*EOS_PERFECT_GAS 1.4 &
 	        *END
@@ -66,22 +67,24 @@ compute         eint all smd/internal_energy
 compute         alleint all reduce sum c_eint
 compute         contact_radius all smd/contact_radius
 compute         S tlsph smd/tlsph_stress
+compute         S_ulsph ulsph smd/ulsph_stress
 compute         nn ulsph smd/ulsph_num_neighs
 compute         epl tlsph smd/plastic_strain
 compute         hgerr tlsph smd/hourglass_error
 
 variable        etot equal pe+ke+c_alleint # total energy of the system
+variable        p_gas atom -(c_S_ulsph[1]+c_S_ulsph[2]+c_S_ulsph[3])/3
 fix             dtfix all smd/adjust_dt 0.1 # compute stable time increment
-fix             integration_fix_ulsph ulsph smd/integrate_ulsph adjust_radius 1.2
+fix             integration_fix_ulsph ulsph smd/integrate_ulsph adjust_radius 1.2 xsph
 fix             integration_fix_tlsph tlsph smd/integrate_tlsph xsph
 fix             balance_fix all balance 1000 0.9 rcb # load balancing for MPI
 
 thermo          100
 thermo_style    custom step ke pe v_etot c_alleint f_dtfix dt
 thermo_modify   lost ignore
-dump            dump_id all custom 100 dump.LAMMPS id type x y &
-                fx fy vx vy c_eint c_contact_radius mol &
-                c_S[1] c_S[2] c_S[4] mass radius c_epl c_hgerr
+dump            dump_id all custom 100 dump.LAMMPS id type x y z &
+                fx fy fz vx vy vz c_eint c_contact_radius mol &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] mass radius c_epl c_hgerr c_nn v_p_gas
 dump_modify     dump_id first yes
 
 run             10000

@@ -9,7 +9,6 @@
  *
  * ----------------------------------------------------------------------- */
 
-
 /* ----------------------------------------------------------------------
  LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
  http://lammps.sandia.gov, Sandia National Laboratories
@@ -73,7 +72,7 @@ void ComputeSMDULSPHStrainRate::init() {
 
 void ComputeSMDULSPHStrainRate::compute_peratom() {
 	invoked_peratom = update->ntimestep;
-	int *mol = atom->molecule;
+	int *mask = atom->mask;
 
 	// grow vector array if necessary
 
@@ -94,13 +93,22 @@ void ComputeSMDULSPHStrainRate::compute_peratom() {
 	Matrix3d D;
 
 	for (int i = 0; i < nlocal; i++) {
-		D = 0.5 * (L[i] + L[i].transpose());
-		strain_rate_array[i][0] = D(0, 0); // xx
-		strain_rate_array[i][1] = D(1, 1); // yy
-		strain_rate_array[i][2] = D(2, 2); // zz
-		strain_rate_array[i][3] = D(0, 1); // xy
-		strain_rate_array[i][4] = D(0, 2); // xz
-		strain_rate_array[i][5] = D(1, 2); // yz
+		if (mask[i] & groupbit) {
+			D = 0.5 * (L[i] + L[i].transpose());
+			strain_rate_array[i][0] = D(0, 0); // xx
+			strain_rate_array[i][1] = D(1, 1); // yy
+			strain_rate_array[i][2] = D(2, 2); // zz
+			strain_rate_array[i][3] = D(0, 1); // xy
+			strain_rate_array[i][4] = D(0, 2); // xz
+			strain_rate_array[i][5] = D(1, 2); // yz
+		} else {
+			strain_rate_array[i][0] = 0.0;
+			strain_rate_array[i][1] = 0.0;
+			strain_rate_array[i][2] = 0.0;
+			strain_rate_array[i][3] = 0.0;
+			strain_rate_array[i][4] = 0.0;
+			strain_rate_array[i][5] = 0.0;
+		}
 	}
 }
 

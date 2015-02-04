@@ -112,6 +112,7 @@ void PairPDGCGShells::bending_forces() {
 	tagint ***trianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairs;
 	int *nTrianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->nTrianglePairs;
 	double **trianglePairAngle0 = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairAngle0;
+	double **trianglePairPlasticAngle = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairPlasticAngle;
 
 	int i, i1, i2, i3, i4, itype, tnum, t;
 	Vector3d E, n1, n2, E_normed;
@@ -147,6 +148,24 @@ void PairPDGCGShells::bending_forces() {
 			if ((i3 < 0) || (i3 >= nlocal)) {
 				char str[128];
 				sprintf(str, "t0 is %d i3 is %d bit nlocal is %d", trianglePairs[i][t][0], i3, nlocal);
+				error->one(FLERR, str);
+			}
+
+			if ((i1 < 0) || (i1 >= nlocal + atom->nghost)) {
+				char str[128];
+				sprintf(str, "i1 is %d bit nlocal+nghost is %d, try increasing comm_modify cutoff", i1, nlocal + atom->nghost);
+				error->one(FLERR, str);
+			}
+
+			if ((i2 < 0) || (i2 >= nlocal + atom->nghost)) {
+				char str[128];
+				sprintf(str, "i2 is %d bit nlocal+nghost is %d, try increasing comm_modify cutoff", i2, nlocal + atom->nghost);
+				error->one(FLERR, str);
+			}
+
+			if ((i4 < 0) || (i4 >= nlocal + atom->nghost)) {
+				char str[128];
+				sprintf(str, "i4 is %d bit nlocal+nghost is %d, try increasing comm_modify cutoff", i4, nlocal + atom->nghost);
 				error->one(FLERR, str);
 			}
 
@@ -193,7 +212,26 @@ void PairPDGCGShells::bending_forces() {
 			}
 
 			angle0 = trianglePairAngle0[i][t];
-			force_magnitude = (angle - angle0) * kbend[itype][itype] * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
+
+			// deviation from rest angle
+			double deltaAngle = angle - angle0;
+
+			// subtract plastic stretch from current stretch
+			deltaAngle -= trianglePairPlasticAngle[i][t];
+
+			// alternative plasticity based on plastic stretch
+			double maxa = 0.15;
+			if (deltaAngle > maxa) {
+				double plastic_stretch_increment = deltaAngle - maxa;
+				trianglePairPlasticAngle[i][t] += plastic_stretch_increment;
+				deltaAngle = maxa;
+			} else if (deltaAngle < -maxa) {
+				double plastic_stretch_increment = deltaAngle + maxa;
+				trianglePairPlasticAngle[i][t] += plastic_stretch_increment;
+				deltaAngle = -maxa;
+			}
+
+			force_magnitude = deltaAngle * kbend[itype][itype] * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
 
 			//printf("angle is %f\n", angle);
 
@@ -368,6 +406,7 @@ void PairPDGCGShells::bond_forces() {
 	int nlocal = atom->nlocal;
 	tagint *tag = atom->tag;
 	double **r0 = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->r0;
+	double **plastic_stretch = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->plastic_stretch;
 	tagint **partner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->partner;
 	int *npartner = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->npartner;
 	double *vinter = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->vinter;
@@ -434,12 +473,14 @@ void PairPDGCGShells::bond_forces() {
 				// bond stretch
 				stretch = dr / r0[i][jj]; // total stretch
 
-//				double se;
+//				// subtract plastic stretch from current stretch
+//				stretch -= plastic_stretch[i][jj];
+//
+//				// alternative plasticity based on plastic stretch
 //				if (stretch > syield[itype][jtype]) {
-//					plastic_stretch[i][jj] = syield[itype][jtype] - stretch;
-//					se = syield[itype][jtype]; // elastic part of stretch
-//				} else {
-//					se = stretch;
+//					double plastic_stretch_increment = stretch - syield[itype][jtype];
+//					plastic_stretch[i][jj] += plastic_stretch_increment;
+//					stretch = syield[itype][jtype];
 //				}
 
 				c = 9.0 * bulkmodulus[itype][jtype] * (1.0 / vinter[i] + 1.0 / vinter[j]);
@@ -463,8 +504,6 @@ void PairPDGCGShells::bond_forces() {
 					ev_tally(i, i, nlocal, 0, 0.5 * evdwl, 0.0, 0.5 * fbond, delx, dely, delz);
 					//printf("broken evdwl=%f, norm = %f %f\n", evdwl, vinter[i], vinter[j]);
 				}
-
-				// bond-based plasticity
 
 				//			if (smax[itype][jtype] > 0.0) { // maximum-stretch based failure
 				if (stretch > smax[itype][jtype]) {

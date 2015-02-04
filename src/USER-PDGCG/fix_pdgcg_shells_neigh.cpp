@@ -55,13 +55,14 @@ FixPDGCGShellsNeigh::FixPDGCGShellsNeigh(LAMMPS *lmp, int narg, char **arg) :
 	maxpartner = 1;
 	npartner = NULL;
 	partner = NULL;
-	r0 = r1 = NULL;
+	r0 = plastic_stretch = NULL;
 	vinter = NULL;
 
 	maxTrianglePairs = 1;
 	nTrianglePairs = NULL;
 	trianglePairs = NULL;
 	trianglePairAngle0 = NULL;
+	trianglePairPlasticAngle = NULL;
 
 	nmax = atom->nmax;
 	grow_arrays(atom->nmax);
@@ -97,12 +98,13 @@ FixPDGCGShellsNeigh::~FixPDGCGShellsNeigh() {
 	memory->destroy(npartner);
 	memory->destroy(partner);
 	memory->destroy(r0);
-	memory->destroy(r1);
+	memory->destroy(plastic_stretch);
 	memory->destroy(vinter);
 
 	memory->destroy(nTrianglePairs);
 	memory->destroy(trianglePairs);
 	memory->destroy(trianglePairAngle0);
+	memory->destroy(trianglePairPlasticAngle);
 
 }
 
@@ -243,18 +245,20 @@ void FixPDGCGShellsNeigh::setup(int vflag) {
 
 	memory->destroy(partner);
 	memory->destroy(r0);
-	memory->destroy(r1);
+	memory->destroy(plastic_stretch);
 	memory->destroy(npartner);
 	memory->destroy(trianglePairs);
 	memory->destroy(nTrianglePairs);
 	memory->destroy(trianglePairAngle0);
+	memory->destroy(trianglePairPlasticAngle);
 
 	npartner = NULL;
 	partner = NULL;
-	r0 = r1 = NULL;
+	r0 = plastic_stretch = NULL;
 	trianglePairs = NULL;
 	nTrianglePairs = NULL;
 	trianglePairAngle0 = NULL;
+	trianglePairPlasticAngle = NULL;
 	nmax = atom->nmax;
 	grow_arrays(nmax);
 
@@ -301,14 +305,14 @@ void FixPDGCGShellsNeigh::setup(int vflag) {
 					if (rsq <= cutsq) {
 						partner[i][npartner[i]] = tag[j];
 						r0[i][npartner[i]] = sqrt(rsq);
-						r1[i][npartner[i]] = 0.0;
+						plastic_stretch[i][npartner[i]] = 0.0;
 						npartner[i]++;
 						vinter[i] += vfrac[j];
 
 						if (j < nlocal) {
 							partner[j][npartner[j]] = tag[i];
 							r0[j][npartner[j]] = sqrt(rsq);
-							r1[j][npartner[j]] = 0.0;
+							plastic_stretch[j][npartner[j]] = 0.0;
 							npartner[j]++;
 							vinter[j] += vfrac[i];
 						}
@@ -394,6 +398,8 @@ void FixPDGCGShellsNeigh::setup_bending_triangles() {
 	for (i = 0; i < nmax; i++) {
 		for (t = 0; t < maxTrianglePairs; t++) {
 			trianglePairAngle0[i][t] = 0.0;
+			trianglePairPlasticAngle[i][t] = 0.0;
+
 		}
 	}
 
@@ -486,6 +492,7 @@ double FixPDGCGShellsNeigh::memory_usage() {
 	bytes += nmax * sizeof(int); // nTrianglePairs
 	bytes += nmax * maxTrianglePairs * 4 * sizeof(tagint); // trianglePairs
 	bytes += nmax * maxTrianglePairs * sizeof(double); // trianglePairAngle0
+	bytes += nmax * maxTrianglePairs * sizeof(double); // trianglePairPlasticAngle
 	return bytes;
 }
 
@@ -501,9 +508,10 @@ void FixPDGCGShellsNeigh::grow_arrays(int nmax) {
 	memory->grow(nTrianglePairs, nmax, "pdgcg_shells:nTrianglePairs");
 	memory->grow(trianglePairs, nmax, maxTrianglePairs, 4, "pdgcg_shells:trianglePairs");
 	memory->grow(trianglePairAngle0, nmax, maxTrianglePairs, "pdgcg_shells:trianglePairAngle0");
+	memory->grow(trianglePairPlasticAngle, nmax, maxTrianglePairs, "pdgcg_shells:trianglePairPlasticAngle");
 
 	memory->grow(r0, nmax, maxpartner, "peri_neigh:r0");
-	memory->grow(r1, nmax, maxpartner, "peri_neigh:r1");
+	memory->grow(plastic_stretch, nmax, maxpartner, "peri_neigh:plastic_stretch");
 	memory->grow(vinter, nmax, "peri_neigh:vinter");
 }
 
@@ -519,7 +527,7 @@ void FixPDGCGShellsNeigh::copy_arrays(int i, int j, int delflag) {
 	for (m = 0; m < npartner[j]; m++) {
 		partner[j][m] = partner[i][m];
 		r0[j][m] = r0[i][m];
-		r1[j][m] = r1[i][m];
+		plastic_stretch[j][m] = plastic_stretch[i][m];
 	}
 	vinter[j] = vinter[i];
 
@@ -530,6 +538,7 @@ void FixPDGCGShellsNeigh::copy_arrays(int i, int j, int delflag) {
 		trianglePairs[j][m][2] = trianglePairs[i][m][2];
 		trianglePairs[j][m][3] = trianglePairs[i][m][3];
 		trianglePairAngle0[j][m] = trianglePairAngle0[i][m];
+		trianglePairPlasticAngle[j][m] = trianglePairPlasticAngle[i][m];
 	}
 
 }
@@ -603,17 +612,20 @@ int FixPDGCGShellsNeigh::pack_exchange(int i, double *buf) {
 	//printf("in FixPDGCGShellsNeigh::pack_exchange ------------------------------------------\n");
 	//tagint *tag = atom->tag;
 
-	int m = 1;
+	int m = 0;
+	int count = 0;
+	buf[m++] = npartner[i];
 	for (int n = 0; n < npartner[i]; n++) {
-		if (partner[i][n] == 0)
-			continue;
+		//if (partner[i][n] == 0)
+		//	continue;
 		buf[m++] = partner[i][n];
 		//printf("SND[%d]: atom %d with tag id %d has partner with tag id %d with r0=%f\n", comm->me, i, tag[i], partner[i][n],
 		//		r0[i][n]);
 		buf[m++] = r0[i][n];
-		buf[m++] = r1[i][n];
+		buf[m++] = plastic_stretch[i][n];
+		count++;
 	}
-	buf[0] = m / 3;
+	//buf[0] = count;
 	buf[m++] = vinter[i];
 
 	buf[m++] = nTrianglePairs[i];
@@ -623,6 +635,7 @@ int FixPDGCGShellsNeigh::pack_exchange(int i, double *buf) {
 		buf[m++] = trianglePairs[i][n][2];
 		buf[m++] = trianglePairs[i][n][3];
 		buf[m++] = trianglePairAngle0[i][n];
+		buf[m++] = trianglePairPlasticAngle[i][n];
 	}
 
 	return m;
@@ -652,7 +665,7 @@ int FixPDGCGShellsNeigh::unpack_exchange(int nlocal, double *buf) {
 	for (int n = 0; n < npartner[nlocal]; n++) {
 		partner[nlocal][n] = static_cast<tagint>(buf[m++]);
 		r0[nlocal][n] = buf[m++];
-		r1[nlocal][n] = buf[m++];
+		plastic_stretch[nlocal][n] = buf[m++];
 	}
 	vinter[nlocal] = buf[m++];
 
@@ -663,6 +676,7 @@ int FixPDGCGShellsNeigh::unpack_exchange(int nlocal, double *buf) {
 		trianglePairs[nlocal][n][2] = static_cast<int>(buf[m++]);
 		trianglePairs[nlocal][n][3] = static_cast<int>(buf[m++]);
 		trianglePairAngle0[nlocal][n] = buf[m++];
+		trianglePairPlasticAngle[nlocal][n] = buf[m++];
 	}
 
 	return m;
@@ -712,7 +726,7 @@ int FixPDGCGShellsNeigh::pack_restart(int i, double *buf) {
 	for (int n = 0; n < npartner[i]; n++) {
 		buf[m++] = partner[i][n];
 		buf[m++] = r0[i][n];
-		buf[m++] = r1[i][n];
+		buf[m++] = plastic_stretch[i][n];
 	}
 	buf[m++] = vinter[i];
 	return m;
@@ -737,7 +751,7 @@ void FixPDGCGShellsNeigh::unpack_restart(int nlocal, int nth) {
 	for (int n = 0; n < npartner[nlocal]; n++) {
 		partner[nlocal][n] = static_cast<tagint>(extra[nlocal][m++]);
 		r0[nlocal][n] = extra[nlocal][m++];
-		r1[nlocal][n] = extra[nlocal][m++];
+		plastic_stretch[nlocal][n] = extra[nlocal][m++];
 	}
 	vinter[nlocal] = extra[nlocal][m++];
 }

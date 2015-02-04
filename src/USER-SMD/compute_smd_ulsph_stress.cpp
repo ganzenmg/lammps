@@ -9,7 +9,6 @@
  *
  * ----------------------------------------------------------------------- */
 
-
 /* ----------------------------------------------------------------------
  LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
  http://lammps.sandia.gov, Sandia National Laboratories
@@ -73,7 +72,7 @@ void ComputeSMDULSPHStress::init() {
 
 void ComputeSMDULSPHStress::compute_peratom() {
 	invoked_peratom = update->ntimestep;
-	int *mol = atom->molecule;
+	int *mask = atom->mask;
 
 	// grow vector array if necessary
 
@@ -87,18 +86,27 @@ void ComputeSMDULSPHStress::compute_peratom() {
 	int itmp = 0;
 	Matrix3d *T = (Matrix3d *) force->pair->extract("smd/ulsph/stressTensor_ptr", itmp);
 	if (T == NULL) {
-		error->all(FLERR,
-				"compute smd/ulsph_stress could not access stress tensors. Are the matching pair styles present?");
+		error->all(FLERR, "compute smd/ulsph_stress could not access stress tensors. Are the matching pair styles present?");
 	}
 	int nlocal = atom->nlocal;
 
 	for (int i = 0; i < nlocal; i++) {
-		stress_array[i][0] = T[i](0, 0); // xx
-		stress_array[i][1] = T[i](1, 1); // yy
-		stress_array[i][2] = T[i](2, 2); // zz
-		stress_array[i][3] = T[i](0, 1); // xy
-		stress_array[i][4] = T[i](0, 2); // xz
-		stress_array[i][5] = T[i](1, 2); // yz
+
+		if (mask[i] & groupbit) {
+			stress_array[i][0] = T[i](0, 0); // xx
+			stress_array[i][1] = T[i](1, 1); // yy
+			stress_array[i][2] = T[i](2, 2); // zz
+			stress_array[i][3] = T[i](0, 1); // xy
+			stress_array[i][4] = T[i](0, 2); // xz
+			stress_array[i][5] = T[i](1, 2); // yz
+		} else {
+			stress_array[i][0] = 0.0; // xx
+			stress_array[i][1] = 0.0; // yy
+			stress_array[i][2] = 0.0; // zz
+			stress_array[i][3] = 0.0; // xy
+			stress_array[i][4] = 0.0; // xz
+			stress_array[i][5] = 0.0; // yz
+		}
 	}
 }
 

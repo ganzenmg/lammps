@@ -42,9 +42,11 @@
 #include <stdio.h>
 #include <iostream>
 #include "smd_material_models.h"
+#include "smd_math.h"
 
 using namespace std;
 using namespace LAMMPS_NS;
+using namespace SMD_Math;
 
 #include <Eigen/SVD>
 #include <Eigen/Eigen>
@@ -458,7 +460,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				 * force -- the classical SPH way
 				 */
 
-				f_stress = -ivol * jvol * (stressTensor[i] + stressTensor[j]) * g;
+				f_stress = ivol * jvol * (stressTensor[i] + stressTensor[j]) * g;
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
@@ -467,10 +469,13 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
 				c_ij = 0.5 * (c0[i] + c0[j]);
-				if (fabs(delVdotDelR) > 0.1 * c_ij) { // limit delVdotDelR to a fraction of speed of sound
-					double s = copysign(1, delVdotDelR);
-					delVdotDelR = s * 0.1 * c_ij;
-				}
+
+				LimitDoubleMagnitude(delVdotDelR, 0.5 * c_ij);
+
+				//if (fabs(delVdotDelR) > 0.5 * c_ij) { // limit delVdotDelR to a fraction of speed of sound
+				//	double s = copysign(1, delVdotDelR);
+				//	delVdotDelR = s * 0.5 * c_ij;
+				//}
 
 				mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
 				rho_ij = 0.5 * (rho[i] + rho[j]);
@@ -483,7 +488,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				deltaE = 0.5 * sumForces.dot(dv);
 
 				// change in mass density
-				drho[i] -= rmass[j] * g.dot(dv);
+				drho[i] -= rmass[j] * wfd * delVdotDelR;
 
 				// apply forces to pair of particles
 				f[i][0] += sumForces(0);
@@ -501,7 +506,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 					f[j][1] -= sumForces(1);
 					f[j][2] -= sumForces(2);
 					de[j] += deltaE;
-					drho[j] -= rmass[i] * g.dot(dv);
+					drho[j] -= rmass[i] * wfd * delVdotDelR;
 
 					shepardWeight[j] += ivol * wf;
 					smoothVel[j] -= ivol * wf * dvint;

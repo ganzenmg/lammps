@@ -49,12 +49,13 @@
 #include <Eigen/Eigen>
 #include "smd_material_models.h"
 #include "smd_kernels.h"
+#include "smd_math.h"
 using namespace SMD_Kernels;
 using namespace Eigen;
 using namespace std;
 using namespace LAMMPS_NS;
+using namespace SMD_Math;
 
-#define USE_REF_FIX 1
 #define JAUMANN false
 #define DETF_MIN 0.1 // maximum compression deformation allowed
 #define DETF_MAX 40.0 // maximum tension deformation allowed
@@ -152,20 +153,8 @@ void PairTlsph::PreCompute() {
 	int nlocal = atom->nlocal;
 	int jnum, jj, i, j, itype;
 
-#ifdef USE_REF_FIX
 	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
 	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
-#else
-	int inum, ii;
-	int *ilist, *jlist, *numneigh;
-	int **firstneigh;
-	// set up neighbor list variables
-	inum = list->inum;
-	ilist = list->ilist;
-	numneigh = list->numneigh;
-	firstneigh = list->firstneigh;
-#endif
-
 	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
 	Vector3d dx0, dx, dv, g;
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
@@ -186,26 +175,13 @@ void PairTlsph::PreCompute() {
 		hourglass_error[i] = 0.0;
 	}
 
-	//printf("nlocal is: %d\n", nlocal);
-
-#ifdef USE_REF_FIX
-	for (i = 0; i < nlocal; i++) { // for bonds approach
-#else
-			for (ii = 0; ii < inum; ii++) { // for NL approach
-				i = ilist[ii];
-#endif
+	for (i = 0; i < nlocal; i++) {
 
 		if (mol[i] < 0) { // valid SPH particle have mol > 0
 			continue;
 		}
 
-#ifdef USE_REF_FIX
 		jnum = npartner[i];
-#else
-		jlist = firstneigh[i];
-		jnum = numneigh[i];
-#endif
-
 		irad = radius[i];
 		voli = vfrac[i];
 
@@ -217,7 +193,6 @@ void PairTlsph::PreCompute() {
 
 		for (jj = 0; jj < jnum; jj++) {
 
-#ifdef 		USE_REF_FIX
 			if (partner[i][jj] == 0)
 				continue;
 			j = atom->map(partner[i][jj]);
@@ -225,10 +200,6 @@ void PairTlsph::PreCompute() {
 				partner[i][jj] = 0;
 				continue;
 			}
-#else
-			j = jlist[jj];
-			j &= NEIGHMASK;
-#endif
 
 			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
 				continue;
@@ -246,52 +217,36 @@ void PairTlsph::PreCompute() {
 
 			r0Sq = dx0.squaredNorm();
 			h = irad + radius[j];
-			if (true) {
 
-				//if (r0Sq < h * h) {
+			// initialize Eigen data structures from LAMMPS data structures
+			xj << x[j][0], x[j][1], x[j][2];
+			vj << v[j][0], v[j][1], v[j][2];
+			vintj << vint[j][0], vint[j][1], vint[j][2];
 
-				// initialize Eigen data structures from LAMMPS data structures
-				xj << x[j][0], x[j][1], x[j][2];
-				vj << v[j][0], v[j][1], v[j][2];
-				vintj << vint[j][0], vint[j][1], vint[j][2];
+			r0 = sqrt(r0Sq);
+			volj = vfrac[j];
 
-				r0 = sqrt(r0Sq);
-				volj = vfrac[j];
+			// distance vectors in current and reference configuration, velocity difference
+			dx = xj - xi;
+			if (periodic)
+				domain->minimum_image(dx(0), dx(1), dx(2));
+			dv = vj - vi;
+			dvint = vintj - vinti;
 
-				// distance vectors in current and reference configuration, velocity difference
-				dx = xj - xi;
-				if (periodic)
-					domain->minimum_image(dx(0), dx(1), dx(2));
-				dv = vj - vi;
-				dvint = vintj - vinti;
+			barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
+			g = (wfd / r0) * dx0;
 
-				barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
-				g = (wfd / r0) * dx0;
+			/* build matrices */
+			Ktmp = g * dx0.transpose();
+			Ftmp = (dx - dx0) * g.transpose();
+			Fdottmp = dv * g.transpose();
 
-				/* build matrices */
-				Ktmp = g * dx0.transpose();
-				Ftmp = (dx - dx0) * g.transpose();
-				Fdottmp = dv * g.transpose();
-
-				K[i] += volj * Ktmp;
-				Fincr[i] += volj * Ftmp;
-				Fdot[i] += volj * Fdottmp;
-				shepardWeight[i] += volj * wf;
-				smoothVelDifference[i] += volj * wf * dvint;
-				numNeighsRefConfig[i]++;
-
-#ifndef USE_REF_FIX
-				if (j < nlocal) {
-					K[j] += voli * Ktmp;
-					Fincr[j] += voli * Ftmp;
-					Fdot[j] += voli * Fdottmp;
-					shepardWeight[j] += voli * wf;
-					smoothVelDifference[j] -= voli * wf * dvint;
-					numNeighsRefConfig[j]++;
-				}
-#endif
-
-			} // end if check distance
+			K[i] += volj * Ktmp;
+			Fincr[i] += volj * Ftmp;
+			Fdot[i] += volj * Fdottmp;
+			shepardWeight[i] += volj * wf;
+			smoothVelDifference[i] += volj * wf * dvint;
+			numNeighsRefConfig[i]++;
 		} // end loop over j
 	} // end loop over i
 
@@ -301,10 +256,6 @@ void PairTlsph::PreCompute() {
 
 	for (i = 0; i < nlocal; i++) {
 
-//		if (numNeighsRefConfig[i] != npartner[i]) {
-//			printf("recounted=%d, npartner=%d\n", numNeighsRefConfig[i],  npartner[i]);
-//			error->one(FLERR, "");
-//		}
 		itype = type[i];
 		if (setflag[itype][itype] == 1) { // we only do the subsequent calculation if pair style is defined for this particle
 
@@ -478,11 +429,7 @@ void PairTlsph::compute(int eflag, int vflag) {
 		hourglass_error = new double[nmax];
 	}
 
-//	if (update->ntimestep % 100 == 0) {
-//		SmoothField();
-//	}
-
-	if (update->ntimestep == 0) {
+	if (update->ntimestep == 0) { // return on zeroth timestep because reference connectivity lists still needs to be built
 		return;
 	}
 
@@ -499,11 +446,6 @@ void PairTlsph::compute(int eflag, int vflag) {
 }
 
 void PairTlsph::ComputeForces(int eflag, int vflag) {
-
-	//if (update->ntimestep == 0) { // return if this is the 0th timestep as reference configuration is only defined after 0th timestep
-	//	return;
-	//}
-
 	int *mol = atom->molecule;
 	double **x = atom->x;
 	double **v = atom->vest;
@@ -517,28 +459,16 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	double *damage = atom->damage;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
-	int i, j, jj, jnum, itype, iDim;
+	int i, j, jj, jnum, itype;
 	double r, hg_mag, wf, wfd, h, r0, r0Sq, voli, volj;
-	double delVdotDelR, visc_magnitude, deltaE, mu_ij, hg_err;
-	double delta, stress_force_magnitude, hourglass_force_magnitude;
+	double delVdotDelR, visc_magnitude, deltaE, mu_ij, hg_err, gamma_dot_dx, delta;
 	char str[128];
-	Vector3d fi, fj, dx0, dx, dv, f_stress, f_hg, dxp_i, dxp_j, gamma, g, gamma_i, gamma_j;
+	Vector3d fi, fj, dx0, dx, dv, f_stress, f_hg, dxp_i, dxp_j, gamma, g, gamma_i, gamma_j, x0i, x0j;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
 
-#ifdef USE_REF_FIX
 	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
 	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
-#else
-	int inum, ii;
-	int *ilist, *jlist, *numneigh;
-	int **firstneigh;
-	// set up neighbor list variables
-	inum = list->inum;
-	ilist = list->ilist;
-	numneigh = list->numneigh;
-	firstneigh = list->firstneigh;
-#endif
 
 	if (eflag || vflag)
 		ev_setup(eflag, vflag);
@@ -553,36 +483,22 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	hMin = 1.0e22;
 	dtRelative = 1.0e22;
 
-#ifdef USE_REF_FIX
-	for (i = 0; i < nlocal; i++) { // for bonds approach
-#else
-			for (ii = 0; ii < inum; ii++) { // for NL approach
-				i = ilist[ii];
-#endif
+	for (i = 0; i < nlocal; i++) {
 
 		if (mol[i] < 0) {
 			continue; // Particle i is not a valid SPH particle (anymore). Skip all interactions with this particle.
 		}
 
 		itype = type[i];
-
-#ifdef USE_REF_FIX
 		jnum = npartner[i];
-#else
-		jlist = firstneigh[i];
-		jnum = numneigh[i];
-#endif
 
-		// initialize Eigen data structures from LAMMPS data structures
-		for (iDim = 0; iDim < 3; iDim++) {
-			xi(iDim) = x[i][iDim];
-			vi(iDim) = v[i][iDim];
-		}
+		x0i << x0[i][0], x0[i][1], x0[i][2];
+		xi << x[i][0], x[i][1], x[i][2];
+		vi << v[i][0], v[i][1], v[i][2];
 
 		voli = vfrac[i];
 
 		for (jj = 0; jj < jnum; jj++) {
-#ifdef 		USE_REF_FIX
 			if (partner[i][jj] == 0)
 				continue;
 			j = atom->map(partner[i][jj]);
@@ -590,10 +506,6 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				partner[i][jj] = 0;
 				continue;
 			}
-#else
-			j = jlist[jj];
-			j &= NEIGHMASK;
-#endif
 
 			if (mol[j] < 0) {
 				continue; // Particle j is not a valid SPH particle (anymore). Skip all interactions with this particle.
@@ -609,147 +521,110 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 			}
 
 			// check that distance between i and j (in the reference config) is less than cutoff
-			dx0(0) = x0[j][0] - x0[i][0];
-			dx0(1) = x0[j][1] - x0[i][1];
-			dx0(2) = x0[j][2] - x0[i][2];
+			x0j << x0[j][0], x0[j][1], x0[j][2];
+			dx0 = x0j - x0i;
 
 			if (periodic)
 				domain->minimum_image(dx0(0), dx0(1), dx0(2));
 
 			r0Sq = dx0.squaredNorm();
 			h = radius[i] + radius[j];
-			if (true) {
-				//if (r0Sq < h * h) {
+			hMin = MIN(hMin, h);
+			r0 = sqrt(r0Sq);
+			volj = vfrac[j];
 
-				hMin = MIN(hMin, h);
-				r0 = sqrt(r0Sq);
+			// initialize Eigen data structures from LAMMPS data structures
+			xj << x[j][0], x[j][1], x[j][2];
+			vj << v[j][0], v[j][1], v[j][2];
 
-				// initialize Eigen data structures from LAMMPS data structures
-				for (iDim = 0; iDim < 3; iDim++) {
-					xj(iDim) = x[j][iDim];
-					vj(iDim) = v[j][iDim];
-				}
+			// distance vectors in current and reference configuration, velocity difference
+			dx = xj - xi;
+			dv = vj - vi;
 
-				volj = vfrac[j];
+			r = dx.norm(); // current distance
 
-				// distance vectors in current and reference configuration, velocity difference
-				dx = xj - xi;
-				dv = vj - vi;
+			barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
+			g = (wfd / r0) * dx0; // uncorrected kernel gradient
 
-				// current distance
-				r = dx.norm();
+			/*
+			 * force contribution -- note that the kernel gradient correction has been absorbed into PK1
+			 */
+			f_stress = voli * volj * (PK1[i] + PK1[j]) * g;
 
-				// uncorrected kernel gradient
-				barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
-				g = (wfd / r0) * dx0;
+			/*
+			 * artificial viscosity
+			 */
+			spiky_kernel_and_derivative(h, r0, wf, wfd); // call a different kernel and its gradient weights for artificial viscosity and hourglass correction
+			delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
+			LimitDoubleMagnitude(delVdotDelR, 0.01 * signal_vel0[itype]);
+			mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
+			visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // units: m^5/(s^2 kg))
+			f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h); // units: kg^2 * m^5/(s^2 kg) * m^-4 = kg m / s^2 = N
 
+			/*
+			 * hourglass deviation of particles i and j
+			 */
+
+			gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
+			hg_err = gamma.norm() / r0;
+			hourglass_error[i] += volj * wf * hg_err;
+
+			/* SPH-like hourglass formulation */
+
+			if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-3) {
 				/*
-				 * force contribution -- note that the kernel gradient correction has been absorbed into PK1
+				 * viscous hourglass formulation for particles with plastic deformation
 				 */
-
-				f_stress = voli * volj * (PK1[i] + PK1[j]) * g;
-
-				/*
-				 * artificial viscosity
-				 */
-
-				// call a different kernel and its gradient weights for artificial viscosity and hourglass correction
-				spiky_kernel_and_derivative(h, r0, wf, wfd);
-
-				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
-				if (fabs(delVdotDelR) > 0.01 * signal_vel0[itype]) { // limit delVdotDelR to a fraction of speed of sound
-					double s = copysign(1, delVdotDelR);
-					delVdotDelR = s * 0.01 * signal_vel0[itype];
-				}
-
-				mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
-				visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // units: m^5/(s^2 kg))
-				f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h); // units: kg^2 * m^5/(s^2 kg) * m^-4 = kg m / s^2 = N
-
-				/*
-				 * hourglass deviation of particles i and j
-				 */
-
-				gamma = 0.5 * (Fincr[i] + Fincr[j]) * dx0 - dx;
-				hg_err = gamma.norm() / r0;
-
-				hourglass_error[i] += volj * wf * hg_err;
-
-				/* SPH-like hourglass formulation */
-
-				if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-3) {
-					/*
-					 * viscous hourglass formulation
-					 */
-					delta = gamma.dot(dx);
-					if (delVdotDelR * delta < 0.0) {
-						if (hg_err > 0.1) { // limit hg_err
-							hg_err = 0.1;
-						}
-						hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
-					} else {
-						hg_mag = 0.0;
-					}
-					f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
-
+				delta = gamma.dot(dx);
+				if (delVdotDelR * delta < 0.0) {
+					hg_err = MAX(hg_err, 0.1); // limit hg_err to avoid numerical instabilities
+					hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
 				} else {
-					/*
-					 * stiffness hourglass formulation
-					 */
+					hg_mag = 0.0;
+				}
+				f_hg = rmass[i] * rmass[j] * hg_mag * wfd * dx / (r + 1.0e-2 * h);
 
-					double gamma_dot_dx = gamma.dot(dx);
-					double s = copysign(1, gamma_dot_dx);
-					if (fabs(gamma_dot_dx) > 0.1 * r) {
-						gamma_dot_dx = s * 0.1 * r; // limit stiffness based hourglass error
+			} else {
+				/*
+				 * stiffness hourglass formulation for particle in the elastic regime
+				 */
+
+				gamma_dot_dx = gamma.dot(dx); // project hourglass error vector onto pair distance vector
+				LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
+				delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
+				hg_mag = hg_coeff[itype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
+				hg_mag *= -voli * volj * wf * youngsmodulus[itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
+				f_hg = (hg_mag / (r + 0.01 * h)) * dx;
+			}
+
+			f_hg *= (1.0 - MAX(damage[i], damage[j])); // reduce hourglass force between damaged particles
+
+			// sum stress, viscous, and hourglass forces
+			sumForces = f_stress + f_visc + f_hg;
+
+			// energy rate -- project velocity onto force vector
+			deltaE = 0.5 * sumForces.dot(dv);
+
+			// apply forces to pair of particles
+			f[i][0] += sumForces(0);
+			f[i][1] += sumForces(1);
+			f[i][2] += sumForces(2);
+			de[i] += deltaE;
+
+			// tally atomistic stress tensor
+			if (evflag) {
+				ev_tally_xyz(i, j, nlocal, 0, 0.0, 0.0, sumForces(0), sumForces(1), sumForces(2), dx(0), dx(1), dx(2));
+			}
+
+			// check if a particle has moved too much w.r.t another particle
+			if (r > r0) {
+				if (update_method == UPDATE_CONSTANT_THRESHOLD) {
+					if (r - r0 > update_threshold) {
+						updateFlag = 1;
 					}
-
-					delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
-					hg_mag = hg_coeff[itype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
-					hg_mag *= -voli * volj * wf * youngsmodulus[itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
-					f_hg = (hg_mag / (r + 0.01 * h)) * dx;
-					//printf("delta = %g, hg_mag = %g, coeff=%g, wf=%g, vi=%g, vj=%g, Ei=%f, Ej-%f\n",delta, hg_mag, hg_coeff[itype][jtype], wf, voli, volj,
-					//		youngsmodulus[itype], youngsmodulus[jtype]);
-
-				}
-
-				f_hg *= (1.0 - MAX(damage[i], damage[j])); // reduce hourglass force between damaged particles
-
-				// sum stress, viscous, and hourglass forces
-				sumForces = f_stress + f_visc + f_hg;
-
-				// energy rate -- project velocity onto force vector
-				deltaE = 0.5 * sumForces.dot(dv);
-
-				// apply forces to pair of particles
-				f[i][0] += sumForces(0);
-				f[i][1] += sumForces(1);
-				f[i][2] += sumForces(2);
-				de[i] += deltaE;
-#ifndef USE_REF_FIX
-				if (j < nlocal) {
-					f[j][0] -= sumForces(0);
-					f[j][1] -= sumForces(1);
-					f[j][2] -= sumForces(2);
-					de[j] += deltaE;
-					hourglass_error[j] += voli * wf * hg_err;
-				}
-#endif
-
-				// tally atomistic stress tensor
-				if (evflag) {
-					ev_tally_xyz(i, j, nlocal, 0, 0.0, 0.0, sumForces(0), sumForces(1), sumForces(2), dx(0), dx(1), dx(2));
-				}
-
-				// check if a particle has moved too much w.r.t another particle
-				if (r > r0) {
-					if (update_method == UPDATE_CONSTANT_THRESHOLD) {
-						if (r - r0 > update_threshold) {
-							updateFlag = 1;
-						}
-					} else if (update_method == UPDATE_PAIRWISE_RATIO) {
-						if ((r - r0) / h > update_threshold) {
-							updateFlag = 1;
-						}
+				} else if (update_method == UPDATE_PAIRWISE_RATIO) {
+					if ((r - r0) / h > update_threshold) {
+						updateFlag = 1;
 					}
 				}
 			}
@@ -1751,7 +1626,6 @@ void PairTlsph::init_style() {
 	MPI_Allreduce(&onerad_frozen[1], &maxrad_frozen[1], atom->ntypes,
 	MPI_DOUBLE, MPI_MAX, world);
 
-#ifdef USE_REF_FIX
 	// if first init, create Fix needed for storing reference configuration neighbors
 	if (fix_tlsph_reference_configuration == NULL) {
 		char **fixarg = new char*[3];
@@ -1773,7 +1647,6 @@ void PairTlsph::init_style() {
 			ifix_tlsph = i;
 	if (ifix_tlsph == -1)
 		error->all(FLERR, "Fix SMD_TLSPH_NEIGHBORS does not exist");
-#endif
 
 }
 
@@ -2006,7 +1879,7 @@ double PairTlsph::TestMatricesEqual(Matrix3d A, Matrix3d B, double eps) {
 }
 
 /* ----------------------------------------------------------------------
- compute effectiveP-wave speed
+ compute effective P-wave speed
  determined by longitudinal modulus
  ------------------------------------------------------------------------- */
 
@@ -2056,263 +1929,6 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 	return M;
 
 }
-
-///* ----------------------------------------------------------------------
-// smooth stress field
-// ------------------------------------------------------------------------- */
-//
-//void PairTlsph::SmoothField() {
-//	int *mol = atom->molecule;
-//	double *vfrac = atom->vfrac;
-//	double *radius = atom->radius;
-//	double **x0 = atom->x0;
-//	double **tlsph_stress = atom->tlsph_stress;
-//	int *ilist, *jlist, *numneigh;
-//	int **firstneigh;
-//	int nlocal = atom->nlocal;
-//	int inum, jnum, ii, jj, i, j;
-//	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
-//	Vector3d dx0;
-//	Matrix3d stress;
-//	Matrix3d *average_stress;
-//	double *norm;
-//	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
-//	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
-//
-//// allocate storage
-//	average_stress = new Matrix3d[nlocal];
-//	norm = new double[nlocal];
-//
-//// zero accumulators
-//	stress.setZero();
-//	for (i = 0; i < nlocal; i++) {
-//		stress(0, 0) = tlsph_stress[i][0];
-//		stress(0, 1) = tlsph_stress[i][1];
-//		stress(0, 2) = tlsph_stress[i][2];
-//		stress(1, 1) = tlsph_stress[i][3];
-//		stress(1, 2) = tlsph_stress[i][4];
-//		stress(2, 2) = tlsph_stress[i][5];
-//
-//		h = 2.0 * radius[i];
-//		r0 = 0.0;
-//
-//		barbara_kernel_and_derivative(h, r0, wf, wfd);
-//		average_stress[i] = wf * vfrac[i] * stress;
-//		norm[i] = wf * vfrac[i];
-//	}
-//
-//// set up neighbor list variables
-//	inum = list->inum;
-//	ilist = list->ilist;
-//	numneigh = list->numneigh;
-//	firstneigh = list->firstneigh;
-//
-//	for (ii = 0; ii < inum; ii++) {
-//		i = ilist[ii];
-//
-//		if (mol[i] < 0) { // valid SPH particle have mol > 0
-//			continue;
-//		}
-//
-//		jlist = firstneigh[i];
-//		jnum = numneigh[i];
-//		irad = radius[i];
-//		voli = vfrac[i];
-//		x0i << x0[i][0], x0[i][1], x0[i][2];
-//
-//		for (jj = 0; jj < jnum; jj++) {
-//			j = jlist[jj];
-//			j &= NEIGHMASK;
-//
-//			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
-//				continue;
-//			}
-//
-//			if (mol[i] != mol[j]) {
-//				continue;
-//			}
-//
-//			x0j << x0[j][0], x0[j][1], x0[j][2];
-//			dx0 = x0j - x0i;
-//
-//			if (periodic)
-//				domain->minimum_image(dx0(0), dx0(1), dx0(2));
-//
-//			r0Sq = dx0.squaredNorm();
-//			h = irad + radius[j];
-//			if (r0Sq < h * h) {
-//
-//				r0 = sqrt(r0Sq);
-//				volj = vfrac[j];
-//
-//				stress(0, 0) = tlsph_stress[j][0];
-//				stress(0, 1) = tlsph_stress[j][1];
-//				stress(0, 2) = tlsph_stress[j][2];
-//				stress(1, 1) = tlsph_stress[j][3];
-//				stress(1, 2) = tlsph_stress[j][4];
-//				stress(2, 2) = tlsph_stress[j][5];
-//
-//				// kernel function
-//				barbara_kernel_and_derivative(h, r0, wf, wfd);
-//
-//				average_stress[i] += wf * volj * stress;
-//				norm[i] += volj * wf;
-//
-//				if (j < nlocal) {
-//
-//					stress(0, 0) = tlsph_stress[i][0];
-//					stress(0, 1) = tlsph_stress[i][1];
-//					stress(0, 2) = tlsph_stress[i][2];
-//					stress(1, 1) = tlsph_stress[i][3];
-//					stress(1, 2) = tlsph_stress[i][4];
-//					stress(2, 2) = tlsph_stress[i][5];
-//
-//					average_stress[j] += wf * voli * stress;
-//					norm[j] += voli * wf;
-//				}
-//
-//			} // end if check distance
-//		} // end loop over j
-//	} // end loop over i
-//
-//	for (i = 0; i < nlocal; i++) {
-//		stress = average_stress[i] / norm[i];
-//
-//		tlsph_stress[i][0] = stress(0, 0);
-//		tlsph_stress[i][1] = stress(0, 1);
-//		tlsph_stress[i][2] = stress(0, 2);
-//		tlsph_stress[i][3] = stress(1, 1);
-//		tlsph_stress[i][4] = stress(1, 2);
-//		tlsph_stress[i][5] = stress(2, 2);
-//
-//	}
-//
-//	delete[] average_stress;
-//	delete[] norm;
-//
-//}
-//
-///* ----------------------------------------------------------------------
-// XSPH-like smoothing of stress field
-// ------------------------------------------------------------------------- */
-//
-//void PairTlsph::SmoothFieldXSPH() {
-//	int *mol = atom->molecule;
-//	double *vfrac = atom->vfrac;
-//	double *radius = atom->radius;
-//	double **x0 = atom->x0;
-//	double **tlsph_stress = atom->tlsph_stress;
-//	int *ilist, *jlist, *numneigh;
-//	int **firstneigh;
-//	int nlocal = atom->nlocal;
-//	int inum, jnum, ii, jj, i, j;
-//	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
-//	Vector3d dx0;
-//	Matrix3d stress_i, stress_j;
-//	Matrix3d *stress_difference;
-//	double *norm;
-//	Vector3d xi, xj, vi, vj, vinti, vintj, x0i, x0j, dvint, du;
-//	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
-//
-//// allocate storage
-//	stress_difference = new Matrix3d[nlocal];
-//	norm = new double[nlocal];
-//
-//// zero accumulators
-//	stress_i.setZero();
-//	for (i = 0; i < nlocal; i++) {
-//		stress_difference[i].setZero();
-//		norm[i] = 0.0;
-//	}
-//
-//// set up neighbor list variables
-//	inum = list->inum;
-//	ilist = list->ilist;
-//	numneigh = list->numneigh;
-//	firstneigh = list->firstneigh;
-//
-//	for (ii = 0; ii < inum; ii++) {
-//		i = ilist[ii];
-//
-//		if (mol[i] < 0) { // valid SPH particle have mol > 0
-//			continue;
-//		}
-//
-//		jlist = firstneigh[i];
-//		jnum = numneigh[i];
-//		irad = radius[i];
-//		voli = vfrac[i];
-//		x0i << x0[i][0], x0[i][1], x0[i][2];
-//
-//		stress_i(0, 0) = tlsph_stress[i][0];
-//		stress_i(0, 1) = tlsph_stress[i][1];
-//		stress_i(0, 2) = tlsph_stress[i][2];
-//		stress_i(1, 1) = tlsph_stress[i][3];
-//		stress_i(1, 2) = tlsph_stress[i][4];
-//		stress_i(2, 2) = tlsph_stress[i][5];
-//
-//		for (jj = 0; jj < jnum; jj++) {
-//			j = jlist[jj];
-//			j &= NEIGHMASK;
-//
-//			if (mol[j] < 0) { // particle has failed. do not include it for computing any property
-//				continue;
-//			}
-//
-//			if (mol[i] != mol[j]) {
-//				continue;
-//			}
-//
-//			x0j << x0[j][0], x0[j][1], x0[j][2];
-//			dx0 = x0j - x0i;
-//
-//			if (periodic)
-//				domain->minimum_image(dx0(0), dx0(1), dx0(2));
-//
-//			r0Sq = dx0.squaredNorm();
-//			h = irad + radius[j];
-//			if (r0Sq < h * h) {
-//
-//				r0 = sqrt(r0Sq);
-//				volj = vfrac[j];
-//
-//				stress_j(0, 0) = tlsph_stress[j][0];
-//				stress_j(0, 1) = tlsph_stress[j][1];
-//				stress_j(0, 2) = tlsph_stress[j][2];
-//				stress_j(1, 1) = tlsph_stress[j][3];
-//				stress_j(1, 2) = tlsph_stress[j][4];
-//				stress_j(2, 2) = tlsph_stress[j][5];
-//
-//				// kernel function
-//				barbara_kernel_and_derivative(h, r0, wf, wfd);
-//
-//				stress_difference[i] += wf * volj * (stress_j - stress_i);
-//				norm[i] += volj * wf;
-//
-//				if (j < nlocal) {
-//					stress_difference[j] += wf * voli * (stress_i - stress_j);
-//					norm[j] += voli * wf;
-//				}
-//
-//			} // end if check distance
-//		} // end loop over j
-//	} // end loop over i
-//
-//	for (i = 0; i < nlocal; i++) {
-//		if (norm[i] > 0.0) {
-//			tlsph_stress[i][0] += stress_difference[i](0, 0) / norm[i];
-//			tlsph_stress[i][1] += stress_difference[i](0, 1) / norm[i];
-//			tlsph_stress[i][2] += stress_difference[i](0, 2) / norm[i];
-//			tlsph_stress[i][3] += stress_difference[i](1, 1) / norm[i];
-//			tlsph_stress[i][4] += stress_difference[i](1, 2) / norm[i];
-//			tlsph_stress[i][5] += stress_difference[i](2, 2) / norm[i];
-//		}
-//	}
-//
-//	delete[] stress_difference;
-//	delete[] norm;
-//
-//}
 
 double PairTlsph::SafeLookup(std::string str, int itype) {
 	//cout << "string passed to lookup: " << str << endl;
