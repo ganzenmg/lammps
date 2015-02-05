@@ -43,6 +43,7 @@ class PairPDGCGShells : public Pair {
   void contact_forces();
   void bond_forces();
   void bending_forces();
+  void delete_triangle_pairs(tagint i_tag, tagint j_tag);
 
 
 

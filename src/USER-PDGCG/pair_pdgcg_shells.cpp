@@ -128,7 +128,7 @@ void PairPDGCGShells::bending_forces() {
 		for (t = 0; t < tnum; t++) {
 
 			// check if triangle pair has not been deleted
-			if (trianglePairs[i][t][0] < 0) {
+			if (trianglePairs[i][t][0] == 0) {
 				continue;
 			}
 
@@ -142,31 +142,41 @@ void PairPDGCGShells::bending_forces() {
 				char str[128];
 				sprintf(str, "triangle index cn1=%d does not match up with local index=%d; tag[i]=%d, t0=%d", i3, i, tag[i],
 						trianglePairs[i][t][0]);
-				error->one(FLERR, str);
+				trianglePairs[i][t][0] = 0;
+				error->message(FLERR, str);
+				continue;
 			}
 
 			if ((i3 < 0) || (i3 >= nlocal)) {
 				char str[128];
 				sprintf(str, "t0 is %d i3 is %d bit nlocal is %d", trianglePairs[i][t][0], i3, nlocal);
-				error->one(FLERR, str);
+				trianglePairs[i][t][0] = 0;
+				error->message(FLERR, str);
+				continue;
 			}
 
 			if ((i1 < 0) || (i1 >= nlocal + atom->nghost)) {
 				char str[128];
-				sprintf(str, "i1 is %d bit nlocal+nghost is %d, try increasing comm_modify cutoff", i1, nlocal + atom->nghost);
-				error->one(FLERR, str);
+				sprintf(str, "i1 is %d but nlocal+nghost is %d, try increasing comm_modify cutoff", i1, nlocal + atom->nghost);
+				error->message(FLERR, str);
+				trianglePairs[i][t][0] = 0;
+				continue;
 			}
 
 			if ((i2 < 0) || (i2 >= nlocal + atom->nghost)) {
 				char str[128];
 				sprintf(str, "i2 is %d bit nlocal+nghost is %d, try increasing comm_modify cutoff", i2, nlocal + atom->nghost);
-				error->one(FLERR, str);
+				error->message(FLERR, str);
+				trianglePairs[i][t][0] = 0;
+				continue;
 			}
 
 			if ((i4 < 0) || (i4 >= nlocal + atom->nghost)) {
 				char str[128];
 				sprintf(str, "i4 is %d bit nlocal+nghost is %d, try increasing comm_modify cutoff", i4, nlocal + atom->nghost);
-				error->one(FLERR, str);
+				error->message(FLERR, str);
+				trianglePairs[i][t][0] = 0;
+				continue;
 			}
 
 			itype = type[i3];
@@ -217,7 +227,7 @@ void PairPDGCGShells::bending_forces() {
 			double deltaAngle = angle - angle0;
 
 			// subtract plastic stretch from current stretch
-			deltaAngle -= trianglePairPlasticAngle[i][t];
+			//deltaAngle -= trianglePairPlasticAngle[i][t];
 
 			// alternative plasticity based on plastic stretch
 			double maxa = 0.15;
@@ -343,11 +353,11 @@ void PairPDGCGShells::contact_forces() {
 				r_geom = radius_factor * radius_factor * radiusSR[i] * radiusSR[j] / rcut;
 				if (domain->dimension == 3) {
 					//assuming poisson ratio = 1/4 for 3d
-					fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom) / r;
+					fpair = 0.1*1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom) / r;
 					evdwl = r * fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
 				} else {
 					//assuming poisson ratio = 1/3 for 2d -- one factor of delta missing compared to 3d
-					fpair = 0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom) / r;
+					fpair = 0.1*0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom) / r;
 					evdwl = r * fpair * 0.6666666666667e0 * delta;
 				}
 
@@ -417,6 +427,8 @@ void PairPDGCGShells::bond_forces() {
 	/* ----------------------- PERIDYNAMIC BOND FORCES --------------------- */
 
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
+
+	nBroken = 0;
 
 	for (i = 0; i < nlocal; i++) {
 
@@ -509,42 +521,68 @@ void PairPDGCGShells::bond_forces() {
 				if (stretch > smax[itype][jtype]) {
 					//printf("\ndeleting bond between tags %d and %d\n", tag[i], tag[j]);
 					partner[i][jj] = 0;
-					nBroken += 1;
 					e[i] += 0.5 * evdwl;
-					tagint j_tag = tag[j];
-
-					// loop over all triangle pairs attached to i and delete those which involve both i and j
-
-					tnum = nTrianglePairs[i];
-
-					for (t = 0; t < tnum; t++) {
-
-						if (trianglePairs[i][t][0] > 0) { // check if triangle pair has not already been deleted
-
-							if (trianglePairs[i][t][1] == j_tag) {
-								//printf("deleting triangle pair with index %d involving %d and %d\n", t, tag[i], j_tag);
-								trianglePairs[i][t][0] = -1;
-							}
-
-							if (trianglePairs[i][t][2] == j_tag) {
-								//printf("deleting triangle pair with index %d involving %d and %d\n", t, tag[i], j_tag);
-								trianglePairs[i][t][0] = -1;
-							}
-
-							if (trianglePairs[i][t][3] == j_tag) {
-								//printf("deleting triangle pair with index %d involving %d and %d\n", t, tag[i], j_tag);
-								trianglePairs[i][t][0] = -1;
-							}
-
-						}
-					}
-
+					nBroken += 1;
+					// now iterate over all triangle pairs and delete them if they contain a bond i/j
+					delete_triangle_pairs(tag[i], tag[j]);
 				}
 			}
 		} //end if (molecule[i] == 1000)
 
 	}
 
+}
+
+void PairPDGCGShells::delete_triangle_pairs(tagint i_tag, tagint j_tag) {
+	int nlocal = atom->nlocal;
+	tagint *tag = atom->tag;
+	tagint ***trianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->trianglePairs;
+	int *nTrianglePairs = ((FixPDGCGShellsNeigh *) modify->fix[ifix_peri])->nTrianglePairs;
+	int tnum, t, count, i;
+
+	// loop over all triangle pairs attached to i and delete those which involve both i and j
+
+	for (i = 0; i < nlocal; i++) {
+
+		tnum = nTrianglePairs[i];
+
+		for (t = 0; t < tnum; t++) {
+
+			if (trianglePairs[i][t][0] > 0) { // check if triangle pair has not already been deleted
+				count = 0;
+
+				if ((trianglePairs[i][t][0] == i_tag) || (trianglePairs[i][t][0] == j_tag)) {
+					count++;
+				}
+
+				if ((trianglePairs[i][t][1] == i_tag) || (trianglePairs[i][t][1] == j_tag)) {
+					count++;
+				}
+
+				if ((trianglePairs[i][t][2] == i_tag) || (trianglePairs[i][t][2] == j_tag)) {
+					count++;
+				}
+
+				if ((trianglePairs[i][t][3] == i_tag) || (trianglePairs[i][t][3] == j_tag)) {
+					count++;
+				}
+
+
+				if (count == 0) {
+					// ok, i and j are not in this triangle
+				} else if (count == 1) {
+					// ok can also happen
+				} else if (count == 2) {
+					// ok, delete this triangle
+					trianglePairs[i][t][0] = 0;
+				} else {
+					printf("problem: tags %d and %d appear %d times in triangle pair\n", i_tag, j_tag, count);
+					error->one(FLERR, "error.");
+				}
+
+			}
+		}
+	}
 }
 
 /* ----------------------------------------------------------------------

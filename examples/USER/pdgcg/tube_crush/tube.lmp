@@ -5,7 +5,7 @@ variable        rho equal 7.3e-6
 variable        E equal 1 # Young's modulus
 variable        nu equal 0.33
 variable        t equal 1.0 # shell thickness
-variable        smax equal 0.04
+variable        smax equal 0.02
 variable        syield equal 0.1
 variable        G0 equal -1
 variable        visc equal 1.0
@@ -20,7 +20,7 @@ variable        skin equal 1.0 # Verlet list range
 
 units		si
 dimension       3
-boundary        sm sm sm
+boundary        s s s
 atom_style      smd
 neighbor        ${skin} bin
 comm_modify     vel yes cutoff 30
@@ -29,7 +29,7 @@ atom_modify     map array
 
 read_data       tris.data
 set             group all mol 1000
-set             group all diameter 10.0
+set             group all diameter 20.0
 
 # clamp group
 variable        z0 equal bound(all,zmin)+10.0
@@ -68,9 +68,10 @@ fix             integrate_fix all nve
 variable        sumF equal c_sumF
 fix             fd_curve all print 10 "${d} ${sumF}" file force_displacement.dat screen no
 #fix             1 all viscous 0.001
-fix             zwalls all wall/reflect zhi EDGE
+fix             zwalls all wall/reflect zhi 273 units box
 thermo          100
 thermo_style    custom step ke c_sumF v_stiff_theory v_stiff_expt v_d
+#thermo_modify lost ignore
 run             ${nrun}
 
 velocity        all set 0 0 0 units box
