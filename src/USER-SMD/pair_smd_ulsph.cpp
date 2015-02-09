@@ -526,6 +526,55 @@ void PairULSPH::compute(int eflag, int vflag) {
 		itype = type[i];
 		if (setflag[itype][itype] == 1) {
 
+			/*
+			 * ghost particle for normal: y
+			 */
+
+//			xi << x[i][0], x[i][1], x[i][2];
+//			h = 2 * radius[i];
+//
+//			if (xi(1) < h) {
+//
+//				ivol = rmass[i] / rho[i];
+//				xj << x[i][0], x[i][1] - h / 3.0, x[i][2];
+//				vj << v[i][0], -v[i][1], v[i][2];
+//				vintj << vint[i][0], -vint[i][1], vint[i][2];
+//				dx = xj - xi;
+//				rSq = dx.squaredNorm();
+//				r = sqrt(rSq);
+//				dv = vj - vi;
+//				dvint = vintj - vinti;
+//
+//				// kernel and derivative
+//				kernel_and_derivative(h, r, wf, wfd);
+//
+//				// uncorrected kernel gradient
+//				g = (wfd / r) * dx;
+//
+//				/*
+//				 * force -- the classical SPH way
+//				 */
+//
+//				f_stress = 4.0 * ivol * ivol * stressTensor[i] * g;
+//
+//				sumForces = f_stress;
+//
+//				// energy rate -- project velocity onto force vector
+//
+//				deltaE = 0.5 * sumForces.dot(dv);
+//
+//				// change in mass density
+//				delVdotDelR = dx.dot(dv) / (r + 0.1 * h);
+//				drho[i] -= 2 * rmass[i] * wfd * delVdotDelR;
+//
+//				// apply forces to pair of particles
+//				f[i][0] += sumForces(0);
+//				f[i][1] += sumForces(1);
+//				f[i][2] += sumForces(2);
+//				de[i] += deltaE;
+//
+//			}
+
 			if (shepardWeight[i] != 0.0) {
 				smoothVel[i] /= shepardWeight[i];
 			} else {
