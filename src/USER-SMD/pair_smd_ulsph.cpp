@@ -350,15 +350,13 @@ void PairULSPH::compute(int eflag, int vflag) {
 	Vector3d fi, fj, dx, dv, f_stress, g, vinti, vintj, dvint;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new;
 
-//printf("in compute\n");
-
 	if (eflag || vflag)
 		ev_setup(eflag, vflag);
 	else
 		evflag = vflag_fdotr = 0;
 
 	if (atom->nmax > nmax) {
-		printf("... allocating in compute with nmax = %d\n", atom->nmax);
+		//printf("... allocating in compute with nmax = %d\n", atom->nmax);
 		nmax = atom->nmax;
 		delete[] K;
 		K = new Matrix3d[nmax];
@@ -626,9 +624,9 @@ void PairULSPH::ComputePressure() {
 					if (type[i] == itype) {
 						TaitEOS_density(var1, var2, var3, rho[i], pFinal, c0[i]);
 						stressTensor[i].setZero();
-						stressTensor[i](0, 0) = pFinal;
-						stressTensor[i](1, 1) = pFinal;
-						stressTensor[i](2, 2) = pFinal;
+						stressTensor[i](0, 0) = -pFinal;
+						stressTensor[i](1, 1) = -pFinal;
+						stressTensor[i](2, 2) = -pFinal;
 					}
 				}
 				break;

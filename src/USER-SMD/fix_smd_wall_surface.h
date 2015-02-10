@@ -21,6 +21,8 @@ FixStyle(smd/wall_surface,FixSMDWallSurface)
 #define LMP_FIX_SMD_WALL_SURFACE_H
 
 #include "fix.h"
+#include <iostream>
+using namespace std;
 
 namespace LAMMPS_NS {
 
@@ -31,64 +33,21 @@ public:
 	virtual ~FixSMDWallSurface();
 	int setmask();
 	void init();
-	void init_list(int, class NeighList *);
 	void setup(int);
-	void setup_bending_triangles();
-	void setup_bending_triangles_linear();
 	void min_setup(int);
-
-	double memory_usage();
-	void grow_arrays(int);
-	void copy_arrays(int, int, int);
-	int pack_exchange(int, double *);
-	int unpack_exchange(int, double *);
-	void write_restart(FILE *);
-	void restart(char *);
-	int pack_restart(int, double *);
-	void unpack_restart(int, int);
-	int size_restart(int);
-	int maxsize_restart();
-	int pack_forward_comm(int, int *, double *, int, int *);
-	void unpack_forward_comm(int, int, double *);
-	int pack_border(int, int *, double *);
-	int unpack_border(int, int, double *);
 
 	int count_words(const char *line);
 	void read_triangles(int pass);
 
-protected:
-	int nmax;
-
-	int first;                 // flag for first time initialization
-	int maxpartner;            // max # of peridynamic neighs for any atom
-	int *npartner;             // # of neighbors for each atom
-	tagint **partner;          // neighs for each atom, stored as global IDs
-	double **r0;               // initial distance to partners
-	double **plastic_stretch;               // rest length of spring due to plasticity
-	double *vinter;            // sum of vfrac for bonded neighbors
-
-	int numTrianglesLocal;
-	int maxTrianglePairs;
-	int *nTrianglePairs;       // number of triangles pairs per atom
-	tagint ***trianglePairs;       // triangle pair definiton
-	double **trianglePairAngle0;
-	double **trianglePairPlasticAngle;
-
-	class NeighList *list;
 private:
-	int triclinic;
+	int first;                 // flag for first time initialization
 	double sublo[3], subhi[3];   // epsilon-extended proc sub-box for adding atoms;
+	std::string filename;
+	int wall_particle_type;
+	int wall_molecule_id;
 };
 }
 
 #endif
 #endif
 
-/* ERROR/WARNING messages:
-
- E: Duplicate particle in PeriDynamic bond - simulation box is too small
-
- This is likely because your box length is shorter than 2 times
- the bond length.
-
- */

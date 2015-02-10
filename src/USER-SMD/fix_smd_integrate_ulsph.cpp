@@ -67,8 +67,12 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
 		printf("fix smd/integrate_ulsph is active for group: %s \n", arg[1]);
 	}
-
 	while (true) {
+
+		if (iarg >= narg) {
+			break;
+		}
+
 		if (strcmp(arg[iarg], "xsph") == 0) {
 			xsphFlag = true;
 			if (comm->me == 0) {
@@ -84,16 +88,15 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 
 			adjust_radius_factor = force->numeric(FLERR, arg[iarg]);
 			if (comm->me == 0) {
-				printf("... will adjust smoothing length dynamically with factor %g\n",
-						adjust_radius_factor);
+				printf("... will adjust smoothing length dynamically with factor %g\n", adjust_radius_factor);
 			}
 		} else if (strcmp(arg[iarg], "limit_velocity") == 0) {
 			iarg++;
 			if (iarg == narg) {
 				error->all(FLERR, "expected number following limit_velocity");
+				vlimit = force->numeric(FLERR, arg[iarg]);
 			}
 
-			vlimit = force->numeric(FLERR, arg[iarg]);
 			if (comm->me == 0) {
 				printf("... will limit velocities to <= %g\n", vlimit);
 			}
@@ -104,10 +107,6 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 		}
 
 		iarg++;
-
-		if (iarg >= narg) {
-			break;
-		}
 
 	}
 
