@@ -57,13 +57,16 @@ fix             stl_surface_fix all smd/wall_surface ellipsoid.stl 2
 run             0
 group           surface type 2
 
+change_box      all boundary m m m
+
 balance         0.9 rcb
 
 timestep        0.03
 #fix             dtfix all smd/adjust_dt 0.1
 fix             integration_fix particles smd/integrate_ulsph 
 fix             gfix particles gravity 9.81e-3 vector 0 1 0
-fix             move_fix surface move linear 0.1 0 0 units box
+fix             boundary_fix surface smd/move_tri_surf *LINEAR 0.5 0.0 0.0
+fix             bfix all balance 500 0.9 rcb
 
 run             10000
 
