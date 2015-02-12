@@ -57,12 +57,15 @@ FixSMDWallSurface::FixSMDWallSurface(LAMMPS *lmp, int narg, char **arg) :
 	atom->add_callback(0);
 	atom->add_callback(1);
 
-	if (narg != 5)
+	if (narg != 6)
 		error->all(FLERR, "Illegal number of arguments for fix smd/wall_surface");
 
 	filename.assign(arg[3]);
 	wall_particle_type = force->inumeric(FLERR, arg[4]);
-	wall_molecule_id = 65535;
+	wall_molecule_id = force->inumeric(FLERR, arg[5]);
+	if (wall_molecule_id < 65535) {
+		error->one(FLERR, "wall molcule id must be >= 65535\n");
+	}
 
 	if (comm->me == 0) {
 		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
@@ -222,12 +225,6 @@ int FixSMDWallSurface::count_words(const char *line) {
 
 void FixSMDWallSurface::read_triangles(int pass) {
 
-	int *mol = atom->molecule;
-	int *type = atom->type;
-	double *radius = atom->radius;
-	double *contact_radius = atom->contact_radius;
-	double **tlsph_fold = atom->tlsph_fold;
-	double **x0 = atom->x0;
 	double coord[3];
 
 	int nlocal_previous = atom->nlocal;
@@ -424,13 +421,27 @@ void FixSMDWallSurface::read_triangles(int pass) {
 		//	printf("coord: %f %f %f\n", coord[0], coord[1], coord[2]);
 		//	printf("sublo: %f %f %f\n", sublo[0], sublo[1], sublo[2]);
 		//	printf("subhi: %f %f %f\n", subhi[0], subhi[1], subhi[2]);
+		//printf("ilocal = %d\n", ilocal);
 		if (center(0) >= sublo[0] && center(0) < subhi[0] && center(1) >= sublo[1] && center(1) < subhi[1] && center(2) >= sublo[2]
 				&& center(2) < subhi[2]) {
 			//printf("******* KERATIN nlocal=%d ***\n", nlocal);
 			coord[0] = center(0);
 			coord[1] = center(1);
 			coord[2] = center(2);
-			atom->avec->create_atom(2, coord);
+			atom->avec->create_atom(wall_particle_type, coord);
+
+			/*
+			 * need to initialize pointers to atom vec arrays here, because they could have changed
+			 * due to callin grow() in create_atoms() above;
+			 */
+
+			int *mol = atom->molecule;
+			int *type = atom->type;
+			double *radius = atom->radius;
+			double *contact_radius = atom->contact_radius;
+			double **tlsph_fold = atom->tlsph_fold;
+			double **x0 = atom->x0;
+
 			radius[ilocal] = r; //ilocal;
 			contact_radius[ilocal] = r; //ilocal;
 			mol[ilocal] = wall_molecule_id;

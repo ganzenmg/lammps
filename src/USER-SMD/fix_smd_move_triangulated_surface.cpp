@@ -217,7 +217,7 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 				 * if this is a triangle, move the vertices as well
 				 */
 
-				if (mol[i] == 65535) {
+				if (mol[i] >= 65535) {
 					tlsph_fold[i][0] += dtv * vx;
 					tlsph_fold[i][1] += dtv * vy;
 					tlsph_fold[i][2] += dtv * vz;
@@ -236,6 +236,7 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 	}
 
 	if (rotateFlag) { // rotate particles
+		Vector3d xnew, R_new, x_correct;
 
 		for (i = 0; i < nlocal; i++) {
 			if (mask[i] & groupbit) {
@@ -244,6 +245,22 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 				R = center - origin;
 				vel = angular_velocity * R.cross(rotation_axis);
 
+				// new incorrect position at new time
+				xnew = center + dtv * vel;
+
+				// line from origin to new incorrect position
+				R_new = xnew - origin;
+
+				// new correct position
+				x_correct = origin + R.norm() * R_new / R_new.norm();
+
+				vel = (x_correct - center) / dtv;
+
+//				printf("x_old: %f %f %f\n", center(0), center(1), center(2));
+//				printf("x_new: %f %f %f\n", xnew(0), xnew(1), xnew(2));
+//				printf("R: %f %f %f\n", R(0), R(1), R(2));
+//				printf("R_new: %f %f %f\n", R_new(0), R_new(1), R_new(2));
+//				printf("x_cor: %f %f %f\n\n", x_correct(0), x_correct(1), x_correct(2));
 				//printf("rot vel: %f %f %f\n", vel(0), vel(1), vel(2));
 
 				v[i][0] = vel(0);
@@ -254,36 +271,51 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 				vest[i][1] = vel(1);
 				vest[i][2] = vel(2);
 
-				x[i][0] += dtv * vel(0);
-				x[i][1] += dtv * vel(1);
-				x[i][2] += dtv * vel(2);
+//				x[i][0] += dtv * vel(0);
+//				x[i][1] += dtv * vel(1);
+//				x[i][2] += dtv * vel(2);
+				x[i][0] = x_correct(0);
+				x[i][1] = x_correct(1);
+				x[i][2] = x_correct(2);
 
 				/*
 				 * if this is a triangle, rotate the vertices as well
 				 */
 
-				if (mol[i] == 65535) {
+				if (mol[i] >= 65535) {
 
 					v1 << tlsph_fold[i][0], tlsph_fold[i][1], tlsph_fold[i][2];
 					R = v1 - origin;
 					vel = angular_velocity * R.cross(rotation_axis);
-					tlsph_fold[i][0] += dtv * vel(0);
-					tlsph_fold[i][1] += dtv * vel(1);
-					tlsph_fold[i][2] += dtv * vel(2);
+					xnew = v1 + dtv * vel;
+					R_new = xnew - origin;
+					x_correct = origin + R.norm() * R_new / R_new.norm();
+					tlsph_fold[i][0] = x_correct(0);
+					tlsph_fold[i][1] = x_correct(1);
+					tlsph_fold[i][2] = x_correct(2);
+					v1 = x_correct;
 
 					v2 << tlsph_fold[i][3], tlsph_fold[i][4], tlsph_fold[i][5];
 					R = v2 - origin;
 					vel = angular_velocity * R.cross(rotation_axis);
-					tlsph_fold[i][3] += dtv * vel(0);
-					tlsph_fold[i][4] += dtv * vel(1);
-					tlsph_fold[i][5] += dtv * vel(2);
+					xnew = v2 + dtv * vel;
+					R_new = xnew - origin;
+					x_correct = origin + R.norm() * R_new / R_new.norm();
+					tlsph_fold[i][3] = x_correct(0);
+					tlsph_fold[i][4] = x_correct(1);
+					tlsph_fold[i][5] = x_correct(2);
+					v2 = x_correct;
 
 					v3 << tlsph_fold[i][6], tlsph_fold[i][7], tlsph_fold[i][8];
 					R = v3 - origin;
 					vel = angular_velocity * R.cross(rotation_axis);
-					tlsph_fold[i][6] += dtv * vel(0);
-					tlsph_fold[i][7] += dtv * vel(1);
-					tlsph_fold[i][8] += dtv * vel(2);
+					xnew = v3 + dtv * vel;
+					R_new = xnew - origin;
+					x_correct = origin + R.norm() * R_new / R_new.norm();
+					tlsph_fold[i][6] = x_correct(0);
+					tlsph_fold[i][7] = x_correct(1);
+					tlsph_fold[i][8] = x_correct(2);
+					v3 = x_correct;
 
 					// recalculate triangle normal
 					n = (v2 - v1).cross(v2 - v3);
@@ -307,7 +339,6 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 void FixSMDMoveTriSurf::reset_dt() {
 	dtv = update->dt;
 }
-
 
 /* ---------------------------------------------------------------------- */
 

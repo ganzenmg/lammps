@@ -103,6 +103,8 @@ void AtomVecSMD::grow(int n) {
 	if (nmax < 0 || nmax > MAXSMALLINT)
 		error->one(FLERR, "Per-processor system is too big");
 
+	printf("in grow, nmax is now %d\n", nmax);
+
 	tag = memory->grow(atom->tag, nmax, "atom:tag");
 	type = memory->grow(atom->type, nmax, "atom:type");
 	mask = memory->grow(atom->mask, nmax, "atom:mask");
@@ -999,8 +1001,13 @@ int AtomVecSMD::unpack_restart(double *buf) {
 
 void AtomVecSMD::create_atom(int itype, double *coord) {
 	int nlocal = atom->nlocal;
-	if (nlocal == nmax)
+	if (nlocal == nmax) {
+		printf("nlocal = %d, nmax = %d, calling grow\n", nlocal, nmax);
 		grow(0);
+		printf("... finished growing\n");
+	}
+
+
 
 	tag[nlocal] = 0;
 	type[nlocal] = itype;
