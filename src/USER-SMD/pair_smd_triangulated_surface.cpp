@@ -91,6 +91,7 @@ void PairTriSurf::compute(int eflag, int vflag) {
 	double rcut, r_geom, delta, ri, rj;
 	int tri, particle;
 	Vector3d normal, x1, x2, x3, x4, x13, x23, x43, w, cp, x4cp;
+	Vector3d xi, x_center, dx;
 	Matrix2d C;
 	Vector2d w2d, rhs;
 
@@ -120,49 +121,56 @@ void PairTriSurf::compute(int eflag, int vflag) {
 	numneigh = list->numneigh;
 	firstneigh = list->firstneigh;
 
-	// loop over neighbors of my atoms
+	int max_neighs = 0;
+
+	// loop over neighbors of my atoms using a full neighbor list
 	for (ii = 0; ii < inum; ii++) {
 		i = ilist[ii];
-		xtmp = x[i][0];
-		ytmp = x[i][1];
-		ztmp = x[i][2];
+
+		// we are only interested in particles, not in triangles.
+		if (mol[i] >= 65535) {
+			continue;
+		}
+
+		// now we know that i is a particle
+		particle = i;
+		x4 << x[i][0], x[i][1], x[i][2];
 		itype = type[i];
 		ri = scale * radius[i];
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
+		max_neighs = MAX(max_neighs, jnum);
 
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
+
 			j &= NEIGHMASK;
 
 			jtype = type[j];
 
-			delx = xtmp - x[j][0];
-			dely = ytmp - x[j][1];
-			delz = ztmp - x[j][2];
-			if (periodic) {
-				domain->minimum_image(delx, dely, delz);
+			if (mol[j] < 65535) {
+				error->one(FLERR, "j has mol id < 65535 and is not a triangle. This should not happen.");
 			}
-			rsq = delx * delx + dely * dely + delz * delz;
+			tri = j;
+
+			x_center << x[j][0], x[j][1], x[j][2]; // center of triangle
+			dx = x_center - x4; //
+			if (periodic) {
+				domain->minimum_image(dx(0), dx(1), dx(2));
+			}
+			rsq = dx.squaredNorm();
 
 			rj = scale * radius[j];
 			rcut = ri + rj;
 			rcutSq = rcut * rcut;
+
+			//printf("type i=%d, type j=%d, r=%f, ri=%f, rj=%f\n", itype, jtype, sqrt(rsq), ri, rj);
 
 			if (rsq < rcutSq) {
 
 				/*
 				 * decide which one of i, j is triangle and which is particle
 				 */
-				if (mol[i] >= 65535) {
-					tri = i;
-					particle = j;
-				} else if (mol[j] >= 65535) {
-					tri = j;
-					particle = i;
-				} else {
-					error->one(FLERR, "neither i or j have mol id >= 65535. This should not happen.");
-				}
 				if (mol[particle] >= 65535) {
 					error->one(FLERR, "both i and j have mol id >= 65535. This should not happen.");
 				}
@@ -175,25 +183,9 @@ void PairTriSurf::compute(int eflag, int vflag) {
 				normal(2) = x0[tri][2];
 
 				/*
-				 * set particle location
+				 * distance check: is particle closer than its radius to the triangle plane?
 				 */
-				x4(0) = x[particle][0];
-				x4(1) = x[particle][1];
-				x4(2) = x[particle][2];
-
-				/*
-				 * get vertex 3 from smd atom vec
-				 */
-				x3(0) = tlsph_fold[tri][6];
-				x3(1) = tlsph_fold[tri][7];
-				x3(2) = tlsph_fold[tri][8];
-
-				/*
-				 *  first distance check
-				 */
-				x43 = x4 - x3;
-				if (fabs(x43.dot(normal)) < radius[particle]) {
-
+				if (fabs(dx.dot(normal)) < radius[particle]) {
 					/*
 					 * get other two triangle vertices
 					 */
@@ -203,12 +195,16 @@ void PairTriSurf::compute(int eflag, int vflag) {
 					x2(0) = tlsph_fold[tri][3];
 					x2(1) = tlsph_fold[tri][4];
 					x2(2) = tlsph_fold[tri][5];
+					x3(0) = tlsph_fold[tri][6];
+					x3(1) = tlsph_fold[tri][7];
+					x3(2) = tlsph_fold[tri][8];
 
 					/*
 					 * pre-compute stuff
 					 */
 					x13 = x1 - x3;
 					x23 = x2 - x3;
+					x43 = x4 - x3;
 
 					/*
 					 * get barycentric coordinates, see
@@ -245,12 +241,52 @@ void PairTriSurf::compute(int eflag, int vflag) {
 					 */
 					x4cp = x4 - cp;
 
-					r = x4cp.norm();
+					/*
+					 * flip normal to point in direction of x4cp
+					 */
 
+					if (x4cp.dot(normal) < 0.0) {
+						normal *= -1.0;
+					}
+
+					/*
+					 * check that normal and x4cp are parallel -- otherwise, particle does
+					 * not project onto triangle plane
+					 */
+
+					r = x4cp.norm();
+//					if (fabs(x4cp.dot(normal) / r - 1.0) > 1.0e-3) {
+//						printf("normal is: %f %f %f, norm is %f\n", normal(0), normal(1), normal(2), normal.norm());
+//						printf("x4cp   is: %f %f %f\n", x4cp(0) /r, x4cp(1)/r, x4cp(2)/r);
+//						printf("dot productr is %f\n", x4cp.dot(normal) / r);
+//						error->one(FLERR, "");
+//					}
+
+					if (r < 1.0 * radius[particle]) {
+
+						delta = radius[particle] - r; // overlap distance
+						r_geom = radius[particle];
+						fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom)
+								/ (r + 1.0e-2 * radius[particle]); //  units:
+						evdwl = r * fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
+
+						if (evflag) {
+							ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, delx, dely, delz);
+						}
+
+						f[i][0] += x4cp(0) * fpair;
+						f[i][1] += x4cp(1) * fpair;
+						f[i][2] += x4cp(2) * fpair;
+
+					}
 					/*
 					 * check if particle is close to triangle surface. if so, put it just on the surface.
 					 */
-					if (r < 1.0 * radius[particle]) {
+
+					double touch_distance = 0.5 * radius[particle];
+
+					if (r < touch_distance) {
+
 						/*
 						 * reflect velocity if it points toward triangle
 						 */
@@ -258,53 +294,34 @@ void PairTriSurf::compute(int eflag, int vflag) {
 						v_old << v[particle][0], v[particle][1], v[particle][2];
 						if (v_old.dot(normal) < 0.0) {
 							//printf("flipping velocity\n");
-							vnew = 0.2 * (-2.0 * v_old.dot(normal) * normal + v_old);
-
+							vnew = 1.0 * (-2.0 * v_old.dot(normal) * normal + v_old);
 							v[particle][0] = vnew(0);
 							v[particle][1] = vnew(1);
 							v[particle][2] = vnew(2);
-
-							// also move particle in direction given by new velocity such that it is just outside the penalty region
-							// origin is cp, current position is x4
-							// need to offset
-							offset = radius[particle] - r;
-							x[particle][0] += offset * normal(0);
-							x[particle][1] += offset * normal(1);
-							x[particle][2] += offset * normal(2);
 						}
+
+						offset = touch_distance - r;
+//						printf("offset is %f\n", offset);
+						x[particle][0] = cp(0) + touch_distance * normal(0);
+						x[particle][1] = cp(1) + touch_distance * normal(1);
+						x[particle][2] = cp(2) + touch_distance * normal(2);
+
+//						printf("moving particle to new position with z=%f\n", x[particle][2]);
+//						printf("normal is %f %f %f\n", normal(0), normal(1), normal(2));
+//						printf("x4cp is %f %f %f\n", x4cp(0), x4cp(1), x4cp(2));
+
 					}
-
-					/*
-					 * check that collision does not occur in the triangular plane
-					 */
-
-					//if (fabs(x4cp.dot(normal)) < 0.05) {
-					//	continue;
-					//}
-					/*
-					 * repulsive force
-					 */
-//					if (r < radius[particle]) {
-//						// Hertzian short-range forces
-//						delta = radius[particle] - r; // overlap distance
-//						r_geom = radius[particle];
-//						//assuming poisson ratio = 1/4 for 3d
-//						fpair = 0.5 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom) / (r + 0.1 * radius[particle]);
-//						evdwl = 0.0; // to do: compute energy expession
-//
-//						if (evflag) {
-//							ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, delx, dely, delz);
-//						}
-//
-//						f[particle][0] += x4cp(0) * fpair;
-//						f[particle][1] += x4cp(1) * fpair;
-//						f[particle][2] += x4cp(2) * fpair;
-//					}
 
 				}
 			}
 		}
 	}
+
+//	int max_neighs_all = 0;
+//	MPI_Allreduce(&max_neighs, &max_neighs_all, 1, MPI_INT, MPI_MAX, world);
+//	if (comm->me == 0) {
+//		printf("max. neighs in tri pair is %d\n", max_neighs_all);
+//	}
 }
 
 /* ----------------------------------------------------------------------
@@ -427,9 +444,15 @@ void PairTriSurf::init_style() {
 	if (!atom->contact_radius_flag)
 		error->all(FLERR, "Pair style smd/smd/tri_surface requires atom style with contact_radius");
 
+	// old: half list
+//	int irequest = neighbor->request(this);
+//	neighbor->requests[irequest]->half = 0;
+//	neighbor->requests[irequest]->gran = 1;
+
+	// need a full neighbor list
 	int irequest = neighbor->request(this);
 	neighbor->requests[irequest]->half = 0;
-	neighbor->requests[irequest]->gran = 1;
+	neighbor->requests[irequest]->full = 1;
 
 	// set maxrad_dynamic and maxrad_frozen for each type
 	// include future Fix pour particles as dynamic

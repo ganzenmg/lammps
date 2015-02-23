@@ -319,6 +319,7 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 
 					// recalculate triangle normal
 					n = (v2 - v1).cross(v2 - v3);
+					n /= n.norm();
 					x0[i][0] = n(0);
 					x0[i][1] = n(1);
 					x0[i][2] = n(2);

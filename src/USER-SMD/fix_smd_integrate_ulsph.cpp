@@ -94,8 +94,8 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 			iarg++;
 			if (iarg == narg) {
 				error->all(FLERR, "expected number following limit_velocity");
-				vlimit = force->numeric(FLERR, arg[iarg]);
 			}
+			vlimit = force->numeric(FLERR, arg[iarg]);
 
 			if (comm->me == 0) {
 				printf("... will limit velocities to <= %g\n", vlimit);

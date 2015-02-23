@@ -23,6 +23,7 @@ using namespace LAMMPS_NS;
 
 #define ONELINE 128
 #define DELTA 1048576
+#define NLINES 9 // number of data items per particle
 
 /* ---------------------------------------------------------------------- */
 
@@ -33,11 +34,11 @@ DumpSMDVTK::DumpSMDVTK(LAMMPS *lmp, int narg, char **arg) :
 	if (binary || multiproc)
 		error->all(FLERR, "Invalid dump xyz filename");
 
-	size_one = 5;
+	size_one = NLINES;
 
 	buffer_allow = 1;
 	buffer_flag = 0;
-	sort_flag = 1;
+	sort_flag = 0;
 	sortcol = 0;
 
 	if (format_default)
@@ -60,7 +61,7 @@ DumpSMDVTK::DumpSMDVTK(LAMMPS *lmp, int narg, char **arg) :
 
 	//printf("***** ALLOCATED %d for gpartdata\n", natoms);
 	global_particle_data = NULL;
-	memory->create(global_particle_data, natoms, 5, "dump:coords");
+	memory->create(global_particle_data, natoms, NLINES, "dump:coords");
 	ntotal = 0;
 
 }
@@ -162,18 +163,24 @@ void DumpSMDVTK::pack(tagint *ids) {
 	int *type = atom->type;
 	int *mask = atom->mask;
 	double **x = atom->x;
+	double **v = atom->v;
+	double *rho = atom->rho;
 	int nlocal = atom->nlocal;
 
 	m = n = 0;
 	for (int i = 0; i < nlocal; i++)
 		if (mask[i] & groupbit) {
+
 			buf[m++] = tag[i];
 			buf[m++] = type[i];
 			buf[m++] = x[i][0];
 			buf[m++] = x[i][1];
-			buf[m++] = x[i][2];
-			if (ids)
-				ids[n++] = tag[i];
+			buf[m++] = x[i][2]; // 5
+			buf[m++] = v[i][0];
+			buf[m++] = v[i][1];
+			buf[m++] = v[i][2]; // 8
+			buf[m++] = rho[i];  // 9
+
 		}
 }
 
@@ -206,6 +213,13 @@ int DumpSMDVTK::convert_string(int n, double *mybuf) {
 void DumpSMDVTK::write_data(int n, double *mybuf) {
 
 	// copy buf atom coords into 3 global arrays
+
+	if (group->count(igroup) < natoms) {
+		printf("warning: current number of atoms in group is %d, old number is %d\n", group->count(igroup), natoms);
+		printf("resetting natoms\n");
+		natoms = group->count(igroup);
+	}
+
 	int m = 0;
 	for (int i = 0; i < n; i++) {
 
@@ -215,11 +229,9 @@ void DumpSMDVTK::write_data(int n, double *mybuf) {
 			error->one(FLERR, "allocated storage in dump smd/vtk is exhausted.");
 		}
 
-		global_particle_data[ntotal][0] = mybuf[m++];
-		global_particle_data[ntotal][1] = mybuf[m++];
-		global_particle_data[ntotal][2] = mybuf[m++];
-		global_particle_data[ntotal][3] = mybuf[m++];
-		global_particle_data[ntotal][4] = mybuf[m++];
+		for (int k = 0; k < NLINES; k++)
+
+		global_particle_data[ntotal][k] = mybuf[m++];
 		ntotal++;
 	}
 
@@ -230,6 +242,8 @@ void DumpSMDVTK::write_data(int n, double *mybuf) {
 		fprintf(fp, "POINT_DATA %d\n", natoms);
 		write_pointdataset_id();
 		write_pointdataset_type();
+		write_pointdataset_rho();
+		write_pointdataset_velocity();
 		ntotal = 0;
 	}
 }
@@ -249,7 +263,6 @@ void DumpSMDVTK::write_pointdata() {
 /* ---------------------------------------------------------------------- */
 
 void DumpSMDVTK::write_pointdataset_id() {
-
 
 	fprintf(fp, "SCALARS id FLOAT\n");
 	fprintf(fp, "LOOKUP_TABLE default\n");
@@ -272,3 +285,30 @@ void DumpSMDVTK::write_pointdataset_type() {
 	}
 	fprintf(fp, "\n");
 }
+
+/* ---------------------------------------------------------------------- */
+
+void DumpSMDVTK::write_pointdataset_velocity() {
+
+	fprintf(fp, "VECTORS velocity FLOAT\n");
+	fprintf(fp, "LOOKUP_TABLE default\n");
+
+	for (int i = 0; i < natoms; i++) {
+		fprintf(fp, "%f %f %f\n", global_particle_data[i][5], global_particle_data[i][6], global_particle_data[i][7]);
+	}
+	fprintf(fp, "\n");
+}
+
+/* ---------------------------------------------------------------------- */
+
+void DumpSMDVTK::write_pointdataset_rho() {
+
+	fprintf(fp, "SCALARS rho FLOAT\n");
+	fprintf(fp, "LOOKUP_TABLE default\n");
+
+	for (int i = 0; i < natoms; i++) {
+		fprintf(fp, "%g\n", global_particle_data[i][8]);
+	}
+	fprintf(fp, "\n");
+}
+

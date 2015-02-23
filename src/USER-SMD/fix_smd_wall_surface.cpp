@@ -432,7 +432,7 @@ void FixSMDWallSurface::read_triangles(int pass) {
 
 			/*
 			 * need to initialize pointers to atom vec arrays here, because they could have changed
-			 * due to callin grow() in create_atoms() above;
+			 * due to calling grow() in create_atoms() above;
 			 */
 
 			int *mol = atom->molecule;

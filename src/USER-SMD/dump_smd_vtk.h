@@ -43,6 +43,8 @@ class DumpSMDVTK : public Dump {
   void write_pointdata();
   void write_pointdataset_type();
   void write_pointdataset_id();
+  void write_pointdataset_velocity();
+  void write_pointdataset_rho();
 
   int natoms;
   float **global_particle_data;

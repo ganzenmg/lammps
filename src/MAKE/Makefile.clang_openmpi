@@ -1,4 +1,4 @@
-# openmpi = Fedora Core 6, mpic++, OpenMPI-1.1, FFTW2
+# clang_openmpi = Ubuntu 14.04 with clang
 
 SHELL = /bin/sh
 
@@ -6,15 +6,25 @@ SHELL = /bin/sh
 # compiler/linker settings
 # specify flags and libraries needed for your compiler
 
+# note: for using address sanitizer, do the following
+# 1) compile with at least the following flags:
+     -g -fsanitize=address -fno-omit-frame-pointer
+# 2) run the executable like this:
+#    $> export ASAN_OPTIONS=symbolize=0; mpirun -np 1 lmp_clang_openmpi < script.lmp 2> log
+#    this disables on the fly-symbolization which is problematic in MPI
+# 3) analyze the resulting log file like this:
+#    $> asan_symbolize / < log | c++filt
+
+
 CC =		mpic++
-#CCFLAGS =	-Wall -Wno-unused-parameter -O2 -g -fsanitize=address -fno-omit-frame-pointer
-CCFLAGS =	-Wall -Wno-unused-parameter -O3
+CCFLAGS =	-Wall -Wno-unused-parameter -O2 -g -fsanitize=address -fno-omit-frame-pointer
+#CCFLAGS =	-Wall -Wno-unused-parameter -O3
 SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
 LINK =		mpic++
-#LINKFLAGS =	-O2 -g -fsanitize=address -fno-omit-frame-pointer
-LINKFLAGS =	-O3
+LINKFLAGS =	-O2 -g -fsanitize=address -fno-omit-frame-pointer
+#LINKFLAGS =	-O3
 LIB =       -lstdc++
 SIZE =		size
 
