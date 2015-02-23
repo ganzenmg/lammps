@@ -53,7 +53,8 @@ protected:
 	bool linearFlag, rotateFlag;
 	double vx, vy, vz;
 	Vector3d rotation_axis, origin;
-	double angular_velocity;
+	double rotation_period;
+	Matrix3d u_cross, uxu;
 };
 
 }

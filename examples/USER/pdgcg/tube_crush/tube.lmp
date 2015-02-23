@@ -5,7 +5,7 @@ variable        rho equal 7.3e-6
 variable        E equal 1 # Young's modulus
 variable        nu equal 0.33
 variable        t equal 1.0 # shell thickness
-variable        smax equal 0.02
+variable        smax equal 0.2
 variable        syield equal 0.1
 variable        G0 equal -1
 variable        visc equal 1.0

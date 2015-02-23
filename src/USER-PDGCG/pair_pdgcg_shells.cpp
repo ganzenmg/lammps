@@ -88,7 +88,7 @@ void PairPDGCGShells::compute(int eflag, int vflag) {
 
 	/* ----------------------- PERIDYNAMIC SHORT RANGE FORCES --------------------- */
 
-	contact_forces();
+	//contact_forces();
 	/* ----------------------- PERIDYNAMIC BOND FORCES --------------------- */
 
 	bond_forces();
@@ -224,22 +224,22 @@ void PairPDGCGShells::bending_forces() {
 			angle0 = trianglePairAngle0[i][t];
 
 			// deviation from rest angle
-			double deltaAngle = angle - angle0;
+			double deltaAngle = angle; // - angle0;
 
 			// subtract plastic stretch from current stretch
 			//deltaAngle -= trianglePairPlasticAngle[i][t];
 
 			// alternative plasticity based on plastic stretch
-			double maxa = 0.15;
-			if (deltaAngle > maxa) {
-				double plastic_stretch_increment = deltaAngle - maxa;
-				trianglePairPlasticAngle[i][t] += plastic_stretch_increment;
-				deltaAngle = maxa;
-			} else if (deltaAngle < -maxa) {
-				double plastic_stretch_increment = deltaAngle + maxa;
-				trianglePairPlasticAngle[i][t] += plastic_stretch_increment;
-				deltaAngle = -maxa;
-			}
+//			double maxa = 0.15;
+//			if (deltaAngle > maxa) {
+//				double plastic_stretch_increment = deltaAngle - maxa;
+//				trianglePairPlasticAngle[i][t] += plastic_stretch_increment;
+//				deltaAngle = maxa;
+//			} else if (deltaAngle < -maxa) {
+//				double plastic_stretch_increment = deltaAngle + maxa;
+//				trianglePairPlasticAngle[i][t] += plastic_stretch_increment;
+//				deltaAngle = -maxa;
+//			}
 
 			force_magnitude = deltaAngle * kbend[itype][itype] * E_normSq / (sqrt(N1_normSq) + sqrt(N2_normSq));
 

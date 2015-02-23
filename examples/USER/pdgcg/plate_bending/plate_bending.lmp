@@ -14,14 +14,14 @@ variable        vel equal 0.0001
 # ----
 variable        kbend equal 4*(${Ebend}*${t}^3)/(12.0*(1.0-${nu}^2))
 variable        c0 equal 1.0
-variable        dt equal 1.0e-1
+variable        dt equal 1.0e-2
 print           "sound speed is ${c0}, CFL timestep is ${dt}"
 variable        skin equal 0.1 # Verlet list range
 
 units		si
 dimension       3
 boundary        sm sm sm
-atom_style      tlsph
+atom_style      smd
 neighbor        ${skin} bin
 comm_modify     vel yes
 newton          off
@@ -49,7 +49,7 @@ pair_style      pdgcg/shells
 pair_coeff      * * ${K} ${kbend} ${smax} ${G0} ${visc} ${syield}
 
 compute         d all pdgcg/damage
-compute         eint all sph2/internal_energy
+compute         eint all smd/internal_energy
 compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
 compute         sumF clamp reduce sum fz
