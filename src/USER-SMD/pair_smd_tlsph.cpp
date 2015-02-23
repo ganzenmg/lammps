@@ -49,12 +49,12 @@
 #include <Eigen/Eigen>
 #include "smd_material_models.h"
 #include "smd_kernels.h"
-//#include "smd_math.h"
+#include "smd_math.h"
 using namespace SMD_Kernels;
 using namespace Eigen;
 using namespace std;
 using namespace LAMMPS_NS;
-//using namespace SMD_Math;
+using namespace SMD_Math;
 
 #define JAUMANN false
 #define DETF_MIN 0.1 // maximum compression deformation allowed
@@ -556,7 +556,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 			 */
 			spiky_kernel_and_derivative(h, r0, wf, wfd); // call a different kernel and its gradient weights for artificial viscosity and hourglass correction
 			delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
-			//LimitDoubleMagnitude(delVdotDelR, 0.01 * signal_vel0[itype]);
+			LimitDoubleMagnitude(delVdotDelR, 0.01 * signal_vel0[itype]);
 			mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
 			visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // units: m^5/(s^2 kg))
 			f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h); // units: kg^2 * m^5/(s^2 kg) * m^-4 = kg m / s^2 = N
@@ -590,7 +590,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				 */
 
 				gamma_dot_dx = gamma.dot(dx); // project hourglass error vector onto pair distance vector
-				//LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
+				LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
 				delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
 				hg_mag = hg_coeff[itype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
 				hg_mag *= -voli * volj * wf * youngsmodulus[itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
