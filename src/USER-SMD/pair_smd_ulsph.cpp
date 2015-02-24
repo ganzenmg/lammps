@@ -468,7 +468,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
 				c_ij = 0.5 * (c0[i] + c0[j]);
 
-				LimitDoubleMagnitude(delVdotDelR, 0.5 * c_ij);
+				LimitDoubleMagnitude(delVdotDelR, 0.1 * c_ij);
 
 				//if (fabs(delVdotDelR) > 0.5 * c_ij) { // limit delVdotDelR to a fraction of speed of sound
 				//	double s = copysign(1, delVdotDelR);

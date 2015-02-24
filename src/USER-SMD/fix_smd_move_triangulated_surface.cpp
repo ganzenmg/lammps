@@ -266,16 +266,16 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 	if (rotateFlag) { // rotate particles
 		Vector3d xnew, R_new, x_correct;
 
+		/*
+		 * rotation angle and matrix form of Rodrigues' rotation formula
+		 */
+
+		phi = MY_2PI * dtv / rotation_period;
+		//printf("dt=%f, phi =%f, T=%f\n", dtv, phi, rotation_period);
+		Rot = cos(phi) * eye + sin(phi) * u_cross + (1.0 - cos(phi)) * uxu;
+
 		for (i = 0; i < nlocal; i++) {
 			if (mask[i] & groupbit) {
-
-				/*
-				 * rotation angle and matrix form of Rodrigues' rotation formula
-				 */
-
-				phi = MY_2PI * dtv / rotation_period;
-				//printf("dt=%f, phi =%f, T=%f\n", dtv, phi, rotation_period);
-				Rot = cos(phi) * eye + sin(phi) * u_cross + (1.0 - cos(phi)) * uxu;
 
 				/*
 				 * generate vector R from origin to point which is to be rotated
@@ -293,6 +293,9 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 				 */
 				vel = (rotated_point - point) / update->dt;
 
+				/*
+				 * assign new velocities and coordinates
+				 */
 				v[i][0] = vel(0);
 				v[i][1] = vel(1);
 				v[i][2] = vel(2);

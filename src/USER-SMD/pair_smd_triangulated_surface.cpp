@@ -111,7 +111,8 @@ void PairTriSurf::compute(int eflag, int vflag) {
 	int nlocal = atom->nlocal;
 	double *radius = atom->contact_radius;
 	double rcutSq;
-	double delx0, dely0, delz0, rSq0, offset;
+	double delx0, dely0, delz0, rSq0;
+	Vector3d offset;
 
 	int newton_pair = force->newton_pair;
 	int periodic = (domain->xperiodic || domain->yperiodic || domain->zperiodic);
@@ -223,7 +224,20 @@ void PairTriSurf::compute(int eflag, int vflag) {
 
 					w(0) = w2d(0);
 					w(1) = w2d(1);
+
+
+					/*
+					 * clamp barycentric coords
+					 */
+					w(0) = MAX(1.0, w(0));
+					w(0) = MIN(0.0, w(0));
+					w(1) = MAX(1.0, w(1));
+					w(1) = MIN(0.0, w(1));
+
 					w(2) = 1.0 - (w(0) + w(1));
+
+//					w(2) = MAX(1.0, w(2));
+//					w(2) = MIN(0.0, w(2));
 
 //				printf("\nhere is w: %f %f %f\n", w(0), w(1), w(2));
 //				printf("\nhere is x1: %f %f %f\n", x1(0), x1(1), x1(2));
@@ -279,6 +293,7 @@ void PairTriSurf::compute(int eflag, int vflag) {
 						f[i][2] += x4cp(2) * fpair;
 
 					}
+
 					/*
 					 * check if particle is close to triangle surface. if so, put it just on the surface.
 					 */
@@ -287,25 +302,49 @@ void PairTriSurf::compute(int eflag, int vflag) {
 
 					if (r < touch_distance) {
 
+						printf("\nold distance: %f %f %f\n", x4(0), x4(1), x4(2));
+						printf("\ncp: %f %f %f\n", cp(0), cp(1), cp(2));
+						printf("\nbarycentric coords: %f %f %f\n", w(0), w(1), w(2));
+						printf("radius tri is %f, radius particle is %f\n", radius[tri], radius[particle]);
+
+//						w(0) = MAX(1.0, w(0));
+//						w(0) = MIN(0.0, w(0));
+//
+//						w(1) = MAX(1.0, w(1));
+//						w(1) = MIN(0.0, w(1));
+//
+//						w(2) = MAX(1.0, w(2));
+//						w(2) = MIN(0.0, w(2));
+//
+//						cp = w(0) * x1 + w(1) * x2 + w(2) * x3;
+//						printf("\ncp after clamping: %f %f %f\n", cp(0), cp(1), cp(2));
+
 						/*
 						 * reflect velocity if it points toward triangle
 						 */
 						Vector3d vnew, v_old;
 						v_old << v[particle][0], v[particle][1], v[particle][2];
 						if (v_old.dot(normal) < 0.0) {
-							//printf("flipping velocity\n");
+							printf("flipping velocity\n");
 							vnew = 1.0 * (-2.0 * v_old.dot(normal) * normal + v_old);
 							v[particle][0] = vnew(0);
 							v[particle][1] = vnew(1);
 							v[particle][2] = vnew(2);
 						}
 
-						offset = touch_distance - r;
+						offset = touch_distance * normal;
+
+						Vector3d newpos;
+						newpos = cp + offset;
+						double check_dist = (newpos - cp).norm();
+						printf("new distance after offset: %f, touch distance = %f\n", check_dist, touch_distance);
+
 //						printf("offset is %f\n", offset);
 						x[particle][0] = cp(0) + touch_distance * normal(0);
 						x[particle][1] = cp(1) + touch_distance * normal(1);
 						x[particle][2] = cp(2) + touch_distance * normal(2);
 
+						printf("offsetting particle by %f %f %f\n", offset(0), offset(1), offset(2));
 //						printf("moving particle to new position with z=%f\n", x[particle][2]);
 //						printf("normal is %f %f %f\n", normal(0), normal(1), normal(2));
 //						printf("x4cp is %f %f %f\n", x4cp(0), x4cp(1), x4cp(2));
