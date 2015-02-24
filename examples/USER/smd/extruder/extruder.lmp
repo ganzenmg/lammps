@@ -35,13 +35,12 @@ set             group all diameter ${h}
 set             group all density ${rho}
 set             group all meso_rho ${rho}
 set             group particles contact_radius ${cr0}
-#pair_style      hybrid/overlay ulsph smd/tri_surface 1.0
-#pair_coeff      1 1 ulsph *COMMON ${rho} ${c0} 1.0 1 &
-#		*EOS_TAIT 2 &
-#	        *END
-
-pair_style      hybrid/overlay smd/hertz 1.0 smd/tri_surface 1.0
-pair_coeff      1 1 smd/hertz ${contact_stiffness}
+pair_style      hybrid/overlay ulsph smd/tri_surface 1.0
+pair_coeff      1 1 ulsph *COMMON ${rho} ${c0} 1.0 1 &
+		*EOS_TAIT 2 &
+	        *END
+#pair_style      hybrid/overlay smd/hertz 1.0 smd/tri_surface 1.0
+#pair_coeff      1 1 smd/hertz ${contact_stiffness}
 pair_coeff      2 2 none
 pair_coeff      1 2 smd/tri_surface ${contact_stiffness} 
 
@@ -68,9 +67,19 @@ thermo_modify   lost warn
 #dump_modify     dump_vtk first yes
 
 compute         rho particles smd/rho
+compute         F all smd/triangle_vertices 
 
-dump            dump_custom all custom 10 dump.LAMMPS id type x y z vx vy vz c_rho
+dump            dump_custom particles custom 10 dump.LAMMPS id type mol x y z vx vy vz c_rho
 dump_modify     dump_custom first yes
+
+dump            dump_extruder extruder custom 10 dump_extruder.LAMMPS id type mol x y z &
+                c_F[1] c_F[2] c_F[3] c_F[4] c_F[5] c_F[6] c_F[7] c_F[8] c_F[9]
+dump_modify     dump_extruder first yes
+
+
+dump            dump_housing housing custom 999999999 dump_housing.LAMMPS id type mol x y z &
+                c_F[1] c_F[2] c_F[3] c_F[4] c_F[5] c_F[6] c_F[7] c_F[8] c_F[9]
+dump_modify     dump_housing first yes
 
 run 0
 
@@ -83,12 +92,12 @@ timestep        0.1
 #fix             dtfix all smd/adjust_dt 0.1
 fix             integration_fix particles smd/integrate_ulsph limit_velocity 1.0 adjust_radius 1.2
 fix             gfix particles gravity -9.81e-3 vector 0 0 1
-fix             boundary_fix extruder smd/move_tri_surf *ROTATE 0 0 0 1 0 0 -2.0e-2
+fix             boundary_fix extruder smd/move_tri_surf *ROTATE 0 0 0 1 0 0 100
 fix             bfix all balance 500 0.9 rcb
 #fix 2 all balance 1000 1.05 shift x 10 1.05
 fix             1 particles viscous 0.00000001
 
-run             50000
+run             10000
 
 
 

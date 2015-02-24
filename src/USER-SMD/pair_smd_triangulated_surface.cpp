@@ -85,12 +85,11 @@ PairTriSurf::~PairTriSurf() {
 
 void PairTriSurf::compute(int eflag, int vflag) {
 	int i, j, ii, jj, inum, jnum, itype, jtype;
-	double xtmp, ytmp, ztmp, delx, dely, delz;
 	double rsq, r, evdwl, fpair;
 	int *ilist, *jlist, *numneigh, **firstneigh;
-	double rcut, r_geom, delta, ri, rj;
+	double rcut, r_geom, delta, ri, rj, touch_distance;
 	int tri, particle;
-	Vector3d normal, x1, x2, x3, x4, x13, x23, x43, w, cp, x4cp;
+	Vector3d normal, x1, x2, x3, x4, x13, x23, x43, w, cp, x4cp, vnew, v_old;;
 	Vector3d xi, x_center, dx;
 	Matrix2d C;
 	Vector2d w2d, rhs;
@@ -111,7 +110,6 @@ void PairTriSurf::compute(int eflag, int vflag) {
 	int nlocal = atom->nlocal;
 	double *radius = atom->contact_radius;
 	double rcutSq;
-	double delx0, dely0, delz0, rSq0;
 	Vector3d offset;
 
 	int newton_pair = force->newton_pair;
@@ -224,31 +222,31 @@ void PairTriSurf::compute(int eflag, int vflag) {
 
 					w(0) = w2d(0);
 					w(1) = w2d(1);
-
-
-					/*
-					 * clamp barycentric coords
-					 */
-					w(0) = MAX(1.0, w(0));
-					w(0) = MIN(0.0, w(0));
-					w(1) = MAX(1.0, w(1));
-					w(1) = MIN(0.0, w(1));
-
 					w(2) = 1.0 - (w(0) + w(1));
 
-//					w(2) = MAX(1.0, w(2));
-//					w(2) = MIN(0.0, w(2));
+					/*
+					 * skip this interaction if barycentric coordinate is outside triangle
+					 * this is important for collissions which occur in or nearly in the plane of the triangle,
+					 * i.e., a node to edge contact.
+					 */
 
-//				printf("\nhere is w: %f %f %f\n", w(0), w(1), w(2));
-//				printf("\nhere is x1: %f %f %f\n", x1(0), x1(1), x1(2));
-//				printf("\nhere is x2: %f %f %f\n", x2(0), x2(1), x2(2));
-//				printf("\nhere is x3: %f %f %f\n", x3(0), x23(1), x3(2));
+					if ((w(0) > 1.0) || (w(0) < 0.0)) {
+						continue;
+					}
+
+					if ((w(1) > 1.0) || (w(1) < 0.0)) {
+						continue;
+					}
+
+					if ((w(2) > 1.0) || (w(2) < 0.0)) {
+						continue;
+					}
 
 					/*
 					 * determine closest point in triangle plane
+					 * This is actually the closest point _inside_ the triangle due to the checks above
 					 */
 					cp = w(0) * x1 + w(1) * x2 + w(2) * x3;
-					//printf("here is cp: %f %f %f\n", cp(0), cp(1), cp(2));
 
 					/*
 					 * distance to closest point
@@ -264,18 +262,14 @@ void PairTriSurf::compute(int eflag, int vflag) {
 					}
 
 					/*
-					 * check that normal and x4cp are parallel -- otherwise, particle does
-					 * not project onto triangle plane
+					 * distance to closest point in triangle
 					 */
 
 					r = x4cp.norm();
-//					if (fabs(x4cp.dot(normal) / r - 1.0) > 1.0e-3) {
-//						printf("normal is: %f %f %f, norm is %f\n", normal(0), normal(1), normal(2), normal.norm());
-//						printf("x4cp   is: %f %f %f\n", x4cp(0) /r, x4cp(1)/r, x4cp(2)/r);
-//						printf("dot productr is %f\n", x4cp.dot(normal) / r);
-//						error->one(FLERR, "");
-//					}
 
+					/*
+					 * penalty force pushes particle away from triangle
+					 */
 					if (r < 1.0 * radius[particle]) {
 
 						delta = radius[particle] - r; // overlap distance
@@ -285,7 +279,7 @@ void PairTriSurf::compute(int eflag, int vflag) {
 						evdwl = r * fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
 
 						if (evflag) {
-							ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, delx, dely, delz);
+							ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, x4cp(0), x4cp(1), x4cp(2));
 						}
 
 						f[i][0] += x4cp(0) * fpair;
@@ -295,59 +289,28 @@ void PairTriSurf::compute(int eflag, int vflag) {
 					}
 
 					/*
-					 * check if particle is close to triangle surface. if so, put it just on the surface.
+					 * if particle comes too close to triangle, reflect its velocity and explicitely move it away
 					 */
 
-					double touch_distance = 0.5 * radius[particle];
-
+					touch_distance = 0.5 * radius[particle];
 					if (r < touch_distance) {
-
-						printf("\nold distance: %f %f %f\n", x4(0), x4(1), x4(2));
-						printf("\ncp: %f %f %f\n", cp(0), cp(1), cp(2));
-						printf("\nbarycentric coords: %f %f %f\n", w(0), w(1), w(2));
-						printf("radius tri is %f, radius particle is %f\n", radius[tri], radius[particle]);
-
-//						w(0) = MAX(1.0, w(0));
-//						w(0) = MIN(0.0, w(0));
-//
-//						w(1) = MAX(1.0, w(1));
-//						w(1) = MIN(0.0, w(1));
-//
-//						w(2) = MAX(1.0, w(2));
-//						w(2) = MIN(0.0, w(2));
-//
-//						cp = w(0) * x1 + w(1) * x2 + w(2) * x3;
-//						printf("\ncp after clamping: %f %f %f\n", cp(0), cp(1), cp(2));
 
 						/*
 						 * reflect velocity if it points toward triangle
 						 */
-						Vector3d vnew, v_old;
+
 						v_old << v[particle][0], v[particle][1], v[particle][2];
 						if (v_old.dot(normal) < 0.0) {
-							printf("flipping velocity\n");
+							//printf("flipping velocity\n");
 							vnew = 1.0 * (-2.0 * v_old.dot(normal) * normal + v_old);
 							v[particle][0] = vnew(0);
 							v[particle][1] = vnew(1);
 							v[particle][2] = vnew(2);
 						}
 
-						offset = touch_distance * normal;
-
-						Vector3d newpos;
-						newpos = cp + offset;
-						double check_dist = (newpos - cp).norm();
-						printf("new distance after offset: %f, touch distance = %f\n", check_dist, touch_distance);
-
-//						printf("offset is %f\n", offset);
 						x[particle][0] = cp(0) + touch_distance * normal(0);
 						x[particle][1] = cp(1) + touch_distance * normal(1);
 						x[particle][2] = cp(2) + touch_distance * normal(2);
-
-						printf("offsetting particle by %f %f %f\n", offset(0), offset(1), offset(2));
-//						printf("moving particle to new position with z=%f\n", x[particle][2]);
-//						printf("normal is %f %f %f\n", normal(0), normal(1), normal(2));
-//						printf("x4cp is %f %f %f\n", x4cp(0), x4cp(1), x4cp(2));
 
 					}
 

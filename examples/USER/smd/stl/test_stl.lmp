@@ -64,7 +64,7 @@ fix             gfix particles gravity 9.81e-3 vector 0 1 0
 fix             1 particles smd/integrate_ulsph xsph adjust_radius 1.2
 fix             mesh_fix mesh smd/move_tri_surf *ROTATE 0 0 0 0 1 0 10.0
 
-run             3000
+run             30000
 
 
 
