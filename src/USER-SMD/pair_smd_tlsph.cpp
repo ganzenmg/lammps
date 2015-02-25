@@ -22,6 +22,7 @@
  See the README file in the top-level LAMMPS directory.
  ------------------------------------------------------------------------- */
 
+#include "group.h"
 #include "math.h"
 #include "float.h"
 #include "stdlib.h"
@@ -1627,6 +1628,10 @@ void PairTlsph::init_style() {
 	MPI_DOUBLE, MPI_MAX, world);
 
 	// if first init, create Fix needed for storing reference configuration neighbors
+
+	int igroup = group->find("tlsph");
+	if (igroup == -1) error->all(FLERR,"Pair style tlsph requires its particles to be part of a group named tlsph. This group does not exist.");
+
 	if (fix_tlsph_reference_configuration == NULL) {
 		char **fixarg = new char*[3];
 		fixarg[0] = (char *) "SMD_TLSPH_NEIGHBORS";
