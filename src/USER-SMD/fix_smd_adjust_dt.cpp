@@ -109,8 +109,9 @@ void FixSMDTlsphDtReset::end_of_step() {
 	double *dtCFL_TLSPH = (double *) force->pair->extract("smd/tlsph/dtCFL_ptr", itmp);
 	double *dtCFL_ULSPH = (double *) force->pair->extract("smd/ulsph/dtCFL_ptr", itmp);
 	double *dt_TRI = (double *) force->pair->extract("smd/tri_surface/stable_time_increment_ptr", itmp);
+	double *dt_HERTZ = (double *) force->pair->extract("smd/hertz/stable_time_increment_ptr", itmp);
 
-	if ((dtCFL_TLSPH == NULL) && (dtCFL_ULSPH == NULL) && (dt_TRI == NULL)) {
+	if ((dtCFL_TLSPH == NULL) && (dtCFL_ULSPH == NULL) && (dt_TRI == NULL) && (dt_HERTZ == NULL)) {
 		error->all(FLERR, "fix smd/adjust_dt failed to access a valid dtCFL");
 	}
 
@@ -124,6 +125,10 @@ void FixSMDTlsphDtReset::end_of_step() {
 
 	if (dt_TRI != NULL) {
 		dtmin = MIN(dtmin, *dt_TRI);
+	}
+
+	if (dt_HERTZ != NULL) {
+		dtmin = MIN(dtmin, *dt_HERTZ);
 	}
 
 	dtmin *= safety_factor; // apply safety factor

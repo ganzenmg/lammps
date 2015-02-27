@@ -47,6 +47,7 @@ class PairHertz : public Pair {
   void init_style();
   void init_list(int, class NeighList *);
   virtual double memory_usage();
+  void *extract(const char *, int &);
 
  protected:
   double **bulkmodulus;
@@ -56,6 +57,7 @@ class PairHertz : public Pair {
   double *maxrad_dynamic,*maxrad_frozen;
 
   double scale;
+  double stable_time_increment; // stable time step size
 
   void allocate();
 };

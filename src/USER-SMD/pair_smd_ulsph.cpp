@@ -267,7 +267,7 @@ void PairULSPH::PreCompute() {
 				}
 
 				// velocity gradient L
-				Ltmp = -dv * g.transpose();
+				Ltmp = dv * g.transpose();
 				L[i] += jvol * Ltmp;
 
 				numNeighs[i] += 1;
@@ -388,7 +388,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	}
 
 	//PairULSPH::PreCompute_DensitySummation();
-	//PairULSPH::PreCompute();
+	//PairULSPH::PreCompute(); // get velocity gradient
 	PairULSPH::ComputePressure();
 
 	/*
@@ -598,7 +598,7 @@ void PairULSPH::ComputePressure() {
 	double pFinal;
 	int i, itype;
 	int nlocal = atom->nlocal;
-	Matrix3d D, W, V, sigma_diag;
+	Matrix3d D, Ddev, W, V, sigma_diag;
 	Matrix3d eye;
 
 	dtCFL = 1.0e22;
@@ -627,6 +627,15 @@ void PairULSPH::ComputePressure() {
 						stressTensor[i](0, 0) = -pFinal;
 						stressTensor[i](1, 1) = -pFinal;
 						stressTensor[i](2, 2) = -pFinal;
+
+						/*
+						 * viscosity model
+						 */
+//						D = 0.5 * (L[i] + L[i].transpose());
+//						stressTensor[i] += 1.0e-7 * D;
+
+
+
 					}
 				}
 				break;

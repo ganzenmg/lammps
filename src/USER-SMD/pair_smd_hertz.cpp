@@ -83,7 +83,8 @@ void PairHertz::compute(int eflag, int vflag) {
 	double xtmp, ytmp, ztmp, delx, dely, delz;
 	double rsq, r, evdwl, fpair;
 	int *ilist, *jlist, *numneigh, **firstneigh;
-	double rcut, r_geom, delta, ri, rj;
+	double rcut, r_geom, delta, ri, rj, dt_crit;
+	double *rmass = atom->rmass;
 
 	evdwl = 0.0;
 	if (eflag || vflag)
@@ -107,6 +108,8 @@ void PairHertz::compute(int eflag, int vflag) {
 	ilist = list->ilist;
 	numneigh = list->numneigh;
 	firstneigh = list->firstneigh;
+
+	stable_time_increment = 1.0e22;
 
 	// loop over neighbors of my atoms
 	for (ii = 0; ii < inum; ii++) {
@@ -162,12 +165,20 @@ void PairHertz::compute(int eflag, int vflag) {
 				r_geom = ri * rj / rcut;
 				if (domain->dimension == 3) {
 					//assuming poisson ratio = 1/4 for 3d
-					fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom) / (r + 1.0e-2 * rcut); //  units:
-					evdwl = r * fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
+					fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom); //  units: N
+					evdwl = fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
 				} else {
 					//assuming poisson ratio = 1/3 for 2d -- one factor of delta missing compared to 3d
-					fpair = 0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom) / (r + 1.0e-2 * rcut);
-					evdwl = r * fpair * 0.6666666666667e0 * delta;
+					fpair = 0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom); // units: N
+					evdwl = fpair * 0.6666666666667e0 * delta;
+				}
+
+				dt_crit = 3.14 * sqrt(0.5 * (rmass[i] + rmass[j]) / (fpair / delta));
+				stable_time_increment = MIN(stable_time_increment, dt_crit);
+				if (r > 2.0e-16) {
+					fpair /= r; // divide by r and multiply with non-normalized distance vector
+				} else {
+					fpair = 0.0;
 				}
 
 				/*
@@ -192,6 +203,12 @@ void PairHertz::compute(int eflag, int vflag) {
 			}
 		}
 	}
+
+//	double stable_time_increment_all = 0.0;
+//	MPI_Allreduce(&stable_time_increment, &stable_time_increment_all, 1, MPI_DOUBLE, MPI_MIN, world);
+//	if (comm->me == 0) {
+//		printf("stable time step for pair smd/hertz is %f\n", stable_time_increment_all);
+//	}
 }
 
 /* ----------------------------------------------------------------------
@@ -355,3 +372,12 @@ double PairHertz::memory_usage() {
 	return 0.0;
 }
 
+void *PairHertz::extract(const char *str, int &i) {
+	//printf("in PairTriSurf::extract\n");
+	if (strcmp(str, "smd/hertz/stable_time_increment_ptr") == 0) {
+		return (void *) &stable_time_increment;
+	}
+
+	return NULL;
+
+}
