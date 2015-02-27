@@ -1,9 +1,9 @@
 # create flow by heating and cooling
-variable        l0 equal 0.5 # initial particle lattice spacing
+variable        l0 equal 1.0 # initial particle lattice spacing
 variable        rho equal 1.0e-6 # mass density ulsph
 variable        h equal 2.5*${l0} # SPH kernel diameter
 variable        c0 equal 1.0 # speed of sound for ulsph
-variable        contact_stiffness equal 1*0.5*${c0}^2*${rho} # contact force amplitude
+variable        contact_stiffness equal 100*${c0}^2*${rho} # contact force amplitude
 variable        skin equal 2*${l0} # Verlet list range
 variable        vol_one equal ${l0}^3 # initial particle volume for 2d simulation
 variable        cr0 equal ${l0}/2
@@ -89,10 +89,10 @@ balance         0.9 rcb
 #balance 1.0 shift x 5 1.05
 
 timestep        0.1
-#fix             dtfix all smd/adjust_dt 0.1
+fix             dtfix all smd/adjust_dt 0.1
 fix             integration_fix particles smd/integrate_ulsph limit_velocity 1.0 adjust_radius 1.2
 fix             gfix particles gravity -9.81e-3 vector 0 0 1
-fix             boundary_fix extruder smd/move_tri_surf *ROTATE 0 0 0 1 0 0 100
+fix             boundary_fix extruder smd/move_tri_surf *ROTATE 0 0 0 -1 0 0 100
 fix             bfix all balance 500 0.9 rcb
 #fix 2 all balance 1000 1.05 shift x 10 1.05
 fix             1 particles viscous 0.00000001

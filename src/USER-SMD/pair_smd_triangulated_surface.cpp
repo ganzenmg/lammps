@@ -87,9 +87,10 @@ void PairTriSurf::compute(int eflag, int vflag) {
 	int i, j, ii, jj, inum, jnum, itype, jtype;
 	double rsq, r, evdwl, fpair;
 	int *ilist, *jlist, *numneigh, **firstneigh;
-	double rcut, r_geom, delta, ri, rj, touch_distance;
+	double rcut, r_geom, delta, ri, rj, touch_distance, dt_crit;
 	int tri, particle;
-	Vector3d normal, x1, x2, x3, x4, x13, x23, x43, w, cp, x4cp, vnew, v_old;;
+	Vector3d normal, x1, x2, x3, x4, x13, x23, x43, w, cp, x4cp, vnew, v_old;
+	;
 	Vector3d xi, x_center, dx;
 	Matrix2d C;
 	Vector2d w2d, rhs;
@@ -106,6 +107,7 @@ void PairTriSurf::compute(int eflag, int vflag) {
 	double **x = atom->x;
 	double **x0 = atom->x0;
 	double **v = atom->v;
+	double *rmass = atom->rmass;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
 	double *radius = atom->contact_radius;
@@ -121,6 +123,7 @@ void PairTriSurf::compute(int eflag, int vflag) {
 	firstneigh = list->firstneigh;
 
 	int max_neighs = 0;
+	stable_time_increment = 1.0e22;
 
 	// loop over neighbors of my atoms using a full neighbor list
 	for (ii = 0; ii < inum; ii++) {
@@ -198,55 +201,7 @@ void PairTriSurf::compute(int eflag, int vflag) {
 					x3(1) = tlsph_fold[tri][7];
 					x3(2) = tlsph_fold[tri][8];
 
-					/*
-					 * pre-compute stuff
-					 */
-					x13 = x1 - x3;
-					x23 = x2 - x3;
-					x43 = x4 - x3;
-
-					/*
-					 * get barycentric coordinates, see
-					 * "Robust Treatment of Collisions, Contact and Friction for Cloth Animation",
-					 * Robert Bridson, Ronald Fedkiw, John Anderson
-					 */
-					C(0, 0) = x13.dot(x13);
-					C(0, 1) = x13.dot(x23);
-					C(1, 0) = x13.dot(x23);
-					C(1, 1) = x23.dot(x23);
-
-					rhs(0) = x13.dot(x43);
-					rhs(1) = x23.dot(x43);
-
-					w2d = C.inverse() * rhs;
-
-					w(0) = w2d(0);
-					w(1) = w2d(1);
-					w(2) = 1.0 - (w(0) + w(1));
-
-					/*
-					 * skip this interaction if barycentric coordinate is outside triangle
-					 * this is important for collissions which occur in or nearly in the plane of the triangle,
-					 * i.e., a node to edge contact.
-					 */
-
-					if ((w(0) > 1.0) || (w(0) < 0.0)) {
-						continue;
-					}
-
-					if ((w(1) > 1.0) || (w(1) < 0.0)) {
-						continue;
-					}
-
-					if ((w(2) > 1.0) || (w(2) < 0.0)) {
-						continue;
-					}
-
-					/*
-					 * determine closest point in triangle plane
-					 * This is actually the closest point _inside_ the triangle due to the checks above
-					 */
-					cp = w(0) * x1 + w(1) * x2 + w(2) * x3;
+					PointTriangleDistance(x4, x1, x2, x3, cp, r);
 
 					/*
 					 * distance to closest point
@@ -262,29 +217,26 @@ void PairTriSurf::compute(int eflag, int vflag) {
 					}
 
 					/*
-					 * distance to closest point in triangle
-					 */
-
-					r = x4cp.norm();
-
-					/*
 					 * penalty force pushes particle away from triangle
 					 */
 					if (r < 1.0 * radius[particle]) {
 
 						delta = radius[particle] - r; // overlap distance
 						r_geom = radius[particle];
-						fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom)
-								/ (r + 1.0e-2 * radius[particle]); //  units:
+						fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom);
+						dt_crit = 3.14 * sqrt(rmass[particle] / (fpair / delta));
+						stable_time_increment = MIN(stable_time_increment, dt_crit);
+
 						evdwl = r * fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
+
+						fpair /= (r + 1.0e-2 * radius[particle]); // divide by r + softening and multiply with non-normalized distance vector
+						f[i][0] += x4cp(0) * fpair;
+						f[i][1] += x4cp(1) * fpair;
+						f[i][2] += x4cp(2) * fpair;
 
 						if (evflag) {
 							ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, x4cp(0), x4cp(1), x4cp(2));
 						}
-
-						f[i][0] += x4cp(0) * fpair;
-						f[i][1] += x4cp(1) * fpair;
-						f[i][2] += x4cp(2) * fpair;
 
 					}
 
@@ -292,17 +244,19 @@ void PairTriSurf::compute(int eflag, int vflag) {
 					 * if particle comes too close to triangle, reflect its velocity and explicitely move it away
 					 */
 
-					touch_distance = 0.5 * radius[particle];
+					touch_distance = 0.2 * radius[particle];
 					if (r < touch_distance) {
 
 						/*
 						 * reflect velocity if it points toward triangle
 						 */
 
+						normal = x4cp / r;
+
 						v_old << v[particle][0], v[particle][1], v[particle][2];
 						if (v_old.dot(normal) < 0.0) {
 							//printf("flipping velocity\n");
-							vnew = 1.0 * (-2.0 * v_old.dot(normal) * normal + v_old);
+							vnew = 0.0 * (-2.0 * v_old.dot(normal) * normal + v_old);
 							v[particle][0] = vnew(0);
 							v[particle][1] = vnew(1);
 							v[particle][2] = vnew(2);
@@ -311,7 +265,6 @@ void PairTriSurf::compute(int eflag, int vflag) {
 						x[particle][0] = cp(0) + touch_distance * normal(0);
 						x[particle][1] = cp(1) + touch_distance * normal(1);
 						x[particle][2] = cp(2) + touch_distance * normal(2);
-
 					}
 
 				}
@@ -324,6 +277,12 @@ void PairTriSurf::compute(int eflag, int vflag) {
 //	if (comm->me == 0) {
 //		printf("max. neighs in tri pair is %d\n", max_neighs_all);
 //	}
+//
+//		double stable_time_increment_all = 0.0;
+//		MPI_Allreduce(&stable_time_increment, &stable_time_increment_all, 1, MPI_DOUBLE, MPI_MIN, world);
+//		if (comm->me == 0) {
+//			printf("stable time step tri pair is %f\n", stable_time_increment_all);
+//		}
 }
 
 /* ----------------------------------------------------------------------
@@ -493,3 +452,384 @@ double PairTriSurf::memory_usage() {
 	return 0.0;
 }
 
+/*
+ * distance between triangle and point
+ */
+/*
+ function [dist,PP0] = pointTriangleDistance(TRI,P)
+ % calculate distance between a point and a triangle in 3D
+ % SYNTAX
+ %   dist = pointTriangleDistance(TRI,P)
+ %   [dist,PP0] = pointTriangleDistance(TRI,P)
+ %
+ % DESCRIPTION
+ %   Calculate the distance of a given point P from a triangle TRI.
+ %   Point P is a row vector of the form 1x3. The triangle is a matrix
+ %   formed by three rows of points TRI = [P1;P2;P3] each of size 1x3.
+ %   dist = pointTriangleDistance(TRI,P) returns the distance of the point P
+ %   to the triangle TRI.
+ %   [dist,PP0] = pointTriangleDistance(TRI,P) additionally returns the
+ %   closest point PP0 to P on the triangle TRI.
+ %
+ % Author: Gwendolyn Fischer
+ % Release: 1.0
+ % Release date: 09/02/02
+ % Release: 1.1 Fixed Bug because of normalization
+ % Release: 1.2 Fixed Bug because of typo in region 5 20101013
+ % Release: 1.3 Fixed Bug because of typo in region 2 20101014
+
+ % Possible extention could be a version tailored not to return the distance
+ % and additionally the closest point, but instead return only the closest
+ % point. Could lead to a small speed gain.
+
+ % Example:
+ % %% The Problem
+ % P0 = [0.5 -0.3 0.5];
+ %
+ % P1 = [0 -1 0];
+ % P2 = [1  0 0];
+ % P3 = [0  0 0];
+ %
+ % vertices = [P1; P2; P3];
+ % faces = [1 2 3];
+ %
+ % %% The Engine
+ % [dist,PP0] = pointTriangleDistance([P1;P2;P3],P0);
+ %
+ % %% Visualization
+ % [x,y,z] = sphere(20);
+ % x = dist*x+P0(1);
+ % y = dist*y+P0(2);
+ % z = dist*z+P0(3);
+ %
+ % figure
+ % hold all
+ % patch('Vertices',vertices,'Faces',faces,'FaceColor','r','FaceAlpha',0.8);
+ % plot3(P0(1),P0(2),P0(3),'b*');
+ % plot3(PP0(1),PP0(2),PP0(3),'*g')
+ % surf(x,y,z,'FaceColor','b','FaceAlpha',0.3)
+ % view(3)
+
+ % The algorithm is based on
+ % "David Eberly, 'Distance Between Point and Triangle in 3D',
+ % Geometric Tools, LLC, (1999)"
+ % http:\\www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
+ %
+ %        ^t
+ %  \     |
+ %   \reg2|
+ %    \   |
+ %     \  |
+ %      \ |
+ %       \|
+ %        *P2
+ %        |\
+%        | \
+%  reg3  |  \ reg1
+ %        |   \
+%        |reg0\
+%        |     \
+%        |      \ P1
+ % -------*-------*------->s
+ %        |P0      \
+%  reg4  | reg5    \ reg6
+ */
+
+//void PairTriSurf::PointTriangleDistance(const Vector3d P, const Vector3d TRI1, const Vector3d TRI2, const Vector3d TRI3,
+//		Vector3d &CP, double &dist) {
+//
+//	Vector3d B, E0, E1, D;
+//	double a, b, c, d, e, f;
+//	double det, s, t, sqrDistance, tmp0, tmp1, numer, denom, invDet;
+//
+//	// rewrite triangle in normal form
+//	B = TRI1;
+//	E0 = TRI2 - B;
+//	E1 = TRI3 - B;
+//
+//	D = B - P;
+//	a = E0.dot(E0);
+//	b = E0.dot(E1);
+//	c = E1.dot(E1);
+//	d = E0.dot(D);
+//	e = E1.dot(D);
+//	f = D.dot(D);
+//
+//	det = a * c - b * b;
+//	//% do we have to use abs here?
+//	s = b * e - c * d;
+//	t = b * d - a * e;
+//
+//	//% Terible tree of conditionals to determine in which region of the diagram
+//	//% shown above the projection of the point into the triangle-plane lies.
+//	if ((s + t) <= det) {
+//		if (s < 0) {
+//			if (t < 0) {
+//				// %region4
+//				if (d < 0) {
+//					t = 0;
+//					if (-d >= a) {
+//						s = 1;
+//						sqrDistance = a + 2 * d + f;
+//					} else {
+//						s = -d / a;
+//						sqrDistance = d * s + f;
+//					}
+//				} else {
+//					s = 0;
+//					if (e >= 0) {
+//						t = 0;
+//						sqrDistance = f;
+//					} else {
+//						if (-e >= c) {
+//							t = 1;
+//							sqrDistance = c + 2 * e + f;
+//						} else {
+//							t = -e / c;
+//							sqrDistance = e * t + f;
+//						}
+//					}
+//				}
+//				// end % of region 4
+//			} else {
+//				// % region 3
+//				s = 0;
+//				if (e >= 0) {
+//					t = 0;
+//					sqrDistance = f;
+//				} else {
+//					if (-e >= c) {
+//						t = 1;
+//						sqrDistance = c + 2 * e + f;
+//					} else {
+//						t = -e / c;
+//						sqrDistance = e * t + f;
+//					}
+//				}
+//			}
+//			// end of region 3
+//		} else {
+//			if (t < 0) {
+//				//% region 5
+//				t = 0;
+//				if (d >= 0) {
+//					s = 0;
+//					sqrDistance = f;
+//				} else {
+//					if (-d >= a) {
+//						s = 1;
+//						sqrDistance = a + 2 * d + f;
+//					} else {
+//						s = -d / a;
+//						sqrDistance = d * s + f;
+//					}
+//				}
+//			} else {
+//				// region 0
+//				invDet = 1 / det;
+//				s = s * invDet;
+//				t = t * invDet;
+//				sqrDistance = s * (a * s + b * t + 2 * d) + t * (b * s + c * t + 2 * e) + f;
+//			}
+//		}
+//	} else {
+//		if (s < 0) {
+//			// % region 2
+//			tmp0 = b + d;
+//			tmp1 = c + e;
+//			if (tmp1 > tmp0) { //% minimum on edge s+t=1
+//				numer = tmp1 - tmp0;
+//				denom = a - 2 * b + c;
+//				if (numer >= denom) {
+//					s = 1;
+//					t = 0;
+//					sqrDistance = a + 2 * d + f;
+//				} else {
+//					s = numer / denom;
+//					t = 1 - s;
+//					sqrDistance = s * (a * s + b * t + 2 * d) + t * (b * s + c * t + 2 * e) + f;
+//				}
+//			} else
+//				// % minimum on edge s=0
+//				s = 0;
+//			if (tmp1 <= 0) {
+//				t = 1;
+//				sqrDistance = c + 2 * e + f;
+//			} else {
+//				if (e >= 0) {
+//					t = 0;
+//					sqrDistance = f;
+//				} else {
+//					t = -e / c;
+//					sqrDistance = e * t + f;
+//				}
+//			}
+//		} //end % of region	2
+//		else {
+//			if (t < 0) {
+//				// %region6
+//				tmp0 = b + e;
+//				tmp1 = a + d;
+//				if (tmp1 > tmp0) {
+//					numer = tmp1 - tmp0;
+//					denom = a - 2 * b + c;
+//					if (numer >= denom) {
+//						t = 1;
+//						s = 0;
+//						sqrDistance = c + 2 * e + f;
+//					} else {
+//						t = numer / denom;
+//						s = 1 - t;
+//						sqrDistance = s * (a * s + b * t + 2 * d) + t * (b * s + c * t + 2 * e) + f;
+//					}
+//				} else {
+//					t = 0;
+//					if (tmp1 <= 0) {
+//						s = 1;
+//						sqrDistance = a + 2 * d + f;
+//					} else {
+//						if (d >= 0) {
+//							s = 0;
+//							sqrDistance = f;
+//						} else {
+//							s = -d / a;
+//							sqrDistance = d * s + f;
+//						}
+//					}
+//				} // % end region 6
+//			} else {
+//				//% region 1
+//				numer = c + e - b - d;
+//				if (numer <= 0) {
+//					s = 0;
+//					t = 1;
+//					sqrDistance = c + 2 * e + f;
+//				} else {
+//					denom = a - 2 * b + c;
+//					if (numer >= denom) {
+//						s = 1;
+//						t = 0;
+//						sqrDistance = a + 2 * d + f;
+//					} else {
+//						s = numer / denom;
+//						t = 1 - s;
+//						sqrDistance = s * (a * s + b * t + 2 * d) + t * (b * s + c * t + 2 * e) + f;
+//					}
+//				} //% end of region 1
+//			}
+//		}
+//	}
+//
+//	// % account for numerical round-off error
+//	if (sqrDistance < 0) {
+//		sqrDistance = 0;
+//	}
+//
+//	dist = sqrt(sqrDistance);
+//
+//	// closest point
+//	CP = B + s * E0 + t * E1;
+//
+//}
+/*
+ * % The algorithm is based on
+ % "David Eberly, 'Distance Between Point and Triangle in 3D',
+ % Geometric Tools, LLC, (1999)"
+ % http:\\www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
+ */
+
+void PairTriSurf::PointTriangleDistance(const Vector3d sourcePosition, const Vector3d TRI0, const Vector3d TRI1,
+		const Vector3d TRI2, Vector3d &CP, double &dist) {
+
+	Vector3d edge0 = TRI1 - TRI0;
+	Vector3d edge1 = TRI2 - TRI0;
+	Vector3d v0 = TRI0 - sourcePosition;
+
+	double a = edge0.dot(edge0);
+	double b = edge0.dot(edge1);
+	double c = edge1.dot(edge1);
+	double d = edge0.dot(v0);
+	double e = edge1.dot(v0);
+
+	double det = a * c - b * b;
+	double s = b * e - c * d;
+	double t = b * d - a * e;
+
+	if (s + t < det) {
+		if (s < 0.f) {
+			if (t < 0.f) {
+				if (d < 0.f) {
+					s = clamp(-d / a, 0.f, 1.f);
+					t = 0.f;
+				} else {
+					s = 0.f;
+					t = clamp(-e / c, 0.f, 1.f);
+				}
+			} else {
+				s = 0.f;
+				t = clamp(-e / c, 0.f, 1.f);
+			}
+		} else if (t < 0.f) {
+			s = clamp(-d / a, 0.f, 1.f);
+			t = 0.f;
+		} else {
+			float invDet = 1.f / det;
+			s *= invDet;
+			t *= invDet;
+		}
+	} else {
+		if (s < 0.f) {
+			float tmp0 = b + d;
+			float tmp1 = c + e;
+			if (tmp1 > tmp0) {
+				float numer = tmp1 - tmp0;
+				float denom = a - 2 * b + c;
+				s = clamp(numer / denom, 0.f, 1.f);
+				t = 1 - s;
+			} else {
+				t = clamp(-e / c, 0.f, 1.f);
+				s = 0.f;
+			}
+		} else if (t < 0.f) {
+			if (a + d > b + e) {
+				float numer = c + e - b - d;
+				float denom = a - 2 * b + c;
+				s = clamp(numer / denom, 0.f, 1.f);
+				t = 1 - s;
+			} else {
+				s = clamp(-e / c, 0.f, 1.f);
+				t = 0.f;
+			}
+		} else {
+			float numer = c + e - b - d;
+			float denom = a - 2 * b + c;
+			s = clamp(numer / denom, 0.f, 1.f);
+			t = 1.f - s;
+		}
+	}
+
+	CP = TRI0 + s * edge0 + t * edge1;
+	dist = (CP - sourcePosition).norm();
+
+}
+
+double PairTriSurf::clamp(const double a, const double min, const double max) {
+	if (a < min) {
+		return min;
+	} else if (a > max) {
+		return max;
+	} else {
+		return a;
+	}
+}
+
+
+void *PairTriSurf::extract(const char *str, int &i) {
+	//printf("in PairTriSurf::extract\n");
+	if (strcmp(str, "smd/tri_surface/stable_time_increment_ptr") == 0) {
+		return (void *) &stable_time_increment;
+	}
+
+	return NULL;
+
+}
