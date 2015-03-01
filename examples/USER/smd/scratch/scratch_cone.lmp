@@ -36,7 +36,7 @@ group           tlsph type 3
 
 
 # pair style: Total-Lagrangian SPH plus contact forces between plate and indentor
-pair_style      hybrid/overlay tlsph smd/hertz 1.0
+pair_style      hybrid/overlay tlsph *UPDATE_CONSTANT 0.3 smd/hertz 1.0
 pair_coeff      * * none
 #                                  rh0    E    nu   Q1   Q2  hg Cp
 pair_coeff      3 3 tlsph *COMMON  ${rho} ${E} 0.3  0.1  0.0 10 910 &

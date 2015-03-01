@@ -281,6 +281,8 @@ void PairTlsph::PreCompute() {
 					//K[i] = PairTlsph::pseudo_inverse_SVD(K[i]);
 				}
 
+				K[i].setIdentity();
+
 				Fincr[i] *= K[i]; // use shape matrix to obtain first-order corrected SPH approximation
 				Fincr[i] += eye;
 				Fdot[i] *= K[i];

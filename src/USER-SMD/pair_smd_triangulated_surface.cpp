@@ -87,7 +87,7 @@ void PairTriSurf::compute(int eflag, int vflag) {
 	int i, j, ii, jj, inum, jnum, itype, jtype;
 	double rsq, r, evdwl, fpair;
 	int *ilist, *jlist, *numneigh, **firstneigh;
-	double rcut, r_geom, delta, ri, rj, touch_distance, dt_crit;
+	double rcut, r_geom, delta, r_tri, r_particle, touch_distance, dt_crit;
 	int tri, particle;
 	Vector3d normal, x1, x2, x3, x4, x13, x23, x43, w, cp, x4cp, vnew, v_old;
 	;
@@ -125,20 +125,10 @@ void PairTriSurf::compute(int eflag, int vflag) {
 	int max_neighs = 0;
 	stable_time_increment = 1.0e22;
 
-	// loop over neighbors of my atoms using a full neighbor list
+	// loop over neighbors of my atoms using a half neighbor list
 	for (ii = 0; ii < inum; ii++) {
 		i = ilist[ii];
-
-		// we are only interested in particles, not in triangles.
-		if (mol[i] >= 65535) {
-			continue;
-		}
-
-		// now we know that i is a particle
-		particle = i;
-		x4 << x[i][0], x[i][1], x[i][2];
 		itype = type[i];
-		ri = scale * radius[i];
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 		max_neighs = MAX(max_neighs, jnum);
@@ -150,32 +140,35 @@ void PairTriSurf::compute(int eflag, int vflag) {
 
 			jtype = type[j];
 
-			if (mol[j] < 65535) {
-				error->one(FLERR, "j has mol id < 65535 and is not a triangle. This should not happen.");
+			/*
+			 * decide which one of i, j is triangle and which is particle
+			 */
+			if ((mol[i] < 65535) && (mol[j] >= 65535)) {
+				particle = i;
+				tri = j;
+			} else if ((mol[j] < 65535) && (mol[i] >= 65535)) {
+				particle = j;
+				tri = i;
+			} else {
+				error->one(FLERR, "unknown case");
 			}
-			tri = j;
 
-			x_center << x[j][0], x[j][1], x[j][2]; // center of triangle
+			x_center << x[tri][0], x[tri][1], x[tri][2]; // center of triangle
+			x4 << x[particle][0], x[particle][1], x[particle][2];
 			dx = x_center - x4; //
 			if (periodic) {
 				domain->minimum_image(dx(0), dx(1), dx(2));
 			}
 			rsq = dx.squaredNorm();
 
-			rj = scale * radius[j];
-			rcut = ri + rj;
+			r_tri = scale * radius[tri];
+			r_particle = scale * radius[particle];
+			rcut = r_tri + r_particle;
 			rcutSq = rcut * rcut;
 
 			//printf("type i=%d, type j=%d, r=%f, ri=%f, rj=%f\n", itype, jtype, sqrt(rsq), ri, rj);
 
 			if (rsq < rcutSq) {
-
-				/*
-				 * decide which one of i, j is triangle and which is particle
-				 */
-				if (mol[particle] >= 65535) {
-					error->one(FLERR, "both i and j have mol id >= 65535. This should not happen.");
-				}
 
 				/*
 				 * gather triangle information
@@ -230,9 +223,18 @@ void PairTriSurf::compute(int eflag, int vflag) {
 						evdwl = r * fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
 
 						fpair /= (r + 1.0e-2 * radius[particle]); // divide by r + softening and multiply with non-normalized distance vector
-						f[i][0] += x4cp(0) * fpair;
-						f[i][1] += x4cp(1) * fpair;
-						f[i][2] += x4cp(2) * fpair;
+
+						if (particle < nlocal) {
+							f[particle][0] += x4cp(0) * fpair;
+							f[particle][1] += x4cp(1) * fpair;
+							f[particle][2] += x4cp(2) * fpair;
+						}
+
+						if (tri < nlocal) {
+							f[tri][0] -= x4cp(0) * fpair;
+							f[tri][1] -= x4cp(1) * fpair;
+							f[tri][2] -= x4cp(2) * fpair;
+						}
 
 						if (evflag) {
 							ev_tally(i, j, nlocal, newton_pair, evdwl, 0.0, fpair, x4cp(0), x4cp(1), x4cp(2));
@@ -256,12 +258,13 @@ void PairTriSurf::compute(int eflag, int vflag) {
 						v_old << v[particle][0], v[particle][1], v[particle][2];
 						if (v_old.dot(normal) < 0.0) {
 							//printf("flipping velocity\n");
-							vnew = 0.0 * (-2.0 * v_old.dot(normal) * normal + v_old);
+							vnew = 0.5 * (-2.0 * v_old.dot(normal) * normal + v_old);
 							v[particle][0] = vnew(0);
 							v[particle][1] = vnew(1);
 							v[particle][2] = vnew(2);
 						}
 
+						//printf("moving particle on top of triangle\n");
 						x[particle][0] = cp(0) + touch_distance * normal(0);
 						x[particle][1] = cp(1) + touch_distance * normal(1);
 						x[particle][2] = cp(2) + touch_distance * normal(2);
@@ -406,14 +409,14 @@ void PairTriSurf::init_style() {
 		error->all(FLERR, "Pair style smd/smd/tri_surface requires atom style with contact_radius");
 
 	// old: half list
-//	int irequest = neighbor->request(this);
-//	neighbor->requests[irequest]->half = 0;
-//	neighbor->requests[irequest]->gran = 1;
-
-	// need a full neighbor list
 	int irequest = neighbor->request(this);
 	neighbor->requests[irequest]->half = 0;
-	neighbor->requests[irequest]->full = 1;
+	neighbor->requests[irequest]->gran = 1;
+
+	// need a full neighbor list
+//	int irequest = neighbor->request(this);
+//	neighbor->requests[irequest]->half = 0;
+//	neighbor->requests[irequest]->full = 1;
 
 	// set maxrad_dynamic and maxrad_frozen for each type
 	// include future Fix pour particles as dynamic
@@ -822,7 +825,6 @@ double PairTriSurf::clamp(const double a, const double min, const double max) {
 		return a;
 	}
 }
-
 
 void *PairTriSurf::extract(const char *str, int &i) {
 	//printf("in PairTriSurf::extract\n");

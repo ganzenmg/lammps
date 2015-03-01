@@ -8,7 +8,7 @@ SHELL = /bin/sh
 
 # note: for using address sanitizer, do the following
 # 1) compile with at least the following flags:
-     -g -fsanitize=address -fno-omit-frame-pointer
+#     -g -fsanitize=address -fno-omit-frame-pointer
 # 2) run the executable like this:
 #    $> export ASAN_OPTIONS=symbolize=0; mpirun -np 1 lmp_clang_openmpi < script.lmp 2> log
 #    this disables on the fly-symbolization which is problematic in MPI
@@ -17,14 +17,14 @@ SHELL = /bin/sh
 
 
 CC =		mpic++
-CCFLAGS =	-Wall -Wno-unused-parameter -O2 -g -fsanitize=address -fno-omit-frame-pointer
-#CCFLAGS =	-Wall -Wno-unused-parameter -O3
+#CCFLAGS =	-Wall -Wno-unused-parameter -O2 -g -fsanitize=address -fno-omit-frame-pointer
+CCFLAGS =	-Wall -Wno-unused-parameter -O3 -ffast-math
 SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
 LINK =		mpic++
-LINKFLAGS =	-O2 -g -fsanitize=address -fno-omit-frame-pointer
-#LINKFLAGS =	-O3
+#LINKFLAGS =	-O2 -g -fsanitize=address -fno-omit-frame-pointer
+LINKFLAGS =	-O3 -ffast-math
 LIB =       -lstdc++
 SIZE =		size
 

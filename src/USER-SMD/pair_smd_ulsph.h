@@ -66,6 +66,7 @@ public:
 
 protected:
 
+    double *c0_type; // reference speed of sound defined per particle type
     double *rho0; // reference mass density per type
     double *Q1; // linear artificial viscosity coeff
     int *eos; // eos models
@@ -83,7 +84,7 @@ protected:
     Matrix3d *stressTensor, *L;
 
     enum {
-        NONE, EOS_PERFECT_GAS, EOS_TAIT, VISCOSITY_LINEAR
+        NONE, EOS_PERFECT_GAS, EOS_TAIT, VISCOSITY_LINEAR, STRENGTH
     };
 
     double dtCFL;
@@ -96,6 +97,9 @@ private:
     Dict matProp2;
 	double SafeLookup(std::string str, int itype);
 	bool CheckKeywordPresent(std::string str, int itype);
+
+	bool artificial_stress_flag; // artificial stress is needed for material models with strength
+	bool velocity_gradient_required;
 
 };
 

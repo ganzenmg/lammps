@@ -23,6 +23,19 @@ static inline double Kernel_Wendland_Quintic_NotNormalized(const double r, const
 	}
 }
 
+static inline double Kernel_Cubic_Spline(const double r, const double h) {
+	double q = 2.0 * r / h;
+	if (q > 2.0) {
+		return 0.0;
+	} else if ((q <= 2.0) &&  (q > 1.0)) {
+		return pow(2.0 - q, 3.0) / 6.0;
+	} else if ((q >= 0.0) && (q <= 1.0)) {
+		return 2./3. - q*q + 0.5*q*q*q;
+	} else {
+		return 0.0;
+	}
+}
+
 static inline double Kernel_Barbara(const double r, const double h) {
 	double arg = (1.570796327 * (r + h)) / h;
 	double hsq = h * h;

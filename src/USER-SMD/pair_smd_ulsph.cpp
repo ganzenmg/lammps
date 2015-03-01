@@ -43,7 +43,9 @@
 #include <iostream>
 #include "smd_material_models.h"
 #include "smd_math.h"
+#include "smd_kernels.h"
 
+using namespace SMD_Kernels;
 using namespace std;
 using namespace LAMMPS_NS;
 using namespace SMD_Math;
@@ -53,12 +55,14 @@ using namespace SMD_Math;
 using namespace Eigen;
 
 #define COMPUTE_CORRECTED_DERIVATIVES false
+#define ARTIFICIAL_STRESS true
 
 PairULSPH::PairULSPH(LAMMPS *lmp) :
 		Pair(lmp) {
 
 	Q1 = NULL;
 	eos = NULL;
+	c0_type = NULL;
 	pressure = NULL;
 	c0 = NULL;
 
@@ -69,6 +73,9 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	shepardWeight = NULL;
 	smoothVel = NULL;
 	numNeighs = NULL;
+
+	artificial_stress_flag = false; // turn off artificial stress correction by default
+	velocity_gradient_required = false; // turn off computation of velocity gradient by default
 
 	comm_forward = 9; // this pair style communicates 9 doubles to ghost atoms
 }
@@ -81,6 +88,7 @@ PairULSPH::~PairULSPH() {
 		memory->destroy(Q1);
 		memory->destroy(rho0);
 		memory->destroy(eos);
+		memory->destroy(c0_type);
 
 		delete[] onerad_dynamic;
 		delete[] onerad_frozen;
@@ -338,6 +346,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	double *drho = atom->drho;
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
+	double *contact_radius = atom->contact_radius;
 	double *rho = atom->rho;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
@@ -349,6 +358,11 @@ void PairULSPH::compute(int eflag, int vflag) {
 	int **firstneigh;
 	Vector3d fi, fj, dx, dv, f_stress, g, vinti, vintj, dvint;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new;
+
+	double ini_dist, weight;
+	Matrix3d S, D, V;
+	int k;
+	SelfAdjointEigenSolver<Matrix3d> es;
 
 	if (eflag || vflag)
 		ev_setup(eflag, vflag);
@@ -388,7 +402,9 @@ void PairULSPH::compute(int eflag, int vflag) {
 	}
 
 	//PairULSPH::PreCompute_DensitySummation();
-	//PairULSPH::PreCompute(); // get velocity gradient
+	if (velocity_gradient_required == true ) {
+		PairULSPH::PreCompute(); // get velocity gradient
+	}
 	PairULSPH::ComputePressure();
 
 	/*
@@ -454,11 +470,33 @@ void PairULSPH::compute(int eflag, int vflag) {
 				// uncorrected kernel gradient
 				g = (wfd / r) * dx;
 
+				// symmetric stress
+				S = stressTensor[i] + stressTensor[j];
+
+				/*
+				 * artificial stress to control tensile instability
+				 */
+				if (artificial_stress_flag == true) {
+					ini_dist = contact_radius[i] + contact_radius[j];
+					weight = Kernel_Cubic_Spline(r, h) / Kernel_Cubic_Spline(ini_dist, h);
+					weight = pow(weight, 4.0);
+
+					es.compute(S);
+					D = es.eigenvalues().asDiagonal();
+					for (k = 0; k < 3; k++) {
+						if (D(k, k) > 0.0) {
+							D(k, k) -= weight * 0.5 * D(k, k);
+						}
+					}
+					V = es.eigenvectors();
+					S = V * D * V.inverse();
+				}
+
 				/*
 				 * force -- the classical SPH way
 				 */
 
-				f_stress = ivol * jvol * (stressTensor[i] + stressTensor[j]) * g;
+				f_stress = ivol * jvol * S * g;
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
@@ -468,12 +506,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
 				c_ij = 0.5 * (c0[i] + c0[j]);
 
-				LimitDoubleMagnitude(delVdotDelR, 0.1 * c_ij);
-
-				//if (fabs(delVdotDelR) > 0.5 * c_ij) { // limit delVdotDelR to a fraction of speed of sound
-				//	double s = copysign(1, delVdotDelR);
-				//	delVdotDelR = s * 0.5 * c_ij;
-				//}
+				LimitDoubleMagnitude(delVdotDelR, 1.1 * c_ij);
 
 				mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
 				rho_ij = 0.5 * (rho[i] + rho[j]);
@@ -572,7 +605,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 //				de[i] += deltaE;
 //
 //			}
-
 			if (shepardWeight[i] != 0.0) {
 				smoothVel[i] /= shepardWeight[i];
 			} else {
@@ -593,18 +625,22 @@ void PairULSPH::ComputePressure() {
 	double *radius = atom->radius;
 	double *rho = atom->rho;
 	double *rmass = atom->rmass;
+	double **tlsph_stress = atom->tlsph_stress;
 	double *e = atom->e;
 	int *type = atom->type;
 	double pFinal;
 	int i, itype;
 	int nlocal = atom->nlocal;
 	Matrix3d D, Ddev, W, V, sigma_diag;
-	Matrix3d eye;
+	Matrix3d eye, stressRate, Jaumann_rate;
+	Matrix3d sigmaInitial_dev, d_dev, sigmaFinal_dev, stressRate_dev;
+	double plastic_strain_increment;
+	double dt = update->dt;
 
 	dtCFL = 1.0e22;
 	eye.setIdentity();
 
-	double var1, var2, var3, vol;
+	double var1, var2, var3, vol, G, yield_strength, lambda;
 
 	/*
 	 * iterate over particle types first, only use SafeLookup (slow!) once for each type, store the result.
@@ -627,15 +663,6 @@ void PairULSPH::ComputePressure() {
 						stressTensor[i](0, 0) = -pFinal;
 						stressTensor[i](1, 1) = -pFinal;
 						stressTensor[i](2, 2) = -pFinal;
-
-						/*
-						 * viscosity model
-						 */
-//						D = 0.5 * (L[i] + L[i].transpose());
-//						stressTensor[i] += 1.0e-7 * D;
-
-
-
 					}
 				}
 				break;
@@ -658,6 +685,52 @@ void PairULSPH::ComputePressure() {
 				pFinal = 0.0;
 				c0[i] = 1.0;
 				break;
+
+			case STRENGTH:
+
+				G = SafeLookup("lame_mu", itype);
+				yield_strength = SafeLookup("yield_strength", itype);
+				lambda = SafeLookup("lame_lambda", itype);
+				for (i = 0; i < nlocal; i++) {
+
+					if (type[i] == itype) {
+						/*
+						 * initial stress state: given by the unrotateted Cauchy stress.
+						 * Assemble Eigen 3d matrix from stored stress state
+						 */
+						stressTensor[i](0, 0) = tlsph_stress[i][0];
+						stressTensor[i](0, 1) = tlsph_stress[i][1];
+						stressTensor[i](0, 2) = tlsph_stress[i][2];
+						stressTensor[i](1, 1) = tlsph_stress[i][3];
+						stressTensor[i](1, 2) = tlsph_stress[i][4];
+						stressTensor[i](2, 2) = tlsph_stress[i][5];
+						stressTensor[i](1, 0) = stressTensor[i](0, 1);
+						stressTensor[i](2, 0) = stressTensor[i](0, 2);
+						stressTensor[i](2, 1) = stressTensor[i](1, 2);
+
+						D = 0.5 * (L[i] + L[i].transpose());
+						W = 0.5 * (L[i] - L[i].transpose()); // spin tensor:: need this for Jaumann rate
+
+						d_dev = Deviator(D);
+						sigmaInitial_dev = Deviator(stressTensor[i]);
+						LinearPlasticStrength(G, yield_strength, sigmaInitial_dev, d_dev, dt, sigmaFinal_dev, stressRate_dev,
+								plastic_strain_increment);
+						stressRate = lambda * D.trace() * eye + stressRate_dev;
+
+						Jaumann_rate = stressRate; // + W * stressTensor[i] + stressTensor[i] * W.transpose();
+						stressTensor[i] += dt * Jaumann_rate;
+						c0[i] = c0_type[itype];
+
+						tlsph_stress[i][0] = stressTensor[i](0, 0);
+						tlsph_stress[i][1] = stressTensor[i](0, 1);
+						tlsph_stress[i][2] = stressTensor[i](0, 2);
+						tlsph_stress[i][3] = stressTensor[i](1, 1);
+						tlsph_stress[i][4] = stressTensor[i](1, 2);
+						tlsph_stress[i][5] = stressTensor[i](2, 2);
+					}
+				}
+				break;
+
 			default:
 				error->one(FLERR, "unknown EOS.");
 				break;
@@ -706,9 +779,10 @@ void PairULSPH::allocate() {
 
 	memory->create(Q1, n + 1, "pair:Q1");
 	memory->create(rho0, n + 1, "pair:Q2");
+	memory->create(c0_type, n + 1, "pair:c0_type");
 	memory->create(eos, n + 1, "pair:eosmodel");
 
-	memory->create(cutsq, n + 1, n + 1, "pair:cutsq"); // always needs to be allocated, even with granular neighborlist
+	memory->create(cutsq, n + 1, n + 1, "pair:cutsq");		// always needs to be allocated, even with granular neighborlist
 
 	onerad_dynamic = new double[n + 1];
 	onerad_frozen = new double[n + 1];
@@ -899,6 +973,56 @@ void PairULSPH::coeff(int narg, char **arg) {
 					printf("%60s : %g\n", "Heat Capacity Ratio Gamma", SafeLookup("perfect_gas_gamma", itype));
 				}
 			} // end Perfect Gas EOS
+			else if (strcmp(arg[ioffset], "*LINEAR_PLASTIC") == 0) {
+
+				/*
+				 * linear elastic / ideal plastic material model with strength
+				 */
+
+				eos[itype] = STRENGTH;
+				artificial_stress_flag = true;
+				velocity_gradient_required = true;
+				printf("reading *LINEAR_PLASTIC\n");
+
+				t = string("*");
+				iNextKwd = -1;
+				for (iarg = ioffset + 1; iarg < narg; iarg++) {
+					s = string(arg[iarg]);
+					if (s.compare(0, t.length(), t) == 0) {
+						iNextKwd = iarg;
+						break;
+					}
+				}
+
+				if (iNextKwd < 0) {
+					sprintf(str, "no *KEYWORD terminates *LINEAR_PLASTIC");
+					error->all(FLERR, str);
+				}
+
+				if (iNextKwd - ioffset != 3 + 1) {
+					sprintf(str, "expected 3 arguments following *LINEAR_PLASTIC but got %d\n", iNextKwd - ioffset - 1);
+					error->all(FLERR, str);
+				}
+
+				matProp2[std::make_pair("youngs_modulus", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+				matProp2[std::make_pair("poisson_ratio", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
+				matProp2[std::make_pair("yield_strength", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+
+				matProp2[std::make_pair("lame_lambda", itype)] = SafeLookup("youngs_modulus", itype)
+						* SafeLookup("poisson_ratio", itype)
+						/ ((1.0 + SafeLookup("poisson_ratio", itype) * (1.0 - 2.0 * SafeLookup("poisson_ratio", itype))));
+				matProp2[std::make_pair("lame_mu", itype)] = SafeLookup("youngs_modulus", itype)
+						/ (2.0 * (1.0 + SafeLookup("poisson_ratio", itype)));
+
+				if (comm->me == 0) {
+					printf("\n%60s\n", "linear elastic / ideal plastic material mode");
+					printf("%60s : %g\n", "Youngs modulus", SafeLookup("youngs_modulus", itype));
+					printf("%60s : %g\n", "poisson_ratio", SafeLookup("poisson_ratio", itype));
+					printf("%60s : %g\n", "yield_strength", SafeLookup("yield_strength", itype));
+					printf("%60s : %g\n", "Lame constant lambda", SafeLookup("lame_lambda", itype));
+					printf("%60s : %g\n", "shear modulus", SafeLookup("lame_mu", itype));
+				}
+			} // end *LINEAR_PLASTIC
 
 			else {
 				sprintf(str, "unknown *KEYWORD: %s", arg[ioffset]);
@@ -913,6 +1037,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 
 		Q1[itype] = SafeLookup("viscosity_q1", itype);
 		rho0[itype] = SafeLookup("rho_ref", itype);
+		c0_type[itype] = SafeLookup("c_ref", itype);
 
 		setflag[itype][itype] = 1;
 	} else {
@@ -1186,7 +1311,7 @@ double PairULSPH::SafeLookup(std::string str, int itype) {
 		//cout << "returning look up value %d " << matProp2[std::make_pair(str, itype)] << endl;
 		return matProp2[std::make_pair(str, itype)];
 	} else {
-		//sprintf(msg, "failed to lookup indentifier [%s] for particle type %d", str, itype);
+		sprintf(msg, "failed to lookup indentifier [%s] for particle type %d", str.c_str(), itype);
 		error->all(FLERR, msg);
 	}
 	return 1.0;

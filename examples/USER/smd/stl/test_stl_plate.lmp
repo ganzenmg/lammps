@@ -3,7 +3,7 @@ variable        l0 equal 0.25 # initial particle lattice spacing
 variable        rho equal 1 # mass density ulsph
 variable        h equal 2.5*${l0} # SPH kernel diameter
 variable        c0 equal 1.0 # speed of sound for ulsph
-variable        contact_stiffness equal 0.5*${c0}^2*${rho} # contact force amplitude
+variable        contact_stiffness equal 5*${c0}^2*${rho} # contact force amplitude
 variable        skin equal 0.1*${l0} # Verlet list range
 variable        vol_one equal ${l0}^2 # initial particle volume for 2d simulation
 variable        cr0 equal ${l0}/2
@@ -15,17 +15,17 @@ boundary        f f f
 atom_style      smd
 comm_style      tiled
 neighbor        ${skin} bin
-neigh_modify    every 5 delay 0 check yes binsize 1.0 exclude type 2 2
+neigh_modify    every 5 delay 0 check yes binsize 10 exclude type 2 2
 comm_modify     vel yes
 newton          off
-atom_modify     map hash sort 1000 1.0
+atom_modify     map hash sort 1000 10
 
 
 # create simulation box, a container, and a ulsph column
 region          box block -10 10 -10 10 -10 10 units box
 create_box      2 box
 
-create_atoms    1 single 0.5 0.5 1.5 units box
+create_atoms    1 single 0.3 0.5 1.5 units box
 group           particles type 1
 
 set             group all volume ${vol_one}
@@ -36,7 +36,7 @@ set             group all contact_radius 0.5 #${cr0}
 fix             stl_surface_fix all smd/wall_surface plate_small.stl 2 65535
 run             0
 group           mesh type 2
-change_box      all boundary s s s
+change_box      all boundary s s sm
 
 
 pair_style      hybrid/overlay ulsph  smd/tri_surface 1.0
@@ -54,7 +54,7 @@ dump            dump_id all custom 1 dump.LAMMPS id type x y z &
                 mass radius 
 dump_modify     dump_id first yes
 
-velocity        particles set 0 0 -0.1 units box
+velocity        particles set -0 0 -0.1 units box
 #fix             ffix particles setforce 0 0 0 
 
 timestep        ${dtcfl}
