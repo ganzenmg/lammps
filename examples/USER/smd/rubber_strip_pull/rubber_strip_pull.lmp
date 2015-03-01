@@ -39,7 +39,7 @@ group           tlsph union all
 
 pair_style      tlsph *UPDATE_CONSTANT 4.0 # activate Total-Lagrangian SPH
 #                           rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.5  0.0   50 1.0 &
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.5  0.0   10 1.0 &
                 *LINEAR_PLASTICITY 0.1 &
 		*FAILURE_MAX_PLASTIC_STRAIN 2.0 &
 		*EOS_LINEAR &
@@ -58,7 +58,7 @@ dump            dump_id all custom 10 dump.LAMMPS id type x y z &
 dump_modify     dump_id first yes
 
 # apply velocity boundary condition to top and bottom rows of particles
-velocity        top set 0.0  ${vel} 0.0 sum no units box 
+velocity        top set 0.0 ${vel} 0.0 sum no units box 
 velocity        bot set 0.0 -${vel} 0.0 sum no units box
 fix             topfix top setforce 0 0 0
 fix             botfix bot setforce 0 0 0
