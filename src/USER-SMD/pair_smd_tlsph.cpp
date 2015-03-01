@@ -759,7 +759,11 @@ void PairTlsph::AssembleStress() {
 					 * The stress rate, however, needs to be made objective.
 					 */
 
-					sigma_rate = (1.0 / dt) * (sigmaFinal - sigmaInitial);
+					if (dt > 1.0e-16) {
+						sigma_rate = (1.0 / dt) * (sigmaFinal - sigmaInitial);
+					} else {
+						sigma_rate.setZero();
+					}
 
 					Jaumann_rate = sigma_rate + W[i] * sigmaInitial + sigmaInitial * W[i].transpose();
 					sigmaFinal = sigmaInitial + dt * Jaumann_rate;
@@ -1632,7 +1636,8 @@ void PairTlsph::init_style() {
 	// if first init, create Fix needed for storing reference configuration neighbors
 
 	int igroup = group->find("tlsph");
-	if (igroup == -1) error->all(FLERR,"Pair style tlsph requires its particles to be part of a group named tlsph. This group does not exist.");
+	if (igroup == -1)
+		error->all(FLERR, "Pair style tlsph requires its particles to be part of a group named tlsph. This group does not exist.");
 
 	if (fix_tlsph_reference_configuration == NULL) {
 		char **fixarg = new char*[3];
