@@ -5,7 +5,7 @@ variable        l0 equal 1.0 # lattice spacing for creating particles
 variable        rho equal 1 # initial mass density
 variable        E equal 1.0 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
-variable        h equal 3.01*${l0} # SPH smoothing kernel diameter
+variable        h equal 2.41*${l0} # SPH smoothing kernel diameter
 variable        vol_one equal ${l0}^2 # volume of one particle
 variable        mass_one equal ${vol_one}*${rho} # mass of one particle
 variable        skin equal 0.9*${l0} # Verlet list range
