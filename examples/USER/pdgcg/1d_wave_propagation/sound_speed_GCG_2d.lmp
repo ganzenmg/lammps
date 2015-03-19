@@ -54,19 +54,19 @@ neighbor        ${l0} bin
 
 run             0
 
-## apply initial velocity profile
+## apply initial displacement profile
 #variable        a equal 0.02
 #variable        w equal 0.01
 #variable        N equal count(all)
 #label           loop
 #variable        i loop ${N}
 #variable        x0 equal x[${i}]
-##variable        x1 equal ${x0}+${a}*exp(-${w}*${x0}^2)
-##set             atom ${i} x ${x1}
-#group           tmp id ${i}
-#variable        vel equal ${a}*exp(-${w}*(${x0}-200)^2)
-#velocity        tmp set ${vel} 0 0 units box
-#group           tmp clear
+#variable        x1 equal ${x0}+${a}*exp(-${w}*(${x0}-500)^2)
+#set             atom ${i} x ${x1}
+####group           tmp id ${i}
+###variable        vel equal ${a}*exp(-${w}*(${x0}-200)^2)
+###velocity        tmp set ${vel} 0 0 units box
+###group           tmp clear
 ##print           "${i} ${x0} ${x1}"
 #next            i
 #jump            sound_speed_GCG_2d.lmp loop
