@@ -78,7 +78,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	artificial_stress_flag = false; // turn off artificial stress correction by default
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
 
-	comm_forward = 9; // this pair style communicates 9 doubles to ghost atoms
+	comm_forward = 18; // this pair style communicates 18 doubles to ghost atoms
 }
 
 /* ---------------------------------------------------------------------- */
@@ -318,7 +318,7 @@ void PairULSPH::PreCompute() {
 				K2d(1, 0) = K[i](1, 0);
 				K2d(1, 1) = K[i](1, 1);
 
-				if (fabs(K2d.determinant()) > 1.0e-16) {
+				if (fabs(K2d.determinant()) > 1.0e-6) {
 					K2di = K2d.inverse();
 					K[i].setZero();
 					K[i](0, 0) = K2di(0, 0);
@@ -328,10 +328,10 @@ void PairULSPH::PreCompute() {
 					K[i](2, 2) = 1.0;
 				} else {
 
-					cout << "we have a problem with K; this is K" << endl << K2d << endl;
-					cout << "det is " << K2d.determinant() << endl;
-					cout << "NN is " << numNeighs[i] << endl;
-					cout << "-----------------------------------------" << endl;
+//					cout << "we have a problem with K; this is K" << endl << K2d << endl;
+//					cout << "det is " << K2d.determinant() << endl;
+//					cout << "NN is " << numNeighs[i] << endl;
+//					cout << "-----------------------------------------" << endl;
 					K[i].setIdentity();
 				}
 
@@ -518,7 +518,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 //					V = es.eigenvectors();
 //					S = V * D * V.inverse();
 //				}
-
 				/*
 				 * force -- the classical SPH way
 				 */
@@ -564,7 +563,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 //				}
 
 				gamma_dot_dx = gamma.dot(dx); // project hourglass error vector onto pair distance vector
-				//LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
+				LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
 				delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
 				hg_mag = amp * delta / (rSq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
 				hg_mag *= -ivol * jvol * wf * 1.0; // hg_mag has dimensions [J*m^(-1)] = [N]
@@ -1224,15 +1223,24 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 		j = list[i];
 		buf[m++] = pressure[j];
 		buf[m++] = rho[j];
-		buf[m++] = c0[j];
+		buf[m++] = c0[j]; //3
 
 		buf[m++] = stressTensor[j](0, 0);
 		buf[m++] = stressTensor[j](1, 1);
 		buf[m++] = stressTensor[j](2, 2);
 		buf[m++] = stressTensor[j](0, 1);
 		buf[m++] = stressTensor[j](0, 2);
-		buf[m++] = stressTensor[j](1, 2);
+		buf[m++] = stressTensor[j](1, 2); //9
 
+		buf[m++] = F[j](0, 0); // F is not symmetric
+		buf[m++] = F[j](0, 1);
+		buf[m++] = F[j](0, 2);
+		buf[m++] = F[j](1, 0);
+		buf[m++] = F[j](1, 1);
+		buf[m++] = F[j](1, 2);
+		buf[m++] = F[j](2, 0);
+		buf[m++] = F[j](2, 1);
+		buf[m++] = F[j](2, 2); // 9 + 9 = 18
 	}
 	return m;
 }
@@ -1259,6 +1267,16 @@ void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
 		stressTensor[i](1, 0) = stressTensor[i](0, 1);
 		stressTensor[i](2, 0) = stressTensor[i](0, 2);
 		stressTensor[i](2, 1) = stressTensor[i](1, 2);
+
+		F[i](0, 0) = buf[m++];
+		F[i](0, 1) = buf[m++];
+		F[i](0, 2) = buf[m++];
+		F[i](1, 0) = buf[m++];
+		F[i](1, 1) = buf[m++];
+		F[i](1, 2) = buf[m++];
+		F[i](2, 0) = buf[m++];
+		F[i](2, 1) = buf[m++];
+		F[i](2, 2) = buf[m++];
 	}
 }
 
