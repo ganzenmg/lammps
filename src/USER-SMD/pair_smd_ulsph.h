@@ -81,7 +81,7 @@ protected:
     Matrix3d *K, *artStress;
     double *shepardWeight, *c0;
     Vector3d *smoothVel;
-    Matrix3d *stressTensor, *L;
+    Matrix3d *stressTensor, *L, *F;
 
     enum {
         NONE, EOS_PERFECT_GAS, EOS_TAIT, VISCOSITY_LINEAR, STRENGTH

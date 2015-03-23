@@ -54,8 +54,8 @@ using namespace SMD_Math;
 #include <Eigen/Eigen>
 using namespace Eigen;
 
-#define COMPUTE_CORRECTED_DERIVATIVES false
-#define ARTIFICIAL_STRESS true
+#define COMPUTE_CORRECTED_DERIVATIVES true
+#define ARTIFICIAL_STRESS false
 
 PairULSPH::PairULSPH(LAMMPS *lmp) :
 		Pair(lmp) {
@@ -73,6 +73,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	shepardWeight = NULL;
 	smoothVel = NULL;
 	numNeighs = NULL;
+	F = NULL;
 
 	artificial_stress_flag = false; // turn off artificial stress correction by default
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
@@ -104,6 +105,7 @@ PairULSPH::~PairULSPH() {
 		delete[] L;
 		delete[] artStress;
 		delete[] numNeighs;
+		delete[] F;
 	}
 }
 
@@ -200,6 +202,7 @@ void PairULSPH::PreCompute_DensitySummation() {
 void PairULSPH::PreCompute() {
 	double *radius = atom->radius;
 	double **x = atom->x;
+	double **x0 = atom->x0;
 	double **v = atom->vest;
 	double *rmass = atom->rmass;
 	double *rho = atom->rho;
@@ -209,9 +212,10 @@ void PairULSPH::PreCompute() {
 	int nlocal = atom->nlocal;
 	int inum, jnum, ii, jj, i, itype, jtype, j, iDim;
 	double wfd, h, irad, r, rSq, wf, ivol, jvol;
-	Vector3d dx, dv, g;
-	Matrix3d Ktmp, Ltmp;
-	Vector3d xi, xj, vi, vj;
+	Vector3d dx, dv, g, du;
+	Matrix3d Ktmp, Ltmp, Ftmp;
+	Vector3d xi, xj, vi, vj, x0i, x0j, dx0;
+	Matrix2d K2di, K2d;
 
 	// zero accumulators
 	for (i = 0; i < nlocal; i++) {
@@ -219,6 +223,7 @@ void PairULSPH::PreCompute() {
 		L[i].setZero();
 		numNeighs[i] = 0;
 		K[i].setZero();
+		F[i].setZero();
 	}
 
 // set up neighbor list variables
@@ -236,19 +241,17 @@ void PairULSPH::PreCompute() {
 		ivol = rmass[i] / rho[i];
 
 		// initialize Eigen data structures from LAMMPS data structures
-		for (iDim = 0; iDim < 3; iDim++) {
-			xi(iDim) = x[i][iDim];
-			vi(iDim) = v[i][iDim];
-		}
+		x0i << x0[i][0], x0[i][1], x0[i][2];
+		xi << x[i][0], x[i][1], x[i][2];
+		vi << v[i][0], v[i][1], v[i][2];
 
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
 
-			for (iDim = 0; iDim < 3; iDim++) {
-				xj(iDim) = x[j][iDim];
-				vj(iDim) = v[j][iDim];
-			}
+			x0j << x0[j][0], x0[j][1], x0[j][2];
+			xj << x[j][0], x[j][1], x[j][2];
+			vj << v[j][0], v[j][1], v[j][2];
 
 			dx = xj - xi;
 			rSq = dx.squaredNorm();
@@ -261,6 +264,7 @@ void PairULSPH::PreCompute() {
 
 				// distance vectors in current and reference configuration, velocity difference
 				dv = vj - vi;
+				dx0 = x0j - x0i;
 
 				// kernel and derivative
 				kernel_and_derivative(h, r, wf, wfd);
@@ -278,6 +282,11 @@ void PairULSPH::PreCompute() {
 				Ltmp = dv * g.transpose();
 				L[i] += jvol * Ltmp;
 
+				// deformation gradient F in Eulerian frame
+				du = dx - dx0;
+				Ftmp = du * g.transpose();
+				F[i] += jvol * Ftmp;
+
 				numNeighs[i] += 1;
 
 				if (j < nlocal) {
@@ -287,6 +296,7 @@ void PairULSPH::PreCompute() {
 					}
 
 					L[j] += ivol * Ltmp;
+					F[j] += ivol * Ftmp;
 					numNeighs[j] += 1;
 				}
 			} // end if check distance
@@ -308,28 +318,42 @@ void PairULSPH::PreCompute() {
 				K2d(1, 0) = K[i](1, 0);
 				K2d(1, 1) = K[i](1, 1);
 
-				if ((K2d.determinant() > 1.0e-1) && (numNeighs[i] > 4)) {
-					Matrix2d K2di;
+				if (fabs(K2d.determinant()) > 1.0e-16) {
 					K2di = K2d.inverse();
-
-					K[i].setIdentity();
+					K[i].setZero();
 					K[i](0, 0) = K2di(0, 0);
 					K[i](0, 1) = K2di(0, 1);
 					K[i](1, 0) = K2di(1, 0);
 					K[i](1, 1) = K2di(1, 1);
+					K[i](2, 2) = 1.0;
 				} else {
+
+					cout << "we have a problem with K; this is K" << endl << K2d << endl;
+					cout << "det is " << K2d.determinant() << endl;
+					cout << "NN is " << numNeighs[i] << endl;
+					cout << "-----------------------------------------" << endl;
 					K[i].setIdentity();
 				}
 
 			} else { // 3d
-				if (K[i].determinant() > 1.0e-4) {
-					K[i] = pseudo_inverse_SVD(K[i]);
+				if (fabs(K[i].determinant()) > 1.0e-16) {
+					K[i] = K[i].inverse();
 				} else {
 					K[i].setIdentity();
 				}
 			}
 
+//			if (i == 20) {
+//				cout << endl << "this is L before mult with K" << endl << L[i] << endl << "-----------------------" << endl;
+//				cout << "this is K" << endl << K[i] << endl;
+//			}
+
 			L[i] *= K[i];
+			F[i] *= K[i];
+
+//			if (i == 20) {
+//				cout << "this is L after mult with K" << endl << L[i] << endl << "-----------------------" << endl;
+//			}
 
 		} // end loop over i = 0 to nlocal
 	}
@@ -339,6 +363,7 @@ void PairULSPH::PreCompute() {
 
 void PairULSPH::compute(int eflag, int vflag) {
 	double **x = atom->x;
+	double **x0 = atom->x0;
 	double **v = atom->vest;
 	double **vint = atom->v; // Velocity-Verlet algorithm velocities
 	double **f = atom->f;
@@ -392,6 +417,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 		artStress = new Matrix3d[nmax];
 		delete[] numNeighs;
 		numNeighs = new int[nmax];
+		delete[] F;
+		F = new Matrix3d[nmax];
 	}
 
 // zero accumulators
@@ -402,7 +429,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	}
 
 	//PairULSPH::PreCompute_DensitySummation();
-	if (velocity_gradient_required == true ) {
+	if (velocity_gradient_required == true) {
 		PairULSPH::PreCompute(); // get velocity gradient
 	}
 	PairULSPH::ComputePressure();
@@ -476,21 +503,21 @@ void PairULSPH::compute(int eflag, int vflag) {
 				/*
 				 * artificial stress to control tensile instability
 				 */
-				if (artificial_stress_flag == true) {
-					ini_dist = contact_radius[i] + contact_radius[j];
-					weight = Kernel_Cubic_Spline(r, h) / Kernel_Cubic_Spline(ini_dist, h);
-					weight = pow(weight, 4.0);
-
-					es.compute(S);
-					D = es.eigenvalues().asDiagonal();
-					for (k = 0; k < 3; k++) {
-						if (D(k, k) > 0.0) {
-							D(k, k) -= weight * 0.5 * D(k, k);
-						}
-					}
-					V = es.eigenvectors();
-					S = V * D * V.inverse();
-				}
+//				if (artificial_stress_flag == true) {
+//					ini_dist = contact_radius[i] + contact_radius[j];
+//					weight = Kernel_Cubic_Spline(r, h) / Kernel_Cubic_Spline(ini_dist, h);
+//					weight = pow(weight, 4.0);
+//
+//					es.compute(S);
+//					D = es.eigenvalues().asDiagonal();
+//					for (k = 0; k < 3; k++) {
+//						if (D(k, k) > 0.0) {
+//							D(k, k) -= weight * 1.0 * D(k, k);
+//						}
+//					}
+//					V = es.eigenvectors();
+//					S = V * D * V.inverse();
+//				}
 
 				/*
 				 * force -- the classical SPH way
@@ -513,7 +540,37 @@ void PairULSPH::compute(int eflag, int vflag) {
 				visc_magnitude = 0.5 * (Q1[itype] + Q1[jtype]) * c_ij * mu_ij / rho_ij;
 				f_visc = rmass[i] * rmass[j] * visc_magnitude * g;
 
-				sumForces = f_stress + f_visc;
+				/*
+				 * hourglass treatment
+				 */
+				Vector3d gamma, f_hg, dx0, du_est, du;
+				double gamma_dot_dx, delta, hg_mag;
+				double amp = 50.0;
+
+				dx0(0) = x0[j][0] - x0[i][0];
+				dx0(1) = x0[j][1] - x0[i][1];
+				dx0(2) = x0[j][2] - x0[i][2];
+
+				du_est = 0.5 * (F[i] + F[j]) * dx;
+				du = dx - dx0;
+
+				gamma = 0.5 * (F[i] + F[j]) * dx - du;
+
+//				if (du.norm() > 0.1) {
+//					printf("du_est is %f %f %f\n", du_est(0), du_est(1), du_est(2));
+//					printf("du actual is %f %f %f\n", du(0), du(1), du(2));
+//					printf("gamma is %f %f %f\n", gamma(0), gamma(1), gamma(2));
+//					printf("--------------\n");
+//				}
+
+				gamma_dot_dx = gamma.dot(dx); // project hourglass error vector onto pair distance vector
+				//LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
+				delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
+				hg_mag = amp * delta / (rSq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
+				hg_mag *= -ivol * jvol * wf * 1.0; // hg_mag has dimensions [J*m^(-1)] = [N]
+				f_hg = (hg_mag / (r + 0.01 * h)) * dx;
+
+				sumForces = f_stress + f_visc + f_hg;
 
 				// energy rate -- project velocity onto force vector
 				deltaE = 0.5 * sumForces.dot(dv);
@@ -640,7 +697,7 @@ void PairULSPH::ComputePressure() {
 	dtCFL = 1.0e22;
 	eye.setIdentity();
 
-	double var1, var2, var3, vol, G, yield_strength, lambda;
+	double var1, var2, var3, vol, G, yield_strength, lambda, bulk_modulus;
 
 	/*
 	 * iterate over particle types first, only use SafeLookup (slow!) once for each type, store the result.
@@ -688,6 +745,7 @@ void PairULSPH::ComputePressure() {
 
 			case STRENGTH:
 
+				bulk_modulus = SafeLookup("bulk_modulus", itype);
 				G = SafeLookup("lame_mu", itype);
 				yield_strength = SafeLookup("yield_strength", itype);
 				lambda = SafeLookup("lame_lambda", itype);
@@ -715,9 +773,12 @@ void PairULSPH::ComputePressure() {
 						sigmaInitial_dev = Deviator(stressTensor[i]);
 						LinearPlasticStrength(G, yield_strength, sigmaInitial_dev, d_dev, dt, sigmaFinal_dev, stressRate_dev,
 								plastic_strain_increment);
-						stressRate = lambda * D.trace() * eye + stressRate_dev;
+						stressRate = bulk_modulus * D.trace() * eye + stressRate_dev;
 
-						Jaumann_rate = stressRate; // + W * stressTensor[i] + stressTensor[i] * W.transpose();
+						// simple linear elastic model
+						//stressRate = bulk_modulus * D.trace() * eye + 2.0 * G * d_dev;
+
+						Jaumann_rate = stressRate + W * stressTensor[i] + stressTensor[i] * W.transpose();
 						stressTensor[i] += dt * Jaumann_rate;
 						c0[i] = c0_type[itype];
 
