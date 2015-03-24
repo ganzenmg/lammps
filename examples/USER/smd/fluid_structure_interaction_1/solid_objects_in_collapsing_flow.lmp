@@ -9,7 +9,7 @@
 # mutual penetration of these physical entities.
 
 variable        l0 equal 0.05 # initial particle lattice spacing
-variable        rho_water equal 100 # mass density water
+variable        rho_water equal 1000 # mass density water
 variable        rho_obj equal 300 # mass density solid objects
 variable        h equal 2.5*${l0} # SPH kernel diameter
 variable        c0 equal 10.0 # speed of sound for water
@@ -18,7 +18,6 @@ variable        sigma_yield equal 0.1*${E} # plastic yield stress for solid obje
 variable        contact_stiffness equal 0.5*${c0}^2*${rho_water} # contact force amplitude
 variable        skin equal ${h} # Verlet list range
 variable        vol_one equal ${l0}^2 # initial particle volume for 2d simulation
-variable        cr0 equal ${l0}/2
 
 units		si
 dimension       2
@@ -55,19 +54,16 @@ group           tlsph type 2
 # initialize particle properties
 set             group all meso_rho ${rho_water}
 set             group all diameter ${h}
-set             group all contact_radius ${cr0}
+set             group all contact_radius ${l0}
 set             group all volume  ${vol_one}
 set             group all density ${rho_water}
 set             group solids density ${rho_obj}
-set             group water meso_e 10
 
 # set pair styles
-pair_style      hybrid/overlay ulsph tlsph *UPDATE_PAIRWISE 10.0 smd/hertz 1.0
+pair_style      hybrid/overlay ulsph tlsph *UPDATE_PAIRWISE 10.0 smd/hertz 1.5
 pair_coeff      1 1 ulsph *COMMON ${rho_water} ${c0} 0.1 1 &
-		*EOS_PERFECT_GAS 1.4 &
-		*END
-#		*EOS_TAIT 7.0 &
-#	        *END
+		*EOS_TAIT 7.0 &
+	        *END
 pair_coeff      2 2 tlsph *COMMON ${rho_obj} ${E} 0.3 0.5 0.0 10 1.0 &
                 *LINEAR_PLASTICITY ${sigma_yield} &
 		*EOS_LINEAR &
@@ -86,10 +82,10 @@ compute         nn water smd/ulsph_num_neighs
 compute         epl solids smd/plastic_strain
 compute         hgerr solids smd/hourglass_error
 
-fix             gfix all gravity -0.00 vector 0 1 0 # add gravity
+fix             gfix all gravity -9.81 vector 0 1 0 # add gravity
 variable        etot equal pe+ke+c_alleint+f_gfix # total energy of the system
 fix             dtfix all smd/adjust_dt 0.1 # compute stable time increment
-fix             integration_fix_water water smd/integrate_ulsph adjust_radius 1.2 xsph
+fix             integration_fix_water water smd/integrate_ulsph adjust_radius 1.2
 fix             integration_fix_solids solids smd/integrate_tlsph xsph
 fix             balance_fix all balance 1000 0.9 rcb # load balancing for MPI
 

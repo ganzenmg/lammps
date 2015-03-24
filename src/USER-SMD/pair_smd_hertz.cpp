@@ -167,13 +167,16 @@ void PairHertz::compute(int eflag, int vflag) {
 					//assuming poisson ratio = 1/4 for 3d
 					fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom); //  units: N
 					evdwl = fpair * 0.4e0 * delta; // GCG 25 April: this expression conserves total energy
+					dt_crit = 3.14 * sqrt(0.5 * (rmass[i] + rmass[j]) / (fpair / delta));
 				} else {
 					//assuming poisson ratio = 1/3 for 2d -- one factor of delta missing compared to 3d
-					fpair = 0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom); // units: N
+
+					fpair = 1.066666667e0 * bulkmodulus[itype][jtype] * delta * sqrt(delta * r_geom); //  units: N
+					//fpair = 0.16790413e0 * bulkmodulus[itype][jtype] * sqrt(delta * r_geom); // units: N
 					evdwl = fpair * 0.6666666666667e0 * delta;
+					dt_crit = 3.14 * sqrt(0.5 * (rmass[i] + rmass[j]) / (fpair / delta));
 				}
 
-				dt_crit = 3.14 * sqrt(0.5 * (rmass[i] + rmass[j]) / (fpair / delta));
 				stable_time_increment = MIN(stable_time_increment, dt_crit);
 				if (r > 2.0e-16) {
 					fpair /= r; // divide by r and multiply with non-normalized distance vector

@@ -54,7 +54,6 @@ using namespace SMD_Math;
 #include <Eigen/Eigen>
 using namespace Eigen;
 
-#define COMPUTE_CORRECTED_DERIVATIVES true
 #define ARTIFICIAL_STRESS false
 
 PairULSPH::PairULSPH(LAMMPS *lmp) :
@@ -74,6 +73,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	smoothVel = NULL;
 	numNeighs = NULL;
 	F = NULL;
+	gradient_correction = NULL;
 
 	artificial_stress_flag = false; // turn off artificial stress correction by default
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
@@ -90,6 +90,7 @@ PairULSPH::~PairULSPH() {
 		memory->destroy(rho0);
 		memory->destroy(eos);
 		memory->destroy(c0_type);
+		memory->destroy(gradient_correction);
 
 		delete[] onerad_dynamic;
 		delete[] onerad_frozen;
@@ -106,6 +107,7 @@ PairULSPH::~PairULSPH() {
 		delete[] artStress;
 		delete[] numNeighs;
 		delete[] F;
+
 	}
 }
 
@@ -210,7 +212,7 @@ void PairULSPH::PreCompute() {
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
 	int nlocal = atom->nlocal;
-	int inum, jnum, ii, jj, i, itype, jtype, j, iDim;
+	int inum, jnum, ii, jj, i, itype, jtype, j;
 	double wfd, h, irad, r, rSq, wf, ivol, jvol;
 	Vector3d dx, dv, g, du;
 	Matrix3d Ktmp, Ltmp, Ftmp;
@@ -219,14 +221,21 @@ void PairULSPH::PreCompute() {
 
 	// zero accumulators
 	for (i = 0; i < nlocal; i++) {
+		itype = type[i];
+
+		if (gradient_correction[itype]) {
+			K[i].setZero();
+		} else {
+			K[i].setIdentity();
+		}
+
 		delete_flag[i] = 0.0;
 		L[i].setZero();
 		numNeighs[i] = 0;
-		K[i].setZero();
 		F[i].setZero();
 	}
 
-// set up neighbor list variables
+	// set up neighbor list variables
 	inum = list->inum;
 	ilist = list->ilist;
 	numneigh = list->numneigh;
@@ -273,7 +282,7 @@ void PairULSPH::PreCompute() {
 				g = (wfd / r) * dx;
 
 				/* build correction matrix for kernel derivatives */
-				if (COMPUTE_CORRECTED_DERIVATIVES) {
+				if (gradient_correction[itype]) {
 					Ktmp = g * dx.transpose();
 					K[i] += jvol * Ktmp;
 				}
@@ -291,7 +300,7 @@ void PairULSPH::PreCompute() {
 
 				if (j < nlocal) {
 
-					if (COMPUTE_CORRECTED_DERIVATIVES) {
+					if (gradient_correction[itype]) {
 						K[j] += ivol * Ktmp;
 					}
 
@@ -307,9 +316,9 @@ void PairULSPH::PreCompute() {
 	 * invert shape matrix and compute corrected quantities
 	 */
 
-	if (COMPUTE_CORRECTED_DERIVATIVES) {
-		for (i = 0; i < nlocal; i++) {
-			itype = type[i];
+	for (i = 0; i < nlocal; i++) {
+		itype = type[i];
+		if (gradient_correction[itype]) {
 
 			if (domain->dimension == 2) {
 				Matrix2d K2d;
@@ -318,7 +327,14 @@ void PairULSPH::PreCompute() {
 				K2d(1, 0) = K[i](1, 0);
 				K2d(1, 1) = K[i](1, 1);
 
-				if (fabs(K2d.determinant()) > 1.0e-6) {
+				/*
+				 * compute rank
+				 */
+
+				//FullPivLU<Matrix2d> svd(K2d);
+				//JacobiSVD<Matrix2d> svd(K2d);
+				//cout << "rank of matrix is " << svd.rank() << endl;
+				if (fabs(K2d.determinant()) > 1.0e-8) {
 					K2di = K2d.inverse();
 					K[i].setZero();
 					K[i](0, 0) = K2di(0, 0);
@@ -327,12 +343,13 @@ void PairULSPH::PreCompute() {
 					K[i](1, 1) = K2di(1, 1);
 					K[i](2, 2) = 1.0;
 				} else {
-
-//					cout << "we have a problem with K; this is K" << endl << K2d << endl;
-//					cout << "det is " << K2d.determinant() << endl;
-//					cout << "NN is " << numNeighs[i] << endl;
-//					cout << "-----------------------------------------" << endl;
+					//cout << "rank of matrix is " << svd.rank() << endl;
+					//cout << "we have a problem with K; this is K" << endl << K2d << endl;
+					//cout << "det is " << K2d.determinant() << endl;
+					//cout << "NN is " << numNeighs[i] << endl;
+					//cout << "-----------------------------------------" << endl;
 					K[i].setIdentity();
+					//error->one(FLERR,"");
 				}
 
 			} else { // 3d
@@ -357,6 +374,7 @@ void PairULSPH::PreCompute() {
 
 		} // end loop over i = 0 to nlocal
 	}
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -371,7 +389,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	double *drho = atom->drho;
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
-	double *contact_radius = atom->contact_radius;
+
 	double *rho = atom->rho;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
@@ -384,7 +402,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 	Vector3d fi, fj, dx, dv, f_stress, g, vinti, vintj, dvint;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new;
 
-	double ini_dist, weight;
+	//double ini_dist, weight;
+	// double *contact_radius = atom->contact_radius;
 	Matrix3d S, D, V;
 	int k;
 	SelfAdjointEigenSolver<Matrix3d> es;
@@ -428,10 +447,10 @@ void PairULSPH::compute(int eflag, int vflag) {
 		numNeighs[i] = 0;
 	}
 
-	//PairULSPH::PreCompute_DensitySummation();
-	if (velocity_gradient_required == true) {
-		PairULSPH::PreCompute(); // get velocity gradient
-	}
+//PairULSPH::PreCompute_DensitySummation();
+//if (velocity_gradient_required == true) {
+	PairULSPH::PreCompute(); // get velocity gradient
+//}
 	PairULSPH::ComputePressure();
 
 	/*
@@ -503,7 +522,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				/*
 				 * artificial stress to control tensile instability
 				 */
-//				if (artificial_stress_flag == true) {
+//				if (true) { //(artificial_stress_flag == true) {
 //					ini_dist = contact_radius[i] + contact_radius[j];
 //					weight = Kernel_Cubic_Spline(r, h) / Kernel_Cubic_Spline(ini_dist, h);
 //					weight = pow(weight, 4.0);
@@ -512,7 +531,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 //					D = es.eigenvalues().asDiagonal();
 //					for (k = 0; k < 3; k++) {
 //						if (D(k, k) > 0.0) {
-//							D(k, k) -= weight * 1.0 * D(k, k);
+//							D(k, k) -= weight * 0.1 * D(k, k);
 //						}
 //					}
 //					V = es.eigenvectors();
@@ -681,6 +700,7 @@ void PairULSPH::ComputePressure() {
 	double *radius = atom->radius;
 	double *rho = atom->rho;
 	double *rmass = atom->rmass;
+	double *eff_plastic_strain = atom->eff_plastic_strain;
 	double **tlsph_stress = atom->tlsph_stress;
 	double *e = atom->e;
 	int *type = atom->type;
@@ -773,11 +793,13 @@ void PairULSPH::ComputePressure() {
 						LinearPlasticStrength(G, yield_strength, sigmaInitial_dev, d_dev, dt, sigmaFinal_dev, stressRate_dev,
 								plastic_strain_increment);
 						stressRate = bulk_modulus * D.trace() * eye + stressRate_dev;
+						eff_plastic_strain[i] += plastic_strain_increment;
+
 
 						// simple linear elastic model
 						//stressRate = bulk_modulus * D.trace() * eye + 2.0 * G * d_dev;
 
-						Jaumann_rate = stressRate + W * stressTensor[i] + stressTensor[i] * W.transpose();
+						Jaumann_rate = stressRate - W * stressTensor[i] + stressTensor[i] * W;
 						stressTensor[i] += dt * Jaumann_rate;
 						c0[i] = c0_type[itype];
 
@@ -804,7 +826,14 @@ void PairULSPH::ComputePressure() {
 			/*
 			 * kernel gradient correction
 			 */
-			if (COMPUTE_CORRECTED_DERIVATIVES) {
+
+//			pressure[i] = stressTensor[i].trace() / 3.0;
+//			if (fabs(pressure[i]) > 1.0) {
+//				cout << "here is stress tensor" << stressTensor[i] << endl;
+//				cout << "here is K            " << K[i] << endl << endl;
+//
+//			}
+			if (gradient_correction[itype]) {
 				stressTensor[i] = stressTensor[i] * K[i];
 			}
 
@@ -841,6 +870,7 @@ void PairULSPH::allocate() {
 	memory->create(rho0, n + 1, "pair:Q2");
 	memory->create(c0_type, n + 1, "pair:c0_type");
 	memory->create(eos, n + 1, "pair:eosmodel");
+	memory->create(gradient_correction, n + 1, "pair:gradient_correction");
 
 	memory->create(cutsq, n + 1, n + 1, "pair:cutsq");		// always needs to be allocated, even with granular neighborlist
 
@@ -848,6 +878,10 @@ void PairULSPH::allocate() {
 	onerad_frozen = new double[n + 1];
 	maxrad_dynamic = new double[n + 1];
 	maxrad_frozen = new double[n + 1];
+
+	for (int i = 1; i <= n; i++) {
+		gradient_correction[i] = false;
+	}
 
 //printf("end of allocate\n");
 }
@@ -1083,6 +1117,41 @@ void PairULSPH::coeff(int narg, char **arg) {
 					printf("%60s : %g\n", "shear modulus", SafeLookup("lame_mu", itype));
 				}
 			} // end *LINEAR_PLASTIC
+
+			else if (strcmp(arg[ioffset], "*GRADIENT_CORRECTION") == 0) {
+
+				/*
+				 * Gradient correction card
+				 */
+
+				printf("reading *GRADIENT_CORRECTION\n");
+
+				t = string("*");
+				iNextKwd = -1;
+				for (iarg = ioffset + 1; iarg < narg; iarg++) {
+					s = string(arg[iarg]);
+					if (s.compare(0, t.length(), t) == 0) {
+						iNextKwd = iarg;
+						break;
+					}
+				}
+
+				if (iNextKwd < 0) {
+					sprintf(str, "no *KEYWORD terminates *GRADIENT_CORRECTION");
+					error->all(FLERR, str);
+				}
+
+				if (iNextKwd - ioffset != 1 + 0) {
+					sprintf(str, "expected 0 arguments following *GRADIENT_CORRECTION but got %d\n", iNextKwd - ioffset - 1);
+					error->all(FLERR, str);
+				}
+
+				gradient_correction[itype] = true;
+
+				if (comm->me == 0) {
+					printf("\n%60s\n", "Kernel gradient correction is active");
+				}
+			} // end gradient correction material card
 
 			else {
 				sprintf(str, "unknown *KEYWORD: %s", arg[ioffset]);
