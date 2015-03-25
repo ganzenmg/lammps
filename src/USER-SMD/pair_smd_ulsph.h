@@ -98,6 +98,7 @@ private:
 	double SafeLookup(std::string str, int itype);
 	bool CheckKeywordPresent(std::string str, int itype);
 
+	double *hourglass_amplitude;
 	bool *gradient_correction;
 	bool artificial_stress_flag; // artificial stress is needed for material models with strength
 	bool velocity_gradient_required;

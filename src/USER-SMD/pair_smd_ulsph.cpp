@@ -74,6 +74,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	numNeighs = NULL;
 	F = NULL;
 	gradient_correction = NULL;
+	hourglass_amplitude = NULL;
 
 	artificial_stress_flag = false; // turn off artificial stress correction by default
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
@@ -91,6 +92,7 @@ PairULSPH::~PairULSPH() {
 		memory->destroy(eos);
 		memory->destroy(c0_type);
 		memory->destroy(gradient_correction);
+		memory->destroy(hourglass_amplitude);
 
 		delete[] onerad_dynamic;
 		delete[] onerad_frozen;
@@ -401,6 +403,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 	int **firstneigh;
 	Vector3d fi, fj, dx, dv, f_stress, g, vinti, vintj, dvint;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new;
+	Vector3d gamma, f_hg, dx0, du_est, du;
+	double gamma_dot_dx, delta, hg_mag;
 
 	//double ini_dist, weight;
 	// double *contact_radius = atom->contact_radius;
@@ -561,18 +565,19 @@ void PairULSPH::compute(int eflag, int vflag) {
 				/*
 				 * hourglass treatment
 				 */
-				Vector3d gamma, f_hg, dx0, du_est, du;
-				double gamma_dot_dx, delta, hg_mag;
-				double amp = 50.0;
 
-				dx0(0) = x0[j][0] - x0[i][0];
-				dx0(1) = x0[j][1] - x0[i][1];
-				dx0(2) = x0[j][2] - x0[i][2];
+				if (hourglass_amplitude[itype] > 0.0) {
 
-				du_est = 0.5 * (F[i] + F[j]) * dx;
-				du = dx - dx0;
 
-				gamma = 0.5 * (F[i] + F[j]) * dx - du;
+
+					dx0(0) = x0[j][0] - x0[i][0];
+					dx0(1) = x0[j][1] - x0[i][1];
+					dx0(2) = x0[j][2] - x0[i][2];
+
+					du_est = 0.5 * (F[i] + F[j]) * dx;
+					du = dx - dx0;
+
+					gamma = 0.5 * (F[i] + F[j]) * dx - du;
 
 //				if (du.norm() > 0.1) {
 //					printf("du_est is %f %f %f\n", du_est(0), du_est(1), du_est(2));
@@ -581,12 +586,15 @@ void PairULSPH::compute(int eflag, int vflag) {
 //					printf("--------------\n");
 //				}
 
-				gamma_dot_dx = gamma.dot(dx); // project hourglass error vector onto pair distance vector
-				LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
-				delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
-				hg_mag = amp * delta / (rSq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
-				hg_mag *= -ivol * jvol * wf * 1.0; // hg_mag has dimensions [J*m^(-1)] = [N]
-				f_hg = (hg_mag / (r + 0.01 * h)) * dx;
+					gamma_dot_dx = gamma.dot(dx); // project hourglass error vector onto pair distance vector
+					LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
+					delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
+					hg_mag = hourglass_amplitude[itype] * delta / (rSq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
+					hg_mag *= -ivol * jvol * wf * 1.0; // hg_mag has dimensions [J*m^(-1)] = [N]
+					f_hg = (hg_mag / (r + 0.01 * h)) * dx;
+				} else {
+					f_hg.setZero();
+				}
 
 				sumForces = f_stress + f_visc + f_hg;
 
@@ -795,7 +803,6 @@ void PairULSPH::ComputePressure() {
 						stressRate = bulk_modulus * D.trace() * eye + stressRate_dev;
 						eff_plastic_strain[i] += plastic_strain_increment;
 
-
 						// simple linear elastic model
 						//stressRate = bulk_modulus * D.trace() * eye + 2.0 * G * d_dev;
 
@@ -871,6 +878,7 @@ void PairULSPH::allocate() {
 	memory->create(c0_type, n + 1, "pair:c0_type");
 	memory->create(eos, n + 1, "pair:eosmodel");
 	memory->create(gradient_correction, n + 1, "pair:gradient_correction");
+	memory->create(hourglass_amplitude, n + 1, "pair:hourglass_correction");
 
 	memory->create(cutsq, n + 1, n + 1, "pair:cutsq");		// always needs to be allocated, even with granular neighborlist
 
@@ -953,8 +961,8 @@ void PairULSPH::coeff(int narg, char **arg) {
 			error->all(FLERR, str);
 		}
 
-		if (iNextKwd - ioffset != 4 + 1) {
-			sprintf(str, "expected 7 arguments following *COMMON but got %d\n", iNextKwd - ioffset - 1);
+		if (iNextKwd - ioffset != 5 + 1) {
+			sprintf(str, "expected 5 arguments following *COMMON but got %d\n", iNextKwd - ioffset - 1);
 			error->all(FLERR, str);
 		}
 
@@ -962,6 +970,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 		matProp2[std::make_pair("c_ref", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
 		matProp2[std::make_pair("viscosity_q1", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
 		matProp2[std::make_pair("heat_capacity", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
+		matProp2[std::make_pair("hourglass_amplitude", itype)] = force->numeric(FLERR, arg[ioffset + 5]);
 
 		matProp2[std::make_pair("bulk_modulus", itype)] = SafeLookup("c_ref", itype) * SafeLookup("c_ref", itype)
 				* SafeLookup("rho_ref", itype);
@@ -973,6 +982,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 			printf("%40s : %g\n", "linear viscosity coefficient", SafeLookup("viscosity_q1", itype));
 			printf("%40s : %g\n", "heat capacity [energy / (mass * temperature)]", SafeLookup("heat_capacity", itype));
 			printf("%40s : %g\n", "bulk modulus", SafeLookup("bulk_modulus", itype));
+			printf("%40s : %g\n", "hourglass control amplitude", SafeLookup("hourglass_amplitude", itype));
 		}
 
 		/*
@@ -1167,6 +1177,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 		Q1[itype] = SafeLookup("viscosity_q1", itype);
 		rho0[itype] = SafeLookup("rho_ref", itype);
 		c0_type[itype] = SafeLookup("c_ref", itype);
+		hourglass_amplitude[itype] = SafeLookup("hourglass_amplitude", itype);
 
 		setflag[itype][itype] = 1;
 	} else {

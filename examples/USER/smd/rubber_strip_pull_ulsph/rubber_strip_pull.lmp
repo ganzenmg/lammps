@@ -6,13 +6,14 @@ variable        rho equal 1 # initial mass density
 variable        E equal 1.0 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
 variable        sigy equal 0.05*${E}
-variable        h equal 3.01*${l0} # SPH smoothing kernel diameter
+variable        h equal 2.01*${l0} # SPH smoothing kernel diameter
 variable        vol_one equal ${l0}^2 # volume of one particle
 variable        mass_one equal ${vol_one}*${rho} # mass of one particle
 variable        skin equal 0.9*${l0} # Verlet list range
 variable        vel equal 0.005 # pull velocity
 variable        c0 equal 1.0
 variable        crad equal ${l0}/2.0
+variable        hg equal 50.0
 
 units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
 dimension       2 # this is a 2d plane-strain simulation
@@ -41,8 +42,9 @@ group           bot region bot # bottom row of particles
 group           tlsph union all
 
 pair_style      ulsph
-pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 1 &
-		*LINEAR_PLASTIC ${E} ${nu} ${sigy}&
+pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 1 ${hg} &
+		*LINEAR_PLASTIC ${E} ${nu} ${sigy} &
+		*GRADIENT_CORRECTION &
 	        *END
 
 compute         S all smd/ulsph_stress # Cauchy stress tensor
