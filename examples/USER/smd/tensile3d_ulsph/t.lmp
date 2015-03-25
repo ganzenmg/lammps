@@ -1,0 +1,88 @@
+#processors      4 1 1
+variable        rho equal 2700.0e-9
+variable        h equal 0.82
+variable        E equal 10 # Young's modulus
+variable        nu equal 0.3 # Poisson ratio
+variable        sigy equal 10.0
+variable        vel equal 1.0
+variable        hg equal 1000.0
+# ----
+variable        c0 equal sqrt(${E}/${rho})
+variable        dt equal 0.125*${h}/${c0}
+print           "sound speed is ${c0}, CFL timestep is ${dt}"
+variable        skin equal 0.5*${h} # Verlet list range
+variable        contact_stiffness equal 1*${E}
+
+units		si
+dimension       3
+boundary        s s s
+atom_style      smd
+comm_style      tiled
+neighbor        ${skin} bin
+neigh_modify    every 100 delay 0 check no # only build neighbor list if particle has moved half the skin distance
+comm_modify     vel yes
+newton          off
+
+read_data       h4_adjusted.data
+variable        xmin equal bound(all,xmin)
+variable        xminplus equal ${xmin}+15.0
+variable        xmax equal bound(all,xmax)
+variable        xmaxminus equal ${xmax}-15.0
+region          bot block EDGE ${xminplus} EDGE EDGE EDGE EDGE units box
+region          top block ${xmaxminus} EDGE EDGE EDGE EDGE EDGE units box
+group           top region top
+group           bot region bot
+
+velocity        top set  ${vel} 0 0 sum no units box
+velocity        bot set -${vel} 0 0 sum no units box
+
+
+pair_style      ulsph
+pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 1 ${hg} &
+		*LINEAR_PLASTIC ${E} ${nu} ${sigy} &
+		*GRADIENT_CORRECTION &
+	        *END
+
+compute         P all smd/plastic_strain
+compute         S all smd/ulsph_stress
+compute         nn all smd/ulsph_num_neighs
+compute         contact_radius all smd/contact_radius
+compute         eint all smd/internal_energy
+compute         alleint all reduce sum c_eint
+#compute         sumforce BCL reduce sum fx
+variable        etot equal ke+c_alleint+pe
+
+
+balance          1.0 rcb
+
+# time integration
+timestep        ${dt}
+variable        maxdist equal ${h}
+fix             dtfix all smd/adjust_dt 0.1
+fix             force_fix1 top setforce 0 0 0
+fix             force_fix2 bot setforce 0 0 0
+fix             integration_fix all smd/integrate_ulsph adjust_radius 1.2
+variable        a equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
+variable        disp equal 2.0*${vel}*f_dtfix
+fix             output_fix all print 10 "${disp} $a" file force_displacement.dat screen no
+
+
+variable        nrun equal round((10.0/${vel})/${dt})
+print "running for ${nrun} steps"
+
+variable        dumpFreq equal round(${nrun}/1000)
+dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
+                c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
+                fx fy fz vx vy vz c_P c_eint &
+                c_contact_radius c_nn mol
+
+dump_modify     dump_id first yes
+
+thermo          100
+thermo_style    custom step ke pe v_etot c_alleint dt
+#thermo_modify   lost ignore
+
+run             ${nrun}
+#
+#
+#

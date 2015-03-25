@@ -18,13 +18,13 @@ SHELL = /bin/sh
 
 CC =		mpic++
 #CCFLAGS =	-Wall -Wno-unused-parameter -O2 -g -fsanitize=address -fno-omit-frame-pointer
-CCFLAGS =	-Wall -Wno-unused-parameter -O3 -ffast-math
+CCFLAGS =	-Wall -Wno-unused-parameter -O3
 SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
 LINK =		mpic++
-#LINKFLAGS =	-O2 -g -fsanitize=address -fno-omit-frame-pointer
-LINKFLAGS =	-O3 -ffast-math
+#LINKFLAGS = -O2 -g -fsanitize=address -fno-omit-frame-pointer
+LINKFLAGS =	-O3
 LIB =       -lstdc++
 SIZE =		size
 

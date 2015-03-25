@@ -216,8 +216,9 @@ void PairULSPH::PreCompute() {
 	int nlocal = atom->nlocal;
 	int inum, jnum, ii, jj, i, itype, jtype, j;
 	double wfd, h, irad, r, rSq, wf, ivol, jvol;
+	bool gradient_correction_flag;
 	Vector3d dx, dv, g, du;
-	Matrix3d Ktmp, Ltmp, Ftmp;
+	Matrix3d Ktmp, Ltmp, Ftmp, K3di;
 	Vector3d xi, xj, vi, vj, x0i, x0j, dx0;
 	Matrix2d K2di, K2d;
 
@@ -251,6 +252,8 @@ void PairULSPH::PreCompute() {
 		irad = radius[i];
 		ivol = rmass[i] / rho[i];
 
+		gradient_correction_flag = gradient_correction[itype]; // perform kernel gradient correction for this particle type?
+
 		// initialize Eigen data structures from LAMMPS data structures
 		x0i << x0[i][0], x0[i][1], x0[i][2];
 		xi << x[i][0], x[i][1], x[i][2];
@@ -273,6 +276,10 @@ void PairULSPH::PreCompute() {
 				jtype = type[j];
 				jvol = rmass[j] / rho[j];
 
+				if (itype != jtype) {
+					error->one(FLERR, "type of particle i does not equal type of particle j. Something is very wrong.");
+				}
+
 				// distance vectors in current and reference configuration, velocity difference
 				dv = vj - vi;
 				dx0 = x0j - x0i;
@@ -284,7 +291,7 @@ void PairULSPH::PreCompute() {
 				g = (wfd / r) * dx;
 
 				/* build correction matrix for kernel derivatives */
-				if (gradient_correction[itype]) {
+				if (gradient_correction_flag) {
 					Ktmp = g * dx.transpose();
 					K[i] += jvol * Ktmp;
 				}
@@ -302,7 +309,7 @@ void PairULSPH::PreCompute() {
 
 				if (j < nlocal) {
 
-					if (gradient_correction[itype]) {
+					if (gradient_correction_flag) {
 						K[j] += ivol * Ktmp;
 					}
 
@@ -318,64 +325,78 @@ void PairULSPH::PreCompute() {
 	 * invert shape matrix and compute corrected quantities
 	 */
 
+	bool Shape_Matrix_Inversion_Success = false;
+	SelfAdjointEigenSolver<Matrix2d> es;
+	SelfAdjointEigenSolver<Matrix3d> es3d;
+
 	for (i = 0; i < nlocal; i++) {
 		itype = type[i];
-		if (gradient_correction[itype]) {
+		if (setflag[itype][itype]) {
+			if (gradient_correction[itype]) {
+				Shape_Matrix_Inversion_Success = false;
 
-			if (domain->dimension == 2) {
-				Matrix2d K2d;
-				K2d(0, 0) = K[i](0, 0);
-				K2d(0, 1) = K[i](0, 1);
-				K2d(1, 0) = K[i](1, 0);
-				K2d(1, 1) = K[i](1, 1);
+				if (domain->dimension == 2) {
+					Matrix2d K2d;
+					K2d(0, 0) = K[i](0, 0);
+					K2d(0, 1) = K[i](0, 1);
+					K2d(1, 0) = K[i](1, 0);
+					K2d(1, 1) = K[i](1, 1);
 
-				/*
-				 * compute rank
-				 */
+					if (fabs(K2d.determinant()) > 1.0e-16) {
+						K2di = K2d.inverse();
+						// check if inverse of K2d is reasonable
+						es.compute(K2di);
+						if ((fabs(es.eigenvalues()(0)) > 0.1) && (fabs(es.eigenvalues()(1)) > 0.1)) {
+							Shape_Matrix_Inversion_Success = true;
+						}
+					}
 
-				//FullPivLU<Matrix2d> svd(K2d);
-				//JacobiSVD<Matrix2d> svd(K2d);
-				//cout << "rank of matrix is " << svd.rank() << endl;
-				if (fabs(K2d.determinant()) > 1.0e-8) {
-					K2di = K2d.inverse();
-					K[i].setZero();
-					K[i](0, 0) = K2di(0, 0);
-					K[i](0, 1) = K2di(0, 1);
-					K[i](1, 0) = K2di(1, 0);
-					K[i](1, 1) = K2di(1, 1);
-					K[i](2, 2) = 1.0;
-				} else {
-					//cout << "rank of matrix is " << svd.rank() << endl;
-					//cout << "we have a problem with K; this is K" << endl << K2d << endl;
-					//cout << "det is " << K2d.determinant() << endl;
-					//cout << "NN is " << numNeighs[i] << endl;
-					//cout << "-----------------------------------------" << endl;
-					K[i].setIdentity();
-					//error->one(FLERR,"");
-				}
+					if (Shape_Matrix_Inversion_Success) {
+						K[i].setZero();
+						K[i](0, 0) = K2di(0, 0);
+						K[i](0, 1) = K2di(0, 1);
+						K[i](1, 0) = K2di(1, 0);
+						K[i](1, 1) = K2di(1, 1);
+						K[i](2, 2) = 1.0;
+					} else {
+						cout << "we have a problem with K; this is K" << endl << K2d << endl;
+						K[i].setIdentity();
+					}
 
-			} else { // 3d
-				if (fabs(K[i].determinant()) > 1.0e-16) {
-					K[i] = K[i].inverse();
-				} else {
-					K[i].setIdentity();
-				}
-			}
+				} else { // 3d
+					if (fabs(K[i].determinant()) > 1.0e-16) {
+						K3di = K[i].inverse();
+						// check if inverse of K is reasonable
+						es3d.compute(K3di);
+						if ((fabs(es3d.eigenvalues()(0)) > 0.1) && (fabs(es3d.eigenvalues()(1)) > 0.1)
+								&& (fabs(es3d.eigenvalues()(2)) > 0.1)) {
+							Shape_Matrix_Inversion_Success = true;
+						}
+					}
+
+					if (Shape_Matrix_Inversion_Success) {
+						K[i] = K3di;
+					} else {
+						cout << "we have a problem with K; this is K" << endl << K[i] << endl;
+						K[i].setIdentity();
+					}
+				} // end if 3d
 
 //			if (i == 20) {
 //				cout << endl << "this is L before mult with K" << endl << L[i] << endl << "-----------------------" << endl;
 //				cout << "this is K" << endl << K[i] << endl;
 //			}
 
-			L[i] *= K[i];
-			F[i] *= K[i];
+				L[i] *= K[i];
+				F[i] *= K[i];
 
 //			if (i == 20) {
 //				cout << "this is L after mult with K" << endl << L[i] << endl << "-----------------------" << endl;
 //			}
 
-		} // end loop over i = 0 to nlocal
-	}
+			} // end if (gradient_correction[itype]) {
+		} // end if (setflag[itype][itype])
+	} // end loop over i = 0 to nlocal
 
 }
 
@@ -406,8 +427,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 	Vector3d gamma, f_hg, dx0, du_est, du;
 	double gamma_dot_dx, delta, hg_mag;
 
-	//double ini_dist, weight;
-	// double *contact_radius = atom->contact_radius;
+	double ini_dist, weight;
+	double *contact_radius = atom->contact_radius;
 	Matrix3d S, D, V;
 	int k;
 	SelfAdjointEigenSolver<Matrix3d> es;
@@ -418,7 +439,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 		evflag = vflag_fdotr = 0;
 
 	if (atom->nmax > nmax) {
-		//printf("... allocating in compute with nmax = %d\n", atom->nmax);
+//printf("... allocating in compute with nmax = %d\n", atom->nmax);
 		nmax = atom->nmax;
 		delete[] K;
 		K = new Matrix3d[nmax];
@@ -480,9 +501,9 @@ void PairULSPH::compute(int eflag, int vflag) {
 		jnum = numneigh[i];
 		ivol = rmass[i] / rho[i];
 
-		//printf("i = %d, nj=%d\n", i, jnum);
+//printf("i = %d, nj=%d\n", i, jnum);
 
-		// initialize Eigen data structures from LAMMPS data structures
+// initialize Eigen data structures from LAMMPS data structures
 		for (iDim = 0; iDim < 3; iDim++) {
 			xi(iDim) = x[i][iDim];
 			vi(iDim) = v[i][iDim];
@@ -535,7 +556,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 //					D = es.eigenvalues().asDiagonal();
 //					for (k = 0; k < 3; k++) {
 //						if (D(k, k) > 0.0) {
-//							D(k, k) -= weight * 0.1 * D(k, k);
+//							D(k, k) -= weight * 1.0 * D(k, k);
 //						}
 //					}
 //					V = es.eigenvectors();
@@ -568,29 +589,26 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 				if (hourglass_amplitude[itype] > 0.0) {
 
-
-
 					dx0(0) = x0[j][0] - x0[i][0];
 					dx0(1) = x0[j][1] - x0[i][1];
 					dx0(2) = x0[j][2] - x0[i][2];
-
 					du_est = 0.5 * (F[i] + F[j]) * dx;
 					du = dx - dx0;
+					gamma = du_est - du;
 
-					gamma = 0.5 * (F[i] + F[j]) * dx - du;
+//					if (du.norm() > 0.01) {
+//						printf("du_est is %f %f %f\n", du_est(0), du_est(1), du_est(2));
+//						printf("du actual is %f %f %f\n", du(0), du(1), du(2));
+//						printf("gamma is %f %f %f\n", gamma(0), gamma(1), gamma(2));
+//						printf("--------------\n");
+//					}
 
-//				if (du.norm() > 0.1) {
-//					printf("du_est is %f %f %f\n", du_est(0), du_est(1), du_est(2));
-//					printf("du actual is %f %f %f\n", du(0), du(1), du(2));
-//					printf("gamma is %f %f %f\n", gamma(0), gamma(1), gamma(2));
-//					printf("--------------\n");
-//				}
+					gamma_dot_dx = gamma.dot(dx) / (r + 0.1 * h); // project hourglass error vector onto normalized pair distance vector
+					LimitDoubleMagnitude(gamma_dot_dx, r); // limit projected vector to avoid numerical instabilities
+					delta = 0.5 * gamma_dot_dx; // delta has dimensions of [m]
+					hg_mag = hourglass_amplitude[itype] * delta / (rSq + 0.01 * h * h); // hg_mag has dimensions [Pa m^(-1)]
+					hg_mag *= -ivol * jvol * wf; // hg_mag has dimensions [J*m^(-1)] = [N]
 
-					gamma_dot_dx = gamma.dot(dx); // project hourglass error vector onto pair distance vector
-					LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
-					delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
-					hg_mag = hourglass_amplitude[itype] * delta / (rSq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
-					hg_mag *= -ivol * jvol * wf * 1.0; // hg_mag has dimensions [J*m^(-1)] = [N]
 					f_hg = (hg_mag / (r + 0.01 * h)) * dx;
 				} else {
 					f_hg.setZero();
@@ -924,8 +942,8 @@ void PairULSPH::coeff(int narg, char **arg) {
 	 */
 
 	if (force->inumeric(FLERR, arg[0]) == force->inumeric(FLERR, arg[1])) {
-		//sprintf(str, "ULSPH coefficients can only be specified between particles of same type!");
-		//error->all(FLERR, str);
+//sprintf(str, "ULSPH coefficients can only be specified between particles of same type!");
+//error->all(FLERR, str);
 
 		itype = force->inumeric(FLERR, arg[0]);
 
@@ -1177,7 +1195,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 		Q1[itype] = SafeLookup("viscosity_q1", itype);
 		rho0[itype] = SafeLookup("rho_ref", itype);
 		c0_type[itype] = SafeLookup("c_ref", itype);
-		hourglass_amplitude[itype] = SafeLookup("hourglass_amplitude", itype);
+		hourglass_amplitude[itype] = SafeLookup("bulk_modulus", itype) * SafeLookup("hourglass_amplitude", itype);
 
 		setflag[itype][itype] = 1;
 	} else {
@@ -1446,7 +1464,7 @@ void *PairULSPH::extract(const char *str, int &i) {
 	} else if (strcmp(str, "smd/ulsph/numNeighs_ptr") == 0) {
 		return (void *) numNeighs;
 	} else if (strcmp(str, "smd/ulsph/dtCFL_ptr") == 0) {
-		//printf("dtcfl = %f\n", dtCFL);
+//printf("dtcfl = %f\n", dtCFL);
 		return (void *) &dtCFL;
 	}
 
@@ -1467,7 +1485,7 @@ double PairULSPH::SafeLookup(std::string str, int itype) {
 //cout << "string passed to lookup: " << str << endl;
 	char msg[128];
 	if (matProp2.count(std::make_pair(str, itype)) == 1) {
-		//cout << "returning look up value %d " << matProp2[std::make_pair(str, itype)] << endl;
+//cout << "returning look up value %d " << matProp2[std::make_pair(str, itype)] << endl;
 		return matProp2[std::make_pair(str, itype)];
 	} else {
 		sprintf(msg, "failed to lookup indentifier [%s] for particle type %d", str.c_str(), itype);
