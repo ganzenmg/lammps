@@ -3,9 +3,9 @@ variable        rho equal 2700.0e-9
 variable        h equal 0.82
 variable        E equal 10 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
-variable        sigy equal 10.0
-variable        vel equal 1.0
-variable        hg equal 1000.0
+variable        sigy equal 0.1
+variable        vel equal 10.0
+variable        hg equal 100.0
 # ----
 variable        c0 equal sqrt(${E}/${rho})
 variable        dt equal 0.125*${h}/${c0}
@@ -33,15 +33,16 @@ region          top block ${xmaxminus} EDGE EDGE EDGE EDGE EDGE units box
 group           top region top
 group           bot region bot
 
-velocity        top set  ${vel} 0 0 sum no units box
+velocity        top set ${vel} 0 0 sum no units box
 velocity        bot set -${vel} 0 0 sum no units box
 
 
 pair_style      ulsph
 pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 1 ${hg} &
 		*LINEAR_PLASTIC ${E} ${nu} ${sigy} &
-		*GRADIENT_CORRECTION &
+		*GRADIENT_CORRECTION & 
 	        *END
+
 
 compute         P all smd/plastic_strain
 compute         S all smd/ulsph_stress
