@@ -13,7 +13,7 @@ variable        skin equal 0.9*${l0} # Verlet list range
 variable        vel equal 0.005 # pull velocity
 variable        c0 equal 1.0
 variable        crad equal ${l0}/2.0
-variable        hg equal 100.0
+variable        hg equal 200.0
 
 units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
 dimension       2 # this is a 2d plane-strain simulation

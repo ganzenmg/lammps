@@ -5,7 +5,7 @@ variable        E equal 10 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
 variable        sigy equal 0.1
 variable        vel equal 10.0
-variable        hg equal 100.0
+variable        hg equal 1000.0
 # ----
 variable        c0 equal sqrt(${E}/${rho})
 variable        dt equal 0.125*${h}/${c0}
@@ -46,6 +46,8 @@ pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 1 ${hg} &
 
 compute         P all smd/plastic_strain
 compute         S all smd/ulsph_stress
+compute         E all smd/ulsph_strain
+
 compute         nn all smd/ulsph_num_neighs
 compute         contact_radius all smd/contact_radius
 compute         eint all smd/internal_energy
@@ -74,6 +76,7 @@ print "running for ${nrun} steps"
 variable        dumpFreq equal round(${nrun}/1000)
 dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
                 c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
+                c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
                 fx fy fz vx vy vz c_P c_eint &
                 c_contact_radius c_nn mol
 

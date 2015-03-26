@@ -79,8 +79,10 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 
 	artificial_stress_flag = false; // turn off artificial stress correction by default
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
+	gradient_correction_possible = NULL;
 
-	comm_forward = 18; // this pair style communicates 18 doubles to ghost atoms
+	comm_forward = 20; // this pair style communicates 20 doubles to ghost atoms
+	updateFlag = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -111,6 +113,7 @@ PairULSPH::~PairULSPH() {
 		delete[] artStress;
 		delete[] numNeighs;
 		delete[] F;
+		delete[] gradient_correction_possible;
 
 	}
 }
@@ -206,6 +209,7 @@ void PairULSPH::PreCompute_DensitySummation() {
  ---------------------------------------------------------------------- */
 
 void PairULSPH::PreCompute() {
+	double **atom_data9 = atom->tlsph_fold;
 	double *radius = atom->radius;
 	double **x = atom->x;
 	double **x0 = atom->x0;
@@ -220,24 +224,27 @@ void PairULSPH::PreCompute() {
 	double wfd, h, irad, r, rSq, wf, ivol, jvol;
 	bool gradient_correction_flag;
 	Vector3d dx, dv, g, du;
-	Matrix3d Ktmp, Ltmp, Ftmp, K3di;
+	Matrix3d Ktmp, Ltmp, Ftmp, K3di, D;
 	Vector3d xi, xj, vi, vj, x0i, x0j, dx0;
 	Matrix2d K2di, K2d;
 
 	// zero accumulators
 	for (i = 0; i < nlocal; i++) {
 		itype = type[i];
+		if (setflag[itype][itype]) {
 
-		if (gradient_correction[itype]) {
-			K[i].setZero();
-		} else {
-			K[i].setIdentity();
+			if (gradient_correction[itype]) {
+				K[i].setZero();
+			} else {
+				K[i].setIdentity();
+			}
+
+			delete_flag[i] = 0.0;
+			L[i].setZero();
+			numNeighs[i] = 0;
+			F[i].setZero();
+			gradient_correction_possible[i] = false;
 		}
-
-		delete_flag[i] = 0.0;
-		L[i].setZero();
-		numNeighs[i] = 0;
-		F[i].setZero();
 	}
 
 	// set up neighbor list variables
@@ -360,27 +367,34 @@ void PairULSPH::PreCompute() {
 						K[i](1, 0) = K2di(1, 0);
 						K[i](1, 1) = K2di(1, 1);
 						K[i](2, 2) = 1.0;
+						gradient_correction_possible[i] = true;
 					} else {
 						cout << "we have a problem with K; this is K" << endl << K2d << endl;
 						K[i].setIdentity();
 					}
 
 				} else { // 3d
-					if (fabs(K[i].determinant()) > 1.0e-16) {
-						K3di = K[i].inverse();
+					if (fabs(K[i].determinant()) > 1.0e-6) {
 						// check if inverse of K is reasonable
-						es3d.compute(K3di);
-						if ((fabs(es3d.eigenvalues()(0)) > 0.1) && (fabs(es3d.eigenvalues()(1)) > 0.1)
-								&& (fabs(es3d.eigenvalues()(2)) > 0.1)) {
+						es3d.compute(K[i]);
+						if ((fabs(es3d.eigenvalues()(0)) > 1.0e-3) && (fabs(es3d.eigenvalues()(1)) > 1.0e-3)
+								&& (fabs(es3d.eigenvalues()(2)) > 1.0e-3)) {
 							Shape_Matrix_Inversion_Success = true;
+						} else {
+							cout << endl << "we have a problem with K due to small eigenvalues; this is K" << endl << K[i] << endl;
+							cout << "these are the eigenvalues of K " << es3d.eigenvalues() << endl;
 						}
+					} else {
+						cout << endl << "we have a problem with K due to a small determinant; this is K" << endl << K[i] << endl;
 					}
 
 					if (Shape_Matrix_Inversion_Success) {
+						K3di = K[i].inverse();
 						K[i] = K3di;
+						gradient_correction_possible[i] = true;
 					} else {
-						cout << "we have a problem with K; this is K" << endl << K[i] << endl;
 						K[i].setIdentity();
+
 					}
 				} // end if 3d
 
@@ -395,6 +409,18 @@ void PairULSPH::PreCompute() {
 //			if (i == 20) {
 //				cout << "this is L after mult with K" << endl << L[i] << endl << "-----------------------" << endl;
 //			}
+
+				/*
+				 * accumulate strain increments
+				 * we abuse the atom array "tlsph_fold" for this purpose, which 3was originally designed to hold the deformation gradient.
+				 */
+				D = update->dt * 0.5 * (L[i] + L[i].transpose());
+				atom_data9[i][0] += D(0,0); // xx
+				atom_data9[i][1] += D(1,1); // yy
+				atom_data9[i][2] += D(2,2); // zz
+				atom_data9[i][3] += D(0,1); // xy
+				atom_data9[i][4] += D(0,2); // xz
+				atom_data9[i][5] += D(1,2); // yz
 
 			} // end if (gradient_correction[itype]) {
 		} // end if (setflag[itype][itype])
@@ -415,6 +441,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
 	double *plastic_strain = atom->eff_plastic_strain;
+	double **atom_data9 = atom->tlsph_fold;
 
 	double *rho = atom->rho;
 	int *type = atom->type;
@@ -466,6 +493,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 		numNeighs = new int[nmax];
 		delete[] F;
 		F = new Matrix3d[nmax];
+		delete[] gradient_correction_possible;
+		gradient_correction_possible = new bool[nmax];
 	}
 
 // zero accumulators
@@ -475,10 +504,21 @@ void PairULSPH::compute(int eflag, int vflag) {
 		numNeighs[i] = 0;
 	}
 
-//PairULSPH::PreCompute_DensitySummation();
-//if (velocity_gradient_required == true) {
+	/*
+	 * if this is the very first step, zero the array which holds the accumulated strain
+	 */
+	if (update->ntimestep == 0) {
+		for (i = 0; i < nlocal; i++) {
+			itype = type[i];
+			if (setflag[itype][itype]) {
+				for (j = 0; j < 9; j++) {
+					atom_data9[i][j] = 0.0;
+				}
+			}
+		}
+	}
+
 	PairULSPH::PreCompute(); // get velocity gradient
-//}
 	PairULSPH::ComputePressure();
 
 	/*
@@ -486,6 +526,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 	 * NEED TO DO A FORWARD COMMUNICATION TO GHOST ATOMS NOW
 	 */
 	comm->forward_comm_pair(this);
+
+	updateFlag = 0;
 
 	/*
 	 * iterate over pairs of particles i, j and assign forces using pre-computed pressure
@@ -590,17 +632,16 @@ void PairULSPH::compute(int eflag, int vflag) {
 				 * hourglass treatment
 				 */
 
-				if (hourglass_amplitude[itype] > 0.0) {
+				dx0(0) = x0[j][0] - x0[i][0];
+				dx0(1) = x0[j][1] - x0[i][1];
+				dx0(2) = x0[j][2] - x0[i][2];
+				du = dx - dx0;
 
-					dx0(0) = x0[j][0] - x0[i][0];
-					dx0(1) = x0[j][1] - x0[i][1];
-					dx0(2) = x0[j][2] - x0[i][2];
+				if ((hourglass_amplitude[itype] > 0.0) && (gradient_correction_possible[i] == true)
+						&& (gradient_correction_possible[j] == true)) {
+
 					du_est = 0.5 * (F[i] + F[j]) * dx;
-					du = dx - dx0;
 					gamma = du_est - du;
-
-					//if (r > dx0.norm()) {
-						if (S.trace() > 0.0) {
 
 //					if (du.norm() > 0.01) {
 //						printf("du_est is %f %f %f\n", du_est(0), du_est(1), du_est(2));
@@ -609,34 +650,22 @@ void PairULSPH::compute(int eflag, int vflag) {
 //						printf("--------------\n");
 //					}
 
-						gamma_dot_dx = gamma.dot(dx) / (r + 0.1 * h); // project hourglass error vector onto normalized pair distance vector
-						LimitDoubleMagnitude(gamma_dot_dx, 0.01 * h); // limit projected vector to avoid numerical instabilities
+					gamma_dot_dx = gamma.dot(dx) / (r + 0.1 * h); // project hourglass error vector onto normalized pair distance vector
+
+					if (MAX(plastic_strain[i], plastic_strain[j]) > 0.1) {
+						LimitDoubleMagnitude(gamma_dot_dx, 0.002 * r); // limit projected vector to avoid numerical instabilities
+						delta = 0.5 * gamma_dot_dx; // delta has dimensions of [m]
+						hg_mag = Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * Lookup[YIELD_STRENGTH][itype] * delta
+								/ (rSq + 0.01 * h * h); // hg_mag has dimensions [Pa m^(-1)]
+					} else {
+						LimitDoubleMagnitude(gamma_dot_dx, 0.5 * r); // limit projected vector to avoid numerical instabilities
 						delta = 0.5 * gamma_dot_dx; // delta has dimensions of [m]
 						hg_mag = Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * Lookup[BULK_MODULUS][itype] * delta
 								/ (rSq + 0.01 * h * h); // hg_mag has dimensions [Pa m^(-1)]
-						hg_mag *= -ivol * jvol * wf; // hg_mag has dimensions [J*m^(-1)] = [N]
-
-						//if (MAX(plastic_strain[i], plastic_strain[j]) > 0.1) {
-						//	hg_mag *= Lookup[YIELD_STRENGTH][itype] / Lookup[BULK_MODULUS][itype];
-						//}
-
-						/*
-						 * is hg_mag stable
-						 */
-
-//						if (fabs(hg_mag) > 2.0e-16) {
-//							double dt_crit = 0.01 * sqrt(h * (rmass[i] + rmass[j]) / fabs(hg_mag));
-//							if (dt_crit < update->dt) {
-//								//printf("timestep required for hourglass force is %f, current dt is %f\n", dt_crit, update->dt);
-//								double ratio = update->dt / dt_crit;
-//								hg_mag /= ratio;
-//								//error->one(FLERR, "");
-//							}
-//						}
-						f_hg = (hg_mag / (r + 0.01 * h)) * dx;
-					} else {
-						f_hg.setZero();
 					}
+
+					hg_mag *= -ivol * jvol * wf; // hg_mag has dimensions [J*m^(-1)] = [N]
+					f_hg = (hg_mag / (r + 0.01 * h)) * dx;
 				} else {
 					f_hg.setZero();
 				}
@@ -676,6 +705,11 @@ void PairULSPH::compute(int eflag, int vflag) {
 				if (evflag) {
 					ev_tally_xyz(i, j, nlocal, 0, 0.0, 0.0, sumForces(0), sumForces(1), sumForces(2), dx(0), dx(1), dx(2));
 				}
+
+				// check if a particle  has moved too much w.r.t another particle
+//				if (du.norm() > 10 * dx0.norm()) {
+//					updateFlag = 1;
+//				}
 			}
 
 		}
@@ -1241,6 +1275,7 @@ double PairULSPH::memory_usage() {
 
 int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	double *rho = atom->rho;
+	double *eff_plastic_strain = atom->eff_plastic_strain;
 	int i, j, m;
 
 //printf("packing comm\n");
@@ -1267,6 +1302,9 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 		buf[m++] = F[j](2, 0);
 		buf[m++] = F[j](2, 1);
 		buf[m++] = F[j](2, 2); // 9 + 9 = 18
+
+		buf[m++] = static_cast<double>(gradient_correction_possible[j]);
+		buf[m++] = eff_plastic_strain[j];
 	}
 	return m;
 }
@@ -1275,6 +1313,7 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 
 void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
 	double *rho = atom->rho;
+	double *eff_plastic_strain = atom->eff_plastic_strain;
 	int i, m, last;
 
 	m = 0;
@@ -1303,6 +1342,9 @@ void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
 		F[i](2, 0) = buf[m++];
 		F[i](2, 1) = buf[m++];
 		F[i](2, 2) = buf[m++];
+
+		gradient_correction_possible[i] = static_cast<bool>(buf[m++]);
+		eff_plastic_strain[i] = buf[m++];
 	}
 }
 
@@ -1394,6 +1436,8 @@ void *PairULSPH::extract(const char *str, int &i) {
 	} else if (strcmp(str, "smd/ulsph/dtCFL_ptr") == 0) {
 //printf("dtcfl = %f\n", dtCFL);
 		return (void *) &dtCFL;
+	} else if (strcmp(str, "smd/ulsph/updateFlag_ptr") == 0) {
+		return (void *) &updateFlag;
 	}
 
 	return NULL;

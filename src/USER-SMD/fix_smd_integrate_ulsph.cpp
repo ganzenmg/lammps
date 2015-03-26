@@ -114,6 +114,10 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 		printf(">>========>>========>>========>>========>>========>>========>>========>>========\n\n");
 	}
 
+	// set comm sizes needed by this fix
+	comm_forward = 3;
+	atom->add_callback(0);
+
 	time_integrate = 1;
 }
 
@@ -142,6 +146,7 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 	// update v and x and rho and e of atoms in group
 
 	double **x = atom->x;
+	double **x0 = atom->x0;
 	double **v = atom->v;
 	double **f = atom->f;
 	double **vest = atom->vest;
@@ -153,10 +158,34 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 
 	int *mask = atom->mask;
 	int nlocal = atom->nlocal;
-	int i;
+	int i, itmp;
 	double dtfm, vsq, scale;
+	double vxsph_x, vxsph_y, vxsph_z;
 
-	int itmp = 0;
+	/*
+	 * update the reference configuration if needed
+	 */
+
+	int *updateFlag_ptr = (int *) force->pair->extract("smd/ulsph/updateFlag_ptr", itmp);
+	if (updateFlag_ptr == NULL) {
+		error->one(FLERR,
+				"fix smd/integrate_ulsph failed to access updateFlag pointer. Check if a pair style exist which calculates this quantity.");
+	}
+
+	// sum all update flag across processors
+	int updateFlag = 0;
+	MPI_Allreduce(updateFlag_ptr, &updateFlag, 1, MPI_INT, MPI_MAX, world);
+
+	if (updateFlag > 0) {
+		if (comm->me == 0) {
+			printf("updating ref config at step: %ld\n", update->ntimestep);
+		}
+	}
+
+	/*
+	 * get smoothed velocities from ULSPH pair style
+	 */
+
 	Vector3d *smoothVel = (Vector3d *) force->pair->extract("smd/ulsph/smoothVel_ptr", itmp);
 
 	if (xsphFlag) {
@@ -179,11 +208,6 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 			v[i][1] += dtfm * f[i][1];
 			v[i][2] += dtfm * f[i][2];
 
-			// extrapolate velocity from half- to full-step
-			vest[i][0] = v[i][0] + dtfm * f[i][0];
-			vest[i][1] = v[i][1] + dtfm * f[i][1];
-			vest[i][2] = v[i][2] + dtfm * f[i][2];
-
 			if (vlimit > 0.0) {
 				vsq = v[i][0] * v[i][0] + v[i][1] * v[i][1] + v[i][2] * v[i][2];
 				if (vsq > vlimitsq) {
@@ -198,24 +222,55 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 				}
 			}
 
+			/*
+			 * store current coords in x0
+			 */
+
+			if (updateFlag > 0) {
+				x0[i][0] = x[i][0];
+				x0[i][1] = x[i][1];
+				x0[i][2] = x[i][2];
+			}
+
 			if (xsphFlag) {
-				x[i][0] += dtv * (v[i][0] - 0.5 * smoothVel[i](0));
-				x[i][1] += dtv * (v[i][1] - 0.5 * smoothVel[i](1));
-				x[i][2] += dtv * (v[i][2] - 0.5 * smoothVel[i](2));
+
+				// construct XSPH velocity
+				vxsph_x = v[i][0] + 0.5 * smoothVel[i](0);
+				vxsph_y = v[i][1] + 0.5 * smoothVel[i](1);
+				vxsph_z = v[i][2] + 0.5 * smoothVel[i](2);
+
+				vest[i][0] = vxsph_x + dtfm * f[i][0];
+				vest[i][1] = vxsph_y + dtfm * f[i][1];
+				vest[i][2] = vxsph_z + dtfm * f[i][2];
+
+				x[i][0] += dtv * vxsph_x;
+				x[i][1] += dtv * vxsph_y;
+				x[i][2] += dtv * vxsph_z;
+
 			} else {
+
+				// extrapolate velocity from half- to full-step
+				vest[i][0] = v[i][0] + dtfm * f[i][0];
+				vest[i][1] = v[i][1] + dtfm * f[i][1];
+				vest[i][2] = v[i][2] + dtfm * f[i][2];
+
 				x[i][0] += dtv * v[i][0];
 				x[i][1] += dtv * v[i][1];
 				x[i][2] += dtv * v[i][2];
 			}
 		}
 	}
+
+// update of reference config has changed x0
+// communicate these quantities now to ghosts
+	comm->forward_comm_fix(this);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixSMDIntegrateUlsph::final_integrate() {
 
-	// update v, rho, and e of atoms in group
+// update v, rho, and e of atoms in group
 
 	double **v = atom->v;
 	double **f = atom->f;
@@ -264,4 +319,37 @@ void FixSMDIntegrateUlsph::final_integrate() {
 void FixSMDIntegrateUlsph::reset_dt() {
 	dtv = update->dt;
 	dtf = 0.5 * update->dt * force->ftm2v;
+}
+
+/* ---------------------------------------------------------------------- */
+
+int FixSMDIntegrateUlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
+	int i, j, m;
+	double **x0 = atom->x0;
+
+//printf("in FixSMDIntegrateTlsph::pack_forward_comm\n");
+	m = 0;
+	for (i = 0; i < n; i++) {
+		j = list[i];
+		buf[m++] = x0[j][0];
+		buf[m++] = x0[j][1];
+		buf[m++] = x0[j][2];
+	}
+	return m;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixSMDIntegrateUlsph::unpack_forward_comm(int n, int first, double *buf) {
+	int i, m, last;
+	double **x0 = atom->x0;
+
+//printf("in FixSMDIntegrateTlsph::unpack_forward_comm\n");
+	m = 0;
+	last = first + n;
+	for (i = first; i < last; i++) {
+		x0[i][0] = buf[m++];
+		x0[i][1] = buf[m++];
+		x0[i][2] = buf[m++];
+	}
 }
