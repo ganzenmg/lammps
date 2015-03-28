@@ -7,13 +7,13 @@ SHELL = /bin/sh
 # specify flags and libraries needed for your compiler
 
 CC =		clang++
-CCFLAGS =	-O2 -Wall -W -funroll-loops -fstrict-aliasing -Wno-unused-parameter -Wno-unused-result
+CCFLAGS =	-g -O2 -Wall -W -funroll-loops -fstrict-aliasing -Wno-unused-parameter -Wno-unused-result
 SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
 LINK =		clang++
-LINKFLAGS =	-O
-LIB =           
+LINKFLAGS =	-O -g
+LIB =       -lprofiler
 SIZE =		size
 
 ARCHIVE =	ar

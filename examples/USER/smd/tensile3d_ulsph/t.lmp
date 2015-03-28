@@ -3,7 +3,7 @@ variable        rho equal 2700.0e-9
 variable        h equal 0.82
 variable        E equal 10 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
-variable        sigy equal 0.1
+variable        sigy equal 10.1
 variable        vel equal 10.0
 variable        hg equal 1000.0
 # ----

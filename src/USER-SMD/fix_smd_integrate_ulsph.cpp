@@ -201,8 +201,8 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 		if (mask[i] & groupbit) {
 			dtfm = dtf / rmass[i];
 
-			e[i] += dtf * de[i]; // half-step update of particle internal energy
-			rho[i] += dtf * drho[i]; // ... and density
+			//e[i] += dtf * de[i]; // half-step update of particle internal energy
+			//rho[i] += dtf * drho[i]; // ... and density
 
 			v[i][0] += dtfm * f[i][0];
 			v[i][1] += dtfm * f[i][1];
@@ -279,12 +279,23 @@ void FixSMDIntegrateUlsph::final_integrate() {
 	double *rho = atom->rho;
 	double *drho = atom->drho;
 	double *radius = atom->radius;
+	double *contact_radius = atom->contact_radius;
 	int *mask = atom->mask;
 	int nlocal = atom->nlocal;
 	if (igroup == atom->firstgroup)
 		nlocal = atom->nfirst;
 	double dtfm, vsq, scale;
 	double *rmass = atom->rmass;
+
+	/*
+	 * get current number of SPH neighbors from ULSPH pair style
+	 */
+
+	int itmp;
+	int *nn = (int *) force->pair->extract("smd/ulsph/numNeighs_ptr", itmp);
+	if (nn == NULL) {
+		error->one(FLERR, "fix smd/integrate_ulsph failed to accesss num_neighs array");
+	}
 
 	for (int i = 0; i < nlocal; i++) {
 		if (mask[i] & groupbit) {
@@ -309,7 +320,20 @@ void FixSMDIntegrateUlsph::final_integrate() {
 
 			if (adjust_radius_flag) {
 				radius[i] = adjust_radius_factor * pow(rmass[i] / rho[i], 1. / domain->dimension); // Monaghan approach for setting the radius
+//				double dh = - (adjust_radius_factor/domain->dimension) *
+//						pow(rmass[i] / rho[i], 1. / domain->dimension) * (1.0 / rho[i]) * drho[i];
+//				radius[i] += dh * dtv;
 			}
+
+			if (nn[i] < 20) {
+				radius[i] *= 1.01;
+			} //else if (nn[i] > 35) {
+			//	radius[i] /= 1.01;
+			//}
+
+			//radius[i] = MAX(radius[i], 1.5*contact_radius[i]);
+//			radius[i] = MIN(radius[i], 4.0*contact_radius[i]);
+
 		}
 	}
 }

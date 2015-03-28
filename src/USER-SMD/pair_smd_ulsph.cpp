@@ -220,7 +220,7 @@ void PairULSPH::PreCompute() {
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
 	int nlocal = atom->nlocal;
-	int inum, jnum, ii, jj, i, itype, jtype, j;
+	int inum, jnum, ii, jj, i, itype, jtype, j, idim;
 	double wfd, h, irad, r, rSq, wf, ivol, jvol;
 	bool gradient_correction_flag;
 	Vector3d dx, dv, g, du;
@@ -264,17 +264,28 @@ void PairULSPH::PreCompute() {
 		gradient_correction_flag = gradient_correction[itype]; // perform kernel gradient correction for this particle type?
 
 		// initialize Eigen data structures from LAMMPS data structures
-		x0i << x0[i][0], x0[i][1], x0[i][2];
-		xi << x[i][0], x[i][1], x[i][2];
-		vi << v[i][0], v[i][1], v[i][2];
+		for (idim = 0; idim < 3; idim++) {
+			x0i (idim) = x0[i][idim];
+			xi(idim) = x[i][idim];
+			vi(idim) = v[i][idim];
+		}
+		//x0i << x0[i][0], x0[i][1], x0[i][2];
+		//xi << x[i][0], x[i][1], x[i][2];
+		//vi << v[i][0], v[i][1], v[i][2];
 
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
 
-			x0j << x0[j][0], x0[j][1], x0[j][2];
-			xj << x[j][0], x[j][1], x[j][2];
-			vj << v[j][0], v[j][1], v[j][2];
+			for (idim = 0; idim < 3; idim++) {
+				x0j (idim) = x0[j][idim];
+				xj(idim) = x[j][idim];
+				vj(idim) = v[j][idim];
+			}
+
+//			x0j << x0[j][0], x0[j][1], x0[j][2];
+//			xj << x[j][0], x[j][1], x[j][2];
+//			vj << v[j][0], v[j][1], v[j][2];
 
 			dx = xj - xi;
 			rSq = dx.squaredNorm();
@@ -415,12 +426,12 @@ void PairULSPH::PreCompute() {
 				 * we abuse the atom array "tlsph_fold" for this purpose, which 3was originally designed to hold the deformation gradient.
 				 */
 				D = update->dt * 0.5 * (L[i] + L[i].transpose());
-				atom_data9[i][0] += D(0,0); // xx
-				atom_data9[i][1] += D(1,1); // yy
-				atom_data9[i][2] += D(2,2); // zz
-				atom_data9[i][3] += D(0,1); // xy
-				atom_data9[i][4] += D(0,2); // xz
-				atom_data9[i][5] += D(1,2); // yz
+				atom_data9[i][0] += D(0, 0); // xx
+				atom_data9[i][1] += D(1, 1); // yy
+				atom_data9[i][2] += D(2, 2); // zz
+				atom_data9[i][3] += D(0, 1); // xy
+				atom_data9[i][4] += D(0, 2); // xz
+				atom_data9[i][5] += D(1, 2); // yz
 
 			} // end if (gradient_correction[itype]) {
 		} // end if (setflag[itype][itype])
@@ -559,7 +570,10 @@ void PairULSPH::compute(int eflag, int vflag) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
 
-			xj << x[j][0], x[j][1], x[j][2];
+			//xj << x[j][0], x[j][1], x[j][2];
+			xj(0) = x[j][0];
+			xj(1) = x[j][1];
+			xj(2) = x[j][2];
 
 			dx = xj - xi;
 			rSq = dx.squaredNorm();
@@ -707,9 +721,9 @@ void PairULSPH::compute(int eflag, int vflag) {
 				}
 
 				// check if a particle  has moved too much w.r.t another particle
-//				if (du.norm() > 10 * dx0.norm()) {
-//					updateFlag = 1;
-//				}
+				if (du.norm() > 0.5 * dx0.norm()) {
+					updateFlag = 1;
+				}
 			}
 
 		}

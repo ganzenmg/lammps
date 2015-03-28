@@ -50,11 +50,12 @@ public:
 
 protected:
 	double dtv;
-	bool linearFlag, rotateFlag;
+	bool linearFlag, wiggleFlag, rotateFlag;
 	double vx, vy, vz;
 	Vector3d rotation_axis, origin;
 	double rotation_period;
 	Matrix3d u_cross, uxu;
+	double wiggle_travel, wiggle_max_travel, wiggle_direction;
 };
 
 }

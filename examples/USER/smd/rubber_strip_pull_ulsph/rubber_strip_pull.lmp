@@ -75,4 +75,4 @@ fix             botfix bot setforce 0 0 0
 thermo 100
 thermo_style    custom step dt f_dtfix time v_strain
 
-run             20000
+run             10000

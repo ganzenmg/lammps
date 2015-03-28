@@ -61,7 +61,9 @@ FixSMDMoveTriSurf::FixSMDMoveTriSurf(LAMMPS *lmp, int narg, char **arg) :
 	if (narg < 3)
 		error->all(FLERR, "Illegal number of arguments for fix fix smd/move_tri_surf command");
 
-	rotateFlag = linearFlag = false;
+	rotateFlag = linearFlag = wiggleFlag = false;
+	wiggle_direction  = 1.0;
+	wiggle_max_travel = 0.0;
 
 	int iarg = 3;
 
@@ -83,21 +85,51 @@ FixSMDMoveTriSurf::FixSMDMoveTriSurf(LAMMPS *lmp, int narg, char **arg) :
 
 			iarg++;
 			if (iarg == narg) {
-				error->all(FLERR, "expected number following *LINEAR");
+				error->all(FLERR, "expected three floats for velocity following *LINEAR");
 			}
 			vx = force->numeric(FLERR, arg[iarg]);
 
 			iarg++;
 			if (iarg == narg) {
-				error->all(FLERR, "expected number following *LINEAR");
+				error->all(FLERR, "expected three floats for velocity following *LINEAR");
 			}
 			vy = force->numeric(FLERR, arg[iarg]);
 
 			iarg++;
 			if (iarg == narg) {
-				error->all(FLERR, "expected three floats following *LINEAR");
+				error->all(FLERR, "expected three floats for velocity following *LINEAR");
 			}
 			vz = force->numeric(FLERR, arg[iarg]);
+
+		} else if (strcmp(arg[iarg], "*WIGGLE") == 0) {
+			wiggleFlag = true;
+			if (comm->me == 0) {
+				printf("... will move surface in wiggle fashion\n");
+			}
+
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected 4 floats following *WIGGLE : vx vy vz max_travel");
+			}
+			vx = force->numeric(FLERR, arg[iarg]);
+
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected 4 floats following *WIGGLE : vx vy vz max_travel");
+			}
+			vy = force->numeric(FLERR, arg[iarg]);
+
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected 4 floats following *WIGGLE : vx vy vz max_travel");
+			}
+			vz = force->numeric(FLERR, arg[iarg]);
+
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected 4 floats following *WIGGLE : vx vy vz max_travel");
+			}
+			wiggle_max_travel = force->numeric(FLERR, arg[iarg]);
 
 		} else if (strcmp(arg[iarg], "*ROTATE") == 0) {
 			rotateFlag = true;
@@ -193,6 +225,7 @@ FixSMDMoveTriSurf::FixSMDMoveTriSurf(LAMMPS *lmp, int narg, char **arg) :
 int FixSMDMoveTriSurf::setmask() {
 	int mask = 0;
 	mask |= INITIAL_INTEGRATE;
+	//mask |= PRE_EXCHANGE;
 	return mask;
 }
 
@@ -260,6 +293,57 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 				}
 
 			}
+		}
+	}
+
+	if (wiggleFlag) { // wiggle particles forward and backward
+
+		wiggle_travel += sqrt(vx * vx + vy * vy + vz * vz ) * dtv;
+		double wiggle_vx = wiggle_direction * vx;
+		double wiggle_vy = wiggle_direction * vy;
+		double wiggle_vz = wiggle_direction * vz;
+
+		//printf("wiggle vz is %f, wiggle_max_travel is %f, dir=%f\n", wiggle_vz, wiggle_max_travel, wiggle_direction);
+
+		for (i = 0; i < nlocal; i++) {
+			if (mask[i] & groupbit) {
+
+				v[i][0] = wiggle_vx;
+				v[i][1] = wiggle_vy;
+				v[i][2] = wiggle_vz;
+
+				vest[i][0] = wiggle_vx;
+				vest[i][1] = wiggle_vy;
+				vest[i][2] = wiggle_vz;
+
+				x[i][0] += dtv * wiggle_vx;
+				x[i][1] += dtv * wiggle_vy;
+				x[i][2] += dtv * wiggle_vz;
+
+				/*
+				 * if this is a triangle, move the vertices as well
+				 */
+
+				if (mol[i] >= 65535) {
+					tlsph_fold[i][0] += dtv * wiggle_vx;
+					tlsph_fold[i][1] += dtv * wiggle_vy;
+					tlsph_fold[i][2] += dtv * wiggle_vz;
+
+					tlsph_fold[i][3] += dtv * wiggle_vx;
+					tlsph_fold[i][4] += dtv * wiggle_vy;
+					tlsph_fold[i][5] += dtv * wiggle_vz;
+
+					tlsph_fold[i][6] += dtv * wiggle_vx;
+					tlsph_fold[i][7] += dtv * wiggle_vy;
+					tlsph_fold[i][8] += dtv * wiggle_vz;
+				}
+
+			}
+		}
+
+		if (wiggle_travel >= wiggle_max_travel) {
+			wiggle_direction *= -1.0;
+			wiggle_travel = 0.0;
 		}
 	}
 

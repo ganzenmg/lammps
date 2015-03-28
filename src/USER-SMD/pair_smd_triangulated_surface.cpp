@@ -153,8 +153,14 @@ void PairTriSurf::compute(int eflag, int vflag) {
 				error->one(FLERR, "unknown case");
 			}
 
-			x_center << x[tri][0], x[tri][1], x[tri][2]; // center of triangle
-			x4 << x[particle][0], x[particle][1], x[particle][2];
+			//x_center << x[tri][0], x[tri][1], x[tri][2]; // center of triangle
+			x_center(0) = x[tri][0];
+			x_center(1) = x[tri][1];
+			x_center(2) = x[tri][2];
+			//x4 << x[particle][0], x[particle][1], x[particle][2];
+			x4(0) = x[particle][0];
+			x4(1) = x[particle][1];
+			x4(2) = x[particle][2];
 			dx = x_center - x4; //
 			if (periodic) {
 				domain->minimum_image(dx(0), dx(1), dx(2));
@@ -255,7 +261,10 @@ void PairTriSurf::compute(int eflag, int vflag) {
 
 						normal = x4cp / r;
 
-						v_old << v[particle][0], v[particle][1], v[particle][2];
+						//v_old << v[particle][0], v[particle][1], v[particle][2];
+						v_old(0) = v[particle][0];
+						v_old(1) = v[particle][1];
+						v_old(2) = v[particle][2];
 						if (v_old.dot(normal) < 0.0) {
 							//printf("flipping velocity\n");
 							vnew = 0.5 * (-2.0 * v_old.dot(normal) * normal + v_old);
