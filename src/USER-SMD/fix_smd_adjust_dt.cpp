@@ -61,6 +61,7 @@ FixSMDTlsphDtReset::FixSMDTlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
 	global_freq = 1;
 	extscalar = 0;
 	extvector = 0;
+	restart_global = 1; // this fix stores global (i.e., not per-atom) info: elaspsed time
 
 	safety_factor = atof(arg[3]);
 
@@ -152,5 +153,33 @@ void FixSMDTlsphDtReset::end_of_step() {
 
 double FixSMDTlsphDtReset::compute_scalar() {
 	return t_elapsed;
+}
+
+/* ----------------------------------------------------------------------
+   pack entire state of Fix into one write
+------------------------------------------------------------------------- */
+
+void FixSMDTlsphDtReset::write_restart(FILE *fp)
+{
+  int n = 0;
+  double list[1];
+  list[n++] = t_elapsed;
+
+  if (comm->me == 0) {
+    int size = n * sizeof(double);
+    fwrite(&size,sizeof(int),1,fp);
+    fwrite(list,sizeof(double),n,fp);
+  }
+}
+
+/* ----------------------------------------------------------------------
+   use state info from restart file to restart the Fix
+------------------------------------------------------------------------- */
+
+void FixSMDTlsphDtReset::restart(char *buf)
+{
+  int n = 0;
+  double *list = (double *) buf;
+  t_elapsed = list[n++];
 }
 

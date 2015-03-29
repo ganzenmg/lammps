@@ -6,13 +6,22 @@ SHELL = /bin/sh
 # compiler/linker settings
 # specify flags and libraries needed for your compiler
 
+# note: for using address sanitizer, do the following
+# 1) compile with at least the following flags:
+#     -g -fsanitize=address -fno-omit-frame-pointer
+# 2) run the executable like this:
+#    $> export ASAN_OPTIONS=symbolize=0; mpirun -np 1 lmp_clang_openmpi < script.lmp 2> log
+#    this disables on the fly-symbolization which is problematic in MPI
+# 3) analyze the resulting log file like this:
+#    $> asan_symbolize / < log | c++filt
+
 CC =		clang++
-CCFLAGS =	-g -O -Wall -W -funroll-loops -fstrict-aliasing -Wno-unused-parameter -Wno-unused-result
+CCFLAGS =	-g -O0 -Wall -W -funroll-loops -fstrict-aliasing -Wno-unused-parameter -Wno-unused-result -fsanitize=address -fno-omit-frame-pointer
 SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
 LINK =		clang++
-LINKFLAGS =	-O -g
+LINKFLAGS =	-O0 -g -fsanitize=address -fno-omit-frame-pointer
 LIB =           
 SIZE =		size
 

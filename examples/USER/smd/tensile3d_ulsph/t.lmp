@@ -17,7 +17,7 @@ units		si
 dimension       3
 boundary        s s s
 atom_style      smd
-comm_style      tiled
+comm_style      brick
 neighbor        ${skin} bin
 neigh_modify    every 100 delay 0 check no # only build neighbor list if particle has moved half the skin distance
 comm_modify     vel yes
@@ -35,6 +35,7 @@ group           bot region bot
 
 velocity        top set  ${vel} 0 0 sum no units box
 velocity        bot set -${vel} 0 0 sum no units box
+
 
 
 pair_style      ulsph
@@ -56,7 +57,7 @@ compute         alleint all reduce sum c_eint
 variable        etot equal ke+c_alleint+pe
 
 
-balance          1.0 rcb
+#balance          1.0 rcb
 
 # time integration
 timestep        ${dt}
@@ -73,7 +74,7 @@ fix             output_fix all print 10 "${disp} $a" file force_displacement.dat
 variable        nrun equal round((20.0/${vel})/${dt})
 print "running for ${nrun} steps"
 
-variable        dumpFreq equal round(${nrun}/1000)
+variable        dumpFreq equal 100 #round(${nrun}/1000)
 dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
                 c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] &
                 c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
@@ -83,10 +84,18 @@ dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
 dump_modify     dump_id first yes
 
 thermo          100
-thermo_style    custom step ke pe v_etot c_alleint dt
+thermo_style    custom step ke pe v_etot c_alleint dt f_dtfix
 thermo_modify   lost ignore
 
-run              ${nrun}
-#
-#
-#
+label	    loop
+variable    i loop 5
+print	    "A = $i"
+next	    i
+run         200
+write_restart   restart_%_file
+jump	    t.lmp loop
+
+
+
+
+

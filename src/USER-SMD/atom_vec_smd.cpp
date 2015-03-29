@@ -9,7 +9,6 @@
  *
  * ----------------------------------------------------------------------- */
 
-
 /* ----------------------------------------------------------------------
  LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
  http://lammps.sandia.gov, Sandia National Laboratories
@@ -22,7 +21,6 @@
 
  See the README file in the top-level LAMMPS directory.
  ------------------------------------------------------------------------- */
-
 
 #include "math.h"
 #include "stdlib.h"
@@ -263,7 +261,6 @@ int AtomVecSMD::pack_comm_vel(int n, int *list, double *buf, int pbc_flag, int *
 //			buf[m++] = tlsph_stress[j][3];
 //			buf[m++] = tlsph_stress[j][4];
 //			buf[m++] = tlsph_stress[j][5]; // 19
-
 
 		}
 	} else {
@@ -869,7 +866,7 @@ int AtomVecSMD::size_restart() {
 	int i;
 
 	int nlocal = atom->nlocal;
-	int n = 44 * nlocal; // count pack_restart + 3
+	int n = 42 * nlocal; // count pack_restart + 1 (size of buffer)
 
 	if (atom->nextra_restart)
 		for (int iextra = 0; iextra < atom->nextra_restart; iextra++)
@@ -885,35 +882,62 @@ int AtomVecSMD::size_restart() {
  molecular types may be negative, but write as positive
  ------------------------------------------------------------------------- */
 
+// X	tag = memory->grow(atom->tag, nmax, "atom:tag");
+// X 	type = memory->grow(atom->type, nmax, "atom:type");
+// X	mask = memory->grow(atom->mask, nmax, "atom:mask");
+// X	image = memory->grow(atom->image, nmax, "atom:image");
+// X	x = memory->grow(atom->x, nmax, 3, "atom:x");
+// X	v = memory->grow(atom->v, nmax, 3, "atom:v");
+//
+// O	f = memory->grow(atom->f, nmax * comm->nthreads, 3, "atom:f");
+// O	de = memory->grow(atom->de, nmax * comm->nthreads, "atom:de");
+// O	drho = memory->grow(atom->drho, nmax * comm->nthreads, "atom:drho");
+//
+// X	vfrac = memory->grow(atom->vfrac, nmax, "atom:vfrac");
+// X	rmass = memory->grow(atom->rmass, nmax, "atom:rmass");
+// X	x0 = memory->grow(atom->x0, nmax, 3, "atom:x0");
+// X	radius = memory->grow(atom->radius, nmax, "atom:radius");
+// X	contact_radius = memory->grow(atom->contact_radius, nmax, "atom:contact_radius");
+// X	molecule = memory->grow(atom->molecule, nmax, "atom:molecule");
+// X	tlsph_fold = memory->grow(atom->tlsph_fold, nmax, NMAT_FULL, "atom:defgrad_old");
+// X	e = memory->grow(atom->e, nmax, "atom:e");
+// X	vest = memory->grow(atom->vest, nmax, 3, "atom:vest");
+// X	tlsph_stress = memory->grow(atom->tlsph_stress, nmax, NMAT_SYMM, "atom:tlsph_stress");
+// X	eff_plastic_strain = memory->grow(atom->eff_plastic_strain, nmax, "atom:eff_plastic_strain");
+// X	eff_plastic_strain_rate = memory->grow(atom->eff_plastic_strain_rate, nmax, "atom:eff_plastic_strain_rate");
+// X	rho = memory->grow(atom->rho, nmax, "atom:rho");
+// X	damage = memory->grow(atom->damage, nmax, "atom:damage");
+
 int AtomVecSMD::pack_restart(int i, double *buf) {
 	int m = 1; // 1
 
 	buf[m++] = x[i][0];
 	buf[m++] = x[i][1];
-	buf[m++] = x[i][2]; // 4
+	buf[m++] = x[i][2]; // 3
 	buf[m++] = x0[i][0];
 	buf[m++] = x0[i][1];
-	buf[m++] = x0[i][2]; // 7
+	buf[m++] = x0[i][2]; // 6
 	buf[m++] = ubuf(tag[i]).d;
 	buf[m++] = ubuf(type[i]).d;
 	buf[m++] = ubuf(mask[i]).d;
-	buf[m++] = ubuf(image[i]).d;
-	buf[m++] = ubuf(molecule[i]).d; // 12
+	buf[m++] = ubuf(image[i]).d; //10
+	buf[m++] = ubuf(molecule[i]).d;
 	buf[m++] = radius[i];
 	buf[m++] = rmass[i];
-	buf[m++] = vfrac[i];
+	buf[m++] = vfrac[i]; //14
 	buf[m++] = contact_radius[i];
 	buf[m++] = e[i];
 	buf[m++] = rho[i];
-	buf[m++] = eff_plastic_strain[i]; // 19
+	buf[m++] = eff_plastic_strain[i];
+	buf[m++] = eff_plastic_strain_rate[i]; // 19
 
 	for (int k = 0; k < NMAT_FULL; k++) {
 		buf[m++] = tlsph_fold[i][k];
-	} // 27
+	} // 28
 
 	for (int k = 0; k < NMAT_SYMM; k++) {
 		buf[m++] = tlsph_stress[i][k];
-	} // 33
+	} // 34
 
 	buf[m++] = v[i][0];
 	buf[m++] = v[i][1];
@@ -922,7 +946,7 @@ int AtomVecSMD::pack_restart(int i, double *buf) {
 	buf[m++] = vest[i][1];
 	buf[m++] = vest[i][2]; // 40
 
-	buf[m++] = damage[i]; // 40
+	buf[m++] = damage[i]; // 41
 
 	if (atom->nextra_restart)
 		for (int iextra = 0; iextra < atom->nextra_restart; iextra++)
@@ -948,23 +972,24 @@ int AtomVecSMD::unpack_restart(double *buf) {
 
 	x[nlocal][0] = buf[m++];
 	x[nlocal][1] = buf[m++];
-	x[nlocal][2] = buf[m++]; // 4
+	x[nlocal][2] = buf[m++]; // 3
 	x0[nlocal][0] = buf[m++];
 	x0[nlocal][1] = buf[m++];
-	x0[nlocal][2] = buf[m++]; // 7
+	x0[nlocal][2] = buf[m++]; // 6
 	tag[nlocal] = (tagint) ubuf(buf[m++]).i;
 	type[nlocal] = (int) ubuf(buf[m++]).i;
 	mask[nlocal] = (int) ubuf(buf[m++]).i;
 	image[nlocal] = (imageint) ubuf(buf[m++]).i;
-	molecule[nlocal] = (int) ubuf(buf[m++]).i; // 12
+	molecule[nlocal] = (int) ubuf(buf[m++]).i; // 11
 
 	radius[nlocal] = buf[m++];
 	rmass[nlocal] = buf[m++];
-	vfrac[nlocal] = buf[m++];
-	contact_radius[nlocal] = buf[m++];
+	vfrac[nlocal] = buf[m++]; //14
+	contact_radius[nlocal] = buf[m++]; //15
 	e[nlocal] = buf[m++];
 	rho[nlocal] = buf[m++];
-	eff_plastic_strain[nlocal] = buf[m++]; // 19
+	eff_plastic_strain[nlocal] = buf[m++]; // 18
+	eff_plastic_strain_rate[nlocal] = buf[m++]; // 29
 
 	for (int k = 0; k < NMAT_FULL; k++) {
 		tlsph_fold[nlocal][k] = buf[m++];
@@ -981,7 +1006,9 @@ int AtomVecSMD::unpack_restart(double *buf) {
 	vest[nlocal][1] = buf[m++];
 	vest[nlocal][2] = buf[m++]; // 40
 
-	damage[nlocal] = buf[m++];
+	damage[nlocal] = buf[m++]; //41
+
+	//printf("nlocal in restart is %d\n", nlocal);
 
 	double **extra = atom->extra;
 	if (atom->nextra_store) {
@@ -991,6 +1018,9 @@ int AtomVecSMD::unpack_restart(double *buf) {
 	}
 
 	atom->nlocal++;
+
+	//printf("returning m=%d in unpack_restart\n", m);
+
 	return m;
 }
 
@@ -1006,8 +1036,6 @@ void AtomVecSMD::create_atom(int itype, double *coord) {
 		grow(0);
 		printf("... finished growing\n");
 	}
-
-
 
 	tag[nlocal] = 0;
 	type[nlocal] = itype;
