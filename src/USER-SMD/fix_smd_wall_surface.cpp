@@ -50,12 +50,12 @@ enum {
 FixSMDWallSurface::FixSMDWallSurface(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
 
-	restart_global = 1;
-	restart_peratom = 1;
+	restart_global = 0;
+	restart_peratom = 0;
 	first = 1;
 
-	atom->add_callback(0);
-	atom->add_callback(1);
+	//atom->add_callback(0);
+	//atom->add_callback(1);
 
 	if (narg != 6)
 		error->all(FLERR, "Illegal number of arguments for fix smd/wall_surface");
