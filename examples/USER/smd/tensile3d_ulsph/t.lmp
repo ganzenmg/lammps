@@ -1,9 +1,9 @@
 #processors      4 1 1
 variable        rho equal 2700.0e-9
 variable        h equal 0.82
-variable        E equal 10 # Young's modulus
+variable        E equal 70 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
-variable        sigy equal 10.1
+variable        sigy equal  0.7
 variable        vel equal 10.0
 variable        hg equal 1000.0
 # ----
@@ -33,12 +33,12 @@ region          top block ${xmaxminus} EDGE EDGE EDGE EDGE EDGE units box
 group           top region top
 group           bot region bot
 
-velocity        top set ${vel} 0 0 sum no units box
+velocity        top set  ${vel} 0 0 sum no units box
 velocity        bot set -${vel} 0 0 sum no units box
 
 
 pair_style      ulsph
-pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 1 ${hg} &
+pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 0 ${hg} &
 		*LINEAR_PLASTIC ${E} ${nu} ${sigy} &
 		*GRADIENT_CORRECTION & 
 	        *END
@@ -64,13 +64,13 @@ variable        maxdist equal ${h}
 fix             dtfix all smd/adjust_dt 0.1
 fix             force_fix1 top setforce 0 0 0
 fix             force_fix2 bot setforce 0 0 0
-fix             integration_fix all smd/integrate_ulsph adjust_radius 1.2
+fix             integration_fix all smd/integrate_ulsph #adjust_radius 1.2
 variable        a equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
 variable        disp equal 2.0*${vel}*f_dtfix
 fix             output_fix all print 10 "${disp} $a" file force_displacement.dat screen no
 
 
-variable        nrun equal round((10.0/${vel})/${dt})
+variable        nrun equal round((20.0/${vel})/${dt})
 print "running for ${nrun} steps"
 
 variable        dumpFreq equal round(${nrun}/1000)
@@ -84,9 +84,9 @@ dump_modify     dump_id first yes
 
 thermo          100
 thermo_style    custom step ke pe v_etot c_alleint dt
-#thermo_modify   lost ignore
+thermo_modify   lost ignore
 
-run             ${nrun}
+run              ${nrun}
 #
 #
 #

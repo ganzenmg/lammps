@@ -62,6 +62,7 @@ public:
 	void PreCompute();
 	void PreCompute_DensitySummation();
 	Matrix3d Deviator(Matrix3d);
+	double effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev, Matrix3d sigma_dev_rate, double damage);
 
 protected:
 
@@ -92,8 +93,8 @@ private:
 		EOS_TAIT_EXPONENT = 7, REFERENCE_SOUNDSPEED = 8, REFERENCE_DENSITY = 9,
 		EOS_PERFECT_GAS_GAMMA = 10,
 		SHEAR_MODULUS = 11, YIELD_STRENGTH = 12, YOUNGS_MODULUS = 13, POISSON_RATIO = 14,
-		LAME_LAMBDA = 15, HEAT_CAPACITY = 16,
-		MAX_KEY_VALUE = 17
+		LAME_LAMBDA = 15, HEAT_CAPACITY = 16, M_MODULUS = 17,
+		MAX_KEY_VALUE = 18
 	};
 	double **Lookup; // holds per-type material parameters for the quantities defined in enum statement above.
 

@@ -265,7 +265,7 @@ void PairULSPH::PreCompute() {
 
 		// initialize Eigen data structures from LAMMPS data structures
 		for (idim = 0; idim < 3; idim++) {
-			x0i (idim) = x0[i][idim];
+			x0i(idim) = x0[i][idim];
 			xi(idim) = x[i][idim];
 			vi(idim) = v[i][idim];
 		}
@@ -278,7 +278,7 @@ void PairULSPH::PreCompute() {
 			j &= NEIGHMASK;
 
 			for (idim = 0; idim < 3; idim++) {
-				x0j (idim) = x0[j][idim];
+				x0j(idim) = x0[j][idim];
 				xj(idim) = x[j][idim];
 				vj(idim) = v[j][idim];
 			}
@@ -385,7 +385,7 @@ void PairULSPH::PreCompute() {
 					}
 
 				} else { // 3d
-					if (fabs(K[i].determinant()) > 1.0e-6) {
+					if (fabs(K[i].determinant()) > 1.0e-16) {
 						// check if inverse of K is reasonable
 						es3d.compute(K[i]);
 						if ((fabs(es3d.eigenvalues()(0)) > 1.0e-3) && (fabs(es3d.eigenvalues()(1)) > 1.0e-3)
@@ -458,7 +458,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
 	int i, j, ii, jj, jnum, itype, jtype, iDim, inum;
-	double r, wf, wfd, h, rSq, ivol, jvol;
+	double r, wf, wfd, h, rSq, r0Sq, ivol, jvol;
 	double mu_ij, c_ij, rho_ij;
 	double delVdotDelR, visc_magnitude, deltaE;
 	int *ilist, *jlist, *numneigh;
@@ -466,7 +466,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	Vector3d fi, fj, dx, dv, f_stress, g, vinti, vintj, dvint;
 	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new;
 	Vector3d gamma, f_hg, dx0, du_est, du;
-	double gamma_dot_dx, delta, hg_mag;
+	double gamma_dot_dx, hg_mag;
 
 	double ini_dist, weight;
 	double *contact_radius = atom->contact_radius;
@@ -649,7 +649,9 @@ void PairULSPH::compute(int eflag, int vflag) {
 				dx0(0) = x0[j][0] - x0[i][0];
 				dx0(1) = x0[j][1] - x0[i][1];
 				dx0(2) = x0[j][2] - x0[i][2];
+				r0Sq = dx0.squaredNorm();
 				du = dx - dx0;
+
 
 				if ((hourglass_amplitude[itype] > 0.0) && (gradient_correction_possible[i] == true)
 						&& (gradient_correction_possible[j] == true)) {
@@ -666,15 +668,18 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 					gamma_dot_dx = gamma.dot(dx) / (r + 0.1 * h); // project hourglass error vector onto normalized pair distance vector
 
-					if (MAX(plastic_strain[i], plastic_strain[j]) > 0.1) {
-						LimitDoubleMagnitude(gamma_dot_dx, 0.002 * r); // limit projected vector to avoid numerical instabilities
-						delta = 0.5 * gamma_dot_dx; // delta has dimensions of [m]
-						hg_mag = Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * Lookup[YIELD_STRENGTH][itype] * delta
+
+					if (rSq - r0Sq < 0) { // compression mode, we limit hourglass correction force
+						LimitDoubleMagnitude(gamma_dot_dx, 0.005 * r);
+					} else {
+						LimitDoubleMagnitude(gamma_dot_dx, 0.5 * r);
+					}
+
+					if (MAX(plastic_strain[i], plastic_strain[j]) > 1.0e-4) {
+						hg_mag = Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * Lookup[YIELD_STRENGTH][itype] * gamma_dot_dx
 								/ (rSq + 0.01 * h * h); // hg_mag has dimensions [Pa m^(-1)]
 					} else {
-						LimitDoubleMagnitude(gamma_dot_dx, 0.5 * r); // limit projected vector to avoid numerical instabilities
-						delta = 0.5 * gamma_dot_dx; // delta has dimensions of [m]
-						hg_mag = Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * Lookup[BULK_MODULUS][itype] * delta
+						hg_mag = Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * Lookup[BULK_MODULUS][itype] * gamma_dot_dx
 								/ (rSq + 0.01 * h * h); // hg_mag has dimensions [Pa m^(-1)]
 					}
 
@@ -721,7 +726,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				}
 
 				// check if a particle  has moved too much w.r.t another particle
-				if (du.norm() > 0.5 * dx0.norm()) {
+				if (du.norm() > 10.5 * dx0.norm()) {
 					updateFlag = 1;
 				}
 			}
@@ -812,19 +817,36 @@ void PairULSPH::ComputePressure() {
 				D = 0.5 * (L[i] + L[i].transpose());
 				W = 0.5 * (L[i] - L[i].transpose()); // spin tensor:: need this for Jaumann rate
 
+				double d_iso = D.trace();
 				d_dev = Deviator(D);
+
+				double p_rate = Lookup[BULK_MODULUS][itype] * d_iso;
+
 				sigmaInitial_dev = Deviator(stressTensor[i]);
 				LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], Lookup[YIELD_STRENGTH][itype], sigmaInitial_dev, d_dev, dt,
 						sigmaFinal_dev, stressRate_dev, plastic_strain_increment);
-				stressRate = Lookup[BULK_MODULUS][itype] * D.trace() * eye + stressRate_dev;
+				stressRate = p_rate * eye + stressRate_dev;
 				eff_plastic_strain[i] += plastic_strain_increment;
+
+				double damage = 0.0;
+				double m = effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev, stressRate_dev, damage);
+
+//				if (fabs(m - 10.38) > 1.0) {
+//					printf("M = %f\n", m);
+//				}
 
 				// simple linear elastic model
 				//stressRate = bulk_modulus * D.trace() * eye + 2.0 * G * d_dev;
 
 				Jaumann_rate = stressRate - W * stressTensor[i] + stressTensor[i] * W;
 				stressTensor[i] += dt * Jaumann_rate;
-				c0[i] = c0_type[itype];
+				c0[i] = sqrt(m / rho[i]); //c0_type[itype];
+
+//				if (fabs(c0[i] - 1924.5) > 100.0) {
+//					printf("M = %f, rho=%f, c0=%f\n", m, rho[i], c0[i]);
+//				}
+
+				//c0[i] = c0_type[itype];
 
 				tlsph_stress[i][0] = stressTensor[i](0, 0);
 				tlsph_stress[i][1] = stressTensor[i](0, 1);
@@ -1115,6 +1137,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 				Lookup[LAME_LAMBDA][itype] = Lookup[YOUNGS_MODULUS][itype] * Lookup[POISSON_RATIO][itype]
 						/ ((1.0 + Lookup[POISSON_RATIO][itype] * (1.0 - 2.0 * Lookup[POISSON_RATIO][itype])));
 				Lookup[SHEAR_MODULUS][itype] = Lookup[YOUNGS_MODULUS][itype] / (2.0 * (1.0 + Lookup[POISSON_RATIO][itype]));
+				Lookup[M_MODULUS][itype] = Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype];
 
 				if (comm->me == 0) {
 					printf("\n%60s\n", "linear elastic / ideal plastic material mode");
@@ -1123,6 +1146,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 					printf("%60s : %g\n", "yield_strength", Lookup[YIELD_STRENGTH][itype]);
 					printf("%60s : %g\n", "Lame constant lambda", Lookup[LAME_LAMBDA][itype]);
 					printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
+					printf("%60s : %g\n", "p-wave modulus", Lookup[M_MODULUS][itype]);
 				}
 			} // end *LINEAR_PLASTIC
 
@@ -1493,4 +1517,60 @@ bool PairULSPH::CheckKeywordPresent(std::string str, int itype) {
 		error->all(FLERR, msg);
 	}
 	return false;
+}
+
+/* ----------------------------------------------------------------------
+ compute effective P-wave speed
+ determined by longitudinal modulus
+ ------------------------------------------------------------------------- */
+
+double PairULSPH::effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev,
+		Matrix3d sigma_dev_rate, double damage) {
+	double K3; // 3 times the effective bulk modulus, see Pronto 2d eqn 3.4.6
+	double mu2; // 2 times the effective shear modulus, see Pronto 2d eq. 3.4.7
+	double shear_rate_sq;
+	double M; //effective longitudinal modulus
+	double M0; // initial longitudinal modulus
+
+	M0 = Lookup[M_MODULUS][itype];
+
+	//printf("hury\n");
+
+	if (dt * d_iso > 1.0e-6) {
+		K3 = 3.0 * p_rate / d_iso;
+	} else {
+		K3 = 3.0 * M0;
+	}
+
+	if (domain->dimension == 3) {
+		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1) + 1.0e-16) + sigma_dev_rate(0, 2) / (d_dev(0, 2) + 1.0e-16) + sigma_dev_rate(1, 2) / (d_dev(1, 2) + 1.0e-16);
+		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1) + d_dev(0, 2) * d_dev(0, 2) + d_dev(1, 2) * d_dev(1, 2);
+	} else {
+		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1));
+		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1);
+	}
+
+	if (dt * dt * shear_rate_sq < 1.0e-8) {
+		mu2 = 0.5 * (3.0 * M0 - K3); // Formel stimmt
+	}
+
+	M = (K3 + 2.0 * mu2) / 3.0; // effective dilational modulus, see Pronto 2d eqn 3.4.8
+
+	if (M < M0) { // do not allow effective dilatational modulus to decrease beyond its initial value
+		M = M0;
+	}
+
+	//printf("initial M=%f, current M=%f\n", M0, M);
+
+	/*
+	 * damaged particles potentially have a very high dilatational modulus, even though damage degradation scales down the
+	 * effective stress. we simply use the initial modulus for damaged particles.
+	 */
+
+	if (damage > 0.99) {
+		M = M0; //
+	}
+
+	return M;
+
 }
