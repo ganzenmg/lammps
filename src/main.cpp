@@ -15,7 +15,7 @@
 #include "lammps.h"
 #include "input.h"
 #include "string.h"
-#include "google/profiler.h"
+//#include "google/profiler.h"
 
 using namespace LAMMPS_NS;
 
