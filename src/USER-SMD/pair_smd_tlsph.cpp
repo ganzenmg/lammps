@@ -70,11 +70,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 
 	onerad_dynamic = onerad_frozen = maxrad_dynamic = maxrad_frozen = NULL;
 
-	hg_coeff = NULL;
-	Q1 = Q2 = NULL;
 	strengthModel = eos = NULL;
-	signal_vel0 = NULL; // signal velocity basedon on p-wave speed, used for artificial viscosity
-	rho0 = NULL;
 
 	nmax = 0; // make sure no atom on this proc such that initial memory allocation is correct
 	Fdot = Fincr = K = PK1 = NULL;
@@ -86,6 +82,7 @@ PairTlsph::PairTlsph(LAMMPS *lmp) :
 	shepardWeight = NULL;
 	CauchyStress = NULL;
 	hourglass_error = NULL;
+	Lookup = NULL;
 
 	updateFlag = 0;
 	not_first = 0;
@@ -102,14 +99,9 @@ PairTlsph::~PairTlsph() {
 	if (allocated) {
 		memory->destroy(setflag);
 		memory->destroy(cutsq);
-		memory->destroy(youngsmodulus);
-		memory->destroy(hg_coeff);
-		memory->destroy(Q1);
-		memory->destroy(Q2);
 		memory->destroy(strengthModel);
 		memory->destroy(eos);
-		memory->destroy(signal_vel0);
-		memory->destroy(rho0);
+		memory->destroy(Lookup);
 
 		delete[] onerad_dynamic;
 		delete[] onerad_frozen;
@@ -152,7 +144,7 @@ void PairTlsph::PreCompute() {
 	int *tag = atom->tag;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
-	int jnum, jj, i, j, itype;
+	int jnum, jj, i, j, itype, idim;
 
 	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
 	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
@@ -187,10 +179,17 @@ void PairTlsph::PreCompute() {
 		voli = vfrac[i];
 
 		// initialize Eigen data structures from LAMMPS data structures
-		x0i << x0[i][0], x0[i][1], x0[i][2];
-		xi << x[i][0], x[i][1], x[i][2];
-		vi << v[i][0], v[i][1], v[i][2];
-		vinti << vint[i][0], vint[i][1], vint[i][2];
+		for (idim = 0; idim < 3; idim++) {
+			x0i(idim) = x0[i][idim];
+			xi(idim) = x[i][idim];
+			vi(idim) = v[i][idim];
+			vinti(idim) = vint[i][idim];
+		}
+
+//		x0i << x0[i][0], x0[i][1], x0[i][2];
+//		xi << x[i][0], x[i][1], x[i][2];
+//		vi << v[i][0], v[i][1], v[i][2];
+//		vinti << vint[i][0], vint[i][1], vint[i][2];
 
 		for (jj = 0; jj < jnum; jj++) {
 
@@ -210,7 +209,17 @@ void PairTlsph::PreCompute() {
 				continue;
 			}
 
-			x0j << x0[j][0], x0[j][1], x0[j][2];
+			// initialize Eigen data structures from LAMMPS data structures
+			for (idim = 0; idim < 3; idim++) {
+				x0j(idim) = x0[j][idim];
+				xj(idim) = x[j][idim];
+				vj(idim) = v[j][idim];
+				vintj(idim) = vint[j][idim];
+			}
+			//			xj << x[j][0], x[j][1], x[j][2];
+			//			vj << v[j][0], v[j][1], v[j][2];
+			//			vintj << vint[j][0], vint[j][1], vint[j][2];
+			//x0j << x0[j][0], x0[j][1], x0[j][2];
 			dx0 = x0j - x0i;
 
 			if (periodic)
@@ -218,11 +227,6 @@ void PairTlsph::PreCompute() {
 
 			r0Sq = dx0.squaredNorm();
 			h = irad + radius[j];
-
-			// initialize Eigen data structures from LAMMPS data structures
-			xj << x[j][0], x[j][1], x[j][2];
-			vj << v[j][0], v[j][1], v[j][2];
-			vintj << vint[j][0], vint[j][1], vint[j][2];
 
 			r0 = sqrt(r0Sq);
 			volj = vfrac[j];
@@ -234,7 +238,8 @@ void PairTlsph::PreCompute() {
 			dv = vj - vi;
 			dvint = vintj - vinti;
 
-			barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
+			//barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
+			spiky_kernel_and_derivative(h, r0, wf, wfd);
 			g = (wfd / r0) * dx0;
 
 			/* build matrices */
@@ -462,7 +467,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	double *damage = atom->damage;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
-	int i, j, jj, jnum, itype;
+	int i, j, jj, jnum, itype, idim;
 	double r, hg_mag, wf, wfd, h, r0, r0Sq, voli, volj;
 	double delVdotDelR, visc_magnitude, deltaE, mu_ij, hg_err, gamma_dot_dx, delta;
 	char str[128];
@@ -495,9 +500,15 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 		itype = type[i];
 		jnum = npartner[i];
 
-		x0i << x0[i][0], x0[i][1], x0[i][2];
-		xi << x[i][0], x[i][1], x[i][2];
-		vi << v[i][0], v[i][1], v[i][2];
+		for (idim = 0; idim < 3; idim++) {
+			x0i(idim) = x0[i][idim];
+			xi(idim) = x[i][idim];
+			vi(idim) = v[i][idim];
+		}
+
+//		x0i << x0[i][0], x0[i][1], x0[i][2];
+//		xi << x[i][0], x[i][1], x[i][2];
+//		vi << v[i][0], v[i][1], v[i][2];
 
 		voli = vfrac[i];
 
@@ -523,12 +534,17 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				error->all(FLERR, str);
 			}
 
-			// check that distance between i and j (in the reference config) is less than cutoff
-			x0j << x0[j][0], x0[j][1], x0[j][2];
-			dx0 = x0j - x0i;
+			for (idim = 0; idim < 3; idim++) {
+				x0j(idim) = x0[j][idim];
+				xj(idim) = x[j][idim];
+				vj(idim) = v[j][idim];
+			}
 
 			if (periodic)
 				domain->minimum_image(dx0(0), dx0(1), dx0(2));
+
+			// check that distance between i and j (in the reference config) is less than cutoff
+			dx0 = x0j - x0i;
 
 			r0Sq = dx0.squaredNorm();
 			h = radius[i] + radius[j];
@@ -536,17 +552,14 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 			r0 = sqrt(r0Sq);
 			volj = vfrac[j];
 
-			// initialize Eigen data structures from LAMMPS data structures
-			xj << x[j][0], x[j][1], x[j][2];
-			vj << v[j][0], v[j][1], v[j][2];
-
 			// distance vectors in current and reference configuration, velocity difference
 			dx = xj - xi;
 			dv = vj - vi;
 
 			r = dx.norm(); // current distance
 
-			barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
+			//barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
+			spiky_kernel_and_derivative(h, r0, wf, wfd);
 			g = (wfd / r0) * dx0; // uncorrected kernel gradient
 
 			/*
@@ -557,11 +570,11 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 			/*
 			 * artificial viscosity
 			 */
-			spiky_kernel_and_derivative(h, r0, wf, wfd); // call a different kernel and its gradient weights for artificial viscosity and hourglass correction
+			//spiky_kernel_and_derivative(h, r0, wf, wfd); // call a different kernel and its gradient weights for artificial viscosity and hourglass correction
 			delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
-			LimitDoubleMagnitude(delVdotDelR, 0.01 * signal_vel0[itype]);
+			LimitDoubleMagnitude(delVdotDelR, 0.01 * Lookup[SIGNAL_VELOCITY][itype]);
 			mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
-			visc_magnitude = (-Q1[itype] * signal_vel0[itype] * mu_ij + Q2[itype] * mu_ij * mu_ij) / rho0[itype]; // units: m^5/(s^2 kg))
+			visc_magnitude = (-Lookup[VISCOSITY_Q1][itype] * Lookup[SIGNAL_VELOCITY][itype] * mu_ij + Lookup[VISCOSITY_Q2][itype] * mu_ij * mu_ij) / Lookup[REFERENCE_DENSITY][itype]; // units: m^5/(s^2 kg))
 			f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h); // units: kg^2 * m^5/(s^2 kg) * m^-4 = kg m / s^2 = N
 
 			/*
@@ -581,7 +594,7 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				delta = gamma.dot(dx);
 				if (delVdotDelR * delta < 0.0) {
 					hg_err = MAX(hg_err, 0.1); // limit hg_err to avoid numerical instabilities
-					hg_mag = -hg_err * hg_coeff[itype] * signal_vel0[itype] * mu_ij / rho0[itype]; // this has units of pressure
+					hg_mag = -hg_err * Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * Lookup[SIGNAL_VELOCITY][itype] * mu_ij / Lookup[REFERENCE_DENSITY][itype]; // this has units of pressure
 				} else {
 					hg_mag = 0.0;
 				}
@@ -595,8 +608,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				gamma_dot_dx = gamma.dot(dx); // project hourglass error vector onto pair distance vector
 				LimitDoubleMagnitude(gamma_dot_dx, 0.1 * r); // limit projected vector to avoid numerical instabilities
 				delta = 0.5 * gamma_dot_dx / (r + 0.1 * h); // delta has dimensions of [m]
-				hg_mag = hg_coeff[itype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
-				hg_mag *= -voli * volj * wf * youngsmodulus[itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
+				hg_mag = Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * delta / (r0Sq + 0.01 * h * h); // hg_mag has dimensions [m^(-1)]
+				hg_mag *= -voli * volj * wf * Lookup[YOUNGS_MODULUS][itype]; // hg_mag has dimensions [J*m^(-1)] = [N]
 				f_hg = (hg_mag / (r + 0.01 * h)) * dx;
 			}
 
@@ -855,14 +868,9 @@ void PairTlsph::allocate() {
 		for (int j = i; j <= n; j++)
 			setflag[i][j] = 0;
 
-	memory->create(youngsmodulus, n + 1, "pair:youngsmodulus");
-	memory->create(hg_coeff, n + 1, "pair:hg_magnitude");
-	memory->create(Q1, n + 1, "pair:q1");
-	memory->create(Q2, n + 1, "pair:q2");
 	memory->create(strengthModel, n + 1, "pair:strengthmodel");
 	memory->create(eos, n + 1, "pair:eosmodel");
-	memory->create(signal_vel0, n + 1, "pair:signal_vel0");
-	memory->create(rho0, n + 1, "pair:rho0");
+	memory->create(Lookup, MAX_KEY_VALUE, n + 1, "pair:LookupTable");
 
 	memory->create(cutsq, n + 1, n + 1, "pair:cutsq"); // always needs to be allocated, even with granular neighborlist
 
@@ -1019,36 +1027,34 @@ void PairTlsph::coeff(int narg, char **arg) {
 		error->all(FLERR, str);
 	}
 
-	matProp2[std::make_pair("rho_ref", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
-	matProp2[std::make_pair("youngs_modulus", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
-	matProp2[std::make_pair("poisson_ratio", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
-	matProp2[std::make_pair("viscosity_q1", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
-	matProp2[std::make_pair("viscosity_q2", itype)] = force->numeric(FLERR, arg[ioffset + 5]);
-	matProp2[std::make_pair("hourglass_amp", itype)] = force->numeric(FLERR, arg[ioffset + 6]);
-	matProp2[std::make_pair("heat_capacity", itype)] = force->numeric(FLERR, arg[ioffset + 7]);
+	Lookup[REFERENCE_DENSITY][itype] = force->numeric(FLERR, arg[ioffset + 1]);
+	Lookup[YOUNGS_MODULUS][itype] = force->numeric(FLERR, arg[ioffset + 2]);
+	Lookup[POISSON_RATIO][itype] = force->numeric(FLERR, arg[ioffset + 3]);
+	Lookup[VISCOSITY_Q1][itype] = force->numeric(FLERR, arg[ioffset + 4]);
+	Lookup[VISCOSITY_Q2][itype] = force->numeric(FLERR, arg[ioffset + 5]);
+	Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] = force->numeric(FLERR, arg[ioffset + 6]);
+	Lookup[HEAT_CAPACITY][itype] = force->numeric(FLERR, arg[ioffset + 7]);
 
-	matProp2[std::make_pair("lame_lambda", itype)] = SafeLookup("youngs_modulus", itype) * SafeLookup("poisson_ratio", itype)
-			/ ((1.0 + SafeLookup("poisson_ratio", itype) * (1.0 - 2.0 * SafeLookup("poisson_ratio", itype))));
-	matProp2[std::make_pair("lame_mu", itype)] = SafeLookup("youngs_modulus", itype)
-			/ (2.0 * (1.0 + SafeLookup("poisson_ratio", itype)));
-	matProp2[std::make_pair("signal_vel", itype)] = sqrt(
-			(SafeLookup("lame_lambda", itype) + 2.0 * SafeLookup("lame_mu", itype)) / SafeLookup("rho_ref", itype));
-	matProp2[std::make_pair("bulk_modulus", itype)] = SafeLookup("lame_lambda", itype) + 2.0 * SafeLookup("lame_mu", itype) / 3.0;
-	matProp2[std::make_pair("m_modulus", itype)] = SafeLookup("lame_lambda", itype) + 2.0 * SafeLookup("lame_mu", itype);
+	Lookup[LAME_LAMBDA][itype] = Lookup[YOUNGS_MODULUS][itype] * Lookup[POISSON_RATIO][itype]
+			/ ((1.0 + Lookup[POISSON_RATIO][itype] * (1.0 - 2.0 * Lookup[POISSON_RATIO][itype])));
+	Lookup[SHEAR_MODULUS][itype] = Lookup[YOUNGS_MODULUS][itype] / (2.0 * (1.0 + Lookup[POISSON_RATIO][itype]));
+	Lookup[M_MODULUS][itype] = Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype];
+	Lookup[SIGNAL_VELOCITY][itype] =  sqrt(	(Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype]) / Lookup[REFERENCE_DENSITY][itype]);
+	Lookup[BULK_MODULUS][itype] = Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype] / 3.0;
 
 	if (comm->me == 0) {
 		printf("\n material unspecific properties for SMD/TLSPH definition of particle type %d:\n", itype);
-		printf("%60s : %g\n", "reference density", SafeLookup("rho_ref", itype));
-		printf("%60s : %g\n", "Young's modulus", SafeLookup("youngs_modulus", itype));
-		printf("%60s : %g\n", "Poisson ratio", SafeLookup("poisson_ratio", itype));
-		printf("%60s : %g\n", "linear viscosity coefficient", SafeLookup("viscosity_q1", itype));
-		printf("%60s : %g\n", "quadratic viscosity coefficient", SafeLookup("viscosity_q2", itype));
-		printf("%60s : %g\n", "hourglass control coefficient", SafeLookup("hourglass_amp", itype));
-		printf("%60s : %g\n", "heat capacity [energy / (mass * temperature)]", SafeLookup("heat_capacity", itype));
-		printf("%60s : %g\n", "Lame constant lambda", SafeLookup("lame_lambda", itype));
-		printf("%60s : %g\n", "shear modulus", SafeLookup("lame_mu", itype));
-		printf("%60s : %g\n", "bulk modulus", SafeLookup("bulk_modulus", itype));
-		printf("%60s : %g\n", "signal velocity", SafeLookup("signal_vel", itype));
+		printf("%60s : %g\n", "reference density", Lookup[REFERENCE_DENSITY][itype]);
+		printf("%60s : %g\n", "Young's modulus", Lookup[YOUNGS_MODULUS][itype]);
+		printf("%60s : %g\n", "Poisson ratio", Lookup[POISSON_RATIO][itype]);
+		printf("%60s : %g\n", "linear viscosity coefficient", Lookup[VISCOSITY_Q1][itype]);
+		printf("%60s : %g\n", "quadratic viscosity coefficient", Lookup[VISCOSITY_Q2][itype]);
+		printf("%60s : %g\n", "hourglass control coefficient", Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype]);
+		printf("%60s : %g\n", "heat capacity [energy / (mass * temperature)]", Lookup[HEAT_CAPACITY][itype]);
+		printf("%60s : %g\n", "Lame constant lambda", Lookup[LAME_LAMBDA][itype]);
+		printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
+		printf("%60s : %g\n", "bulk modulus", Lookup[BULK_MODULUS][itype]);
+		printf("%60s : %g\n", "signal velocity", Lookup[SIGNAL_VELOCITY][itype]);
 
 	}
 
@@ -1171,14 +1177,14 @@ void PairTlsph::coeff(int narg, char **arg) {
 				error->all(FLERR, str);
 			}
 
-			matProp2[std::make_pair("yield_stress0", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+			Lookup[YIELD_STRESS][itype] = force->numeric(FLERR, arg[ioffset + 1]);
 
 			if (comm->me == 0) {
 				printf("%60s\n", "Linear elastic / perfectly plastic strength based on strain rate");
-				printf("%60s : %g\n", "Young's modulus", SafeLookup("youngs_modulus", itype));
-				printf("%60s : %g\n", "Poisson ratio", SafeLookup("poisson_ratio", itype));
-				printf("%60s : %g\n", "shear modulus", SafeLookup("lame_mu", itype));
-				printf("%60s : %g\n", "constant yield stress", SafeLookup("yield_stress0", itype));
+				printf("%60s : %g\n", "Young's modulus", Lookup[YOUNGS_MODULUS][itype]);
+				printf("%60s : %g\n", "Poisson ratio", Lookup[POISSON_RATIO][itype]);
+				printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
+				printf("%60s : %g\n", "constant yield stress", Lookup[YIELD_STRESS][itype]);
 			}
 		} // end Linear Elastic / perfectly plastic strength only model based on strain rate
 
@@ -1304,7 +1310,7 @@ void PairTlsph::coeff(int narg, char **arg) {
 
 			if (comm->me == 0) {
 				printf("\n%60s\n", "linear EOS based on strain rate");
-				printf("%60s : %g\n", "bulk modulus", SafeLookup("bulk_modulus", itype));
+				printf("%60s : %g\n", "bulk modulus", Lookup[BULK_MODULUS][itype]);
 			}
 		} // end linear eos
 		else if (strcmp(arg[ioffset], "*EOS_SHOCK") == 0) {
@@ -1428,12 +1434,12 @@ void PairTlsph::coeff(int narg, char **arg) {
 				error->all(FLERR, str);
 			}
 
-			matProp2[std::make_pair("failure_max_plastic_strain", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
+			Lookup[FAILURE_MAX_PLASTIC_STRAIN_THRESHOLD][itype] = force->numeric(FLERR, arg[ioffset + 1]);
 
 			if (comm->me == 0) {
 				printf("\n%60s\n", "maximum plastic strain failure criterion");
 				printf("%60s : %g\n", "failure occurs when plastic strain reaches limit",
-						SafeLookup("failure_max_plastic_strain", itype));
+						Lookup[FAILURE_MAX_PLASTIC_STRAIN_THRESHOLD][itype]);
 			}
 		} // end maximum plastic strain failure criterion
 		else if (strcmp(arg[ioffset], "*FAILURE_MAX_PRINCIPAL_STRAIN") == 0) {
@@ -1558,17 +1564,6 @@ void PairTlsph::coeff(int narg, char **arg) {
 		}
 
 	}
-
-	/*
-	 * copy data which is looked up in inner pairwise loops from slow maps to fast arrays
-	 */
-
-	hg_coeff[itype] = SafeLookup("hourglass_amp", itype);
-	Q1[itype] = SafeLookup("viscosity_q1", itype);
-	Q2[itype] = SafeLookup("viscosity_q2", itype);
-	youngsmodulus[itype] = SafeLookup("youngs_modulus", itype);
-	signal_vel0[itype] = SafeLookup("signal_vel", itype);
-	rho0[itype] = SafeLookup("rho_ref", itype);
 
 	setflag[itype][itype] = 1;
 
@@ -1903,7 +1898,7 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 	double M; //effective longitudinal modulus
 	double M0; // initial longitudinal modulus
 
-	M0 = SafeLookup("m_modulus", itype);
+	M0 = Lookup[M_MODULUS][itype];
 
 	if (dt * d_iso > 1.0e-6) {
 		K3 = 3.0 * p_rate / d_iso;
@@ -1943,13 +1938,14 @@ double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_
 }
 
 double PairTlsph::SafeLookup(std::string str, int itype) {
-	//cout << "string passed to lookup: " << str << endl;
+	cout << "string passed to lookup: " << str.c_str() << endl;
+	error->all(FLERR, "");
 	char msg[128];
 	if (matProp2.count(std::make_pair(str, itype)) == 1) {
-//cout << "returning look up value %d " << matProp2[std::make_pair(str, itype)] << endl;
+		cout << "returning look up value %d " << matProp2[std::make_pair(str, itype)] << endl;
 		return matProp2[std::make_pair(str, itype)];
 	} else {
-//sprintf(msg, "failed to lookup indentifier [%s] for particle type %d", str, itype);
+		sprintf(msg, "failed to lookup indentifier [%s] for particle type %d", str.c_str(), itype);
 		error->all(FLERR, msg);
 	}
 	return 1.0;
@@ -2028,7 +2024,7 @@ void PairTlsph::ComputePressure(const int i, const double pInitial, const double
 
 	switch (eos[itype]) {
 	case EOS_LINEAR:
-		LinearEOS(SafeLookup("bulk_modulus", itype), pInitial, d_iso, dt, pFinal, p_rate);
+		LinearEOS(Lookup[BULK_MODULUS][itype], pInitial, d_iso, dt, pFinal, p_rate);
 		break;
 	case EOS_NONE:
 		pFinal = 0.0;
@@ -2036,11 +2032,11 @@ void PairTlsph::ComputePressure(const int i, const double pInitial, const double
 		break;
 	case EOS_SHOCK:
 		//  rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
-		ShockEOS(rho, rho0[itype], mass_specific_energy, 0.0, SafeLookup("eos_shock_c0", itype), SafeLookup("eos_shock_s", itype),
+		ShockEOS(rho, Lookup[REFERENCE_DENSITY][itype], mass_specific_energy, 0.0, SafeLookup("eos_shock_c0", itype), SafeLookup("eos_shock_s", itype),
 				SafeLookup("eos_shock_gamma", itype), pInitial, dt, pFinal, p_rate);
 		break;
 	case EOS_POLYNOMIAL:
-		polynomialEOS(rho, rho0[itype], vol_specific_energy, SafeLookup("eos_polynomial_c0", itype),
+		polynomialEOS(rho, Lookup[REFERENCE_DENSITY][itype], vol_specific_energy, SafeLookup("eos_polynomial_c0", itype),
 				SafeLookup("eos_polynomial_c1", itype), SafeLookup("eos_polynomial_c2", itype),
 				SafeLookup("eos_polynomial_c3", itype), SafeLookup("eos_polynomial_c4", itype),
 				SafeLookup("eos_polynomial_c5", itype), SafeLookup("eos_polynomial_c6", itype), pInitial, dt, pFinal, p_rate);
@@ -2073,14 +2069,14 @@ void PairTlsph::ComputeStressDeviator(const int i, const Matrix3d sigmaInitial_d
 	switch (strengthModel[itype]) {
 	case LINEAR_STRENGTH:
 		//printf("mu0 is %f\n", mu0[itype]);
-		//LinearStrength(SafeLookup("lame_mu", itype), sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
+		//LinearStrength(Lookup[SHEAR_MODULUS][itype], sigmaInitial_dev, d[i], dt, &sigmaFinal_dev, &sigma_dev_rate);
 
-		sigma_dev_rate = 2.0 * SafeLookup("lame_mu", itype) * d_dev;
+		sigma_dev_rate = 2.0 * Lookup[SHEAR_MODULUS][itype] * d_dev;
 		sigmaFinal_dev = sigmaInitial_dev + dt * sigma_dev_rate;
 
 		break;
 	case LINEAR_DEFGRAD:
-		//LinearStrengthDefgrad(SafeLookup("lame_lambda", itype), SafeLookup("lame_mu", itype), Fincr[i], &sigmaFinal_dev);
+		//LinearStrengthDefgrad(Lookup[LAME_LAMBDA][itype], Lookup[SHEAR_MODULUS][itype], Fincr[i], &sigmaFinal_dev);
 		//eff_plastic_strain[i] = 0.0;
 		//p_rate = pInitial - sigmaFinal_dev.trace() / 3.0;
 		//sigma_dev_rate = sigmaInitial_dev - Deviator(sigmaFinal_dev);
@@ -2088,11 +2084,11 @@ void PairTlsph::ComputeStressDeviator(const int i, const Matrix3d sigmaInitial_d
 		R[i].setIdentity();
 		break;
 	case LINEAR_PLASTICITY:
-		LinearPlasticStrength(SafeLookup("lame_mu", itype), SafeLookup("yield_stress0", itype), sigmaInitial_dev, d_dev, dt,
+		LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], Lookup[YIELD_STRESS][itype], sigmaInitial_dev, d_dev, dt,
 				sigmaFinal_dev, sigma_dev_rate, plastic_strain_increment);
 		break;
 	case STRENGTH_JOHNSON_COOK:
-		JohnsonCookStrength(SafeLookup("lame_mu", itype), SafeLookup("heat_capacity", itype), mass_specific_energy,
+		JohnsonCookStrength(Lookup[SHEAR_MODULUS][itype], Lookup[HEAT_CAPACITY][itype], mass_specific_energy,
 				SafeLookup("JC_A", itype), SafeLookup("JC_B", itype), SafeLookup("JC_a", itype), SafeLookup("JC_C", itype),
 				SafeLookup("JC_epdot0", itype), SafeLookup("JC_T0", itype), SafeLookup("JC_Tmelt", itype),
 				SafeLookup("JC_M", itype), dt, eff_plastic_strain[i], eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev,
@@ -2135,9 +2131,9 @@ void PairTlsph::ComputeDamage(const int i, const Matrix3d strain, const double p
 		damage_flag = IsotropicMaxStrainDamage(strain, SafeLookup("failure_max_principal_strain", itype));
 	}
 
-	if (CheckKeywordPresent("failure_max_plastic_strain", itype)) {
+	if (Lookup[FAILURE_MAX_PLASTIC_STRAIN_THRESHOLD][itype] > 0.0) {
 
-		if (eff_plastic_strain[i] >= 0.99 * SafeLookup("failure_max_plastic_strain", itype)) {
+		if (eff_plastic_strain[i] >= 0.99 * Lookup[FAILURE_MAX_PLASTIC_STRAIN_THRESHOLD][itype]) {
 			damage_flag = true;
 		}
 
@@ -2161,7 +2157,7 @@ void PairTlsph::ComputeDamage(const int i, const Matrix3d strain, const double p
 	 */
 
 	if (damage_flag == true) {
-		damage_increment = dt * signal_vel0[itype] / (10.0 * radius[i]);
+		damage_increment = dt * Lookup[SIGNAL_VELOCITY][itype] / (10.0 * radius[i]);
 	} else {
 		damage_increment = 0.0;
 	}

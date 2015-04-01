@@ -93,15 +93,8 @@ protected:
 	/*
 	 * per-type arrays
 	 */
-	double *youngsmodulus, *signal_vel0, *rho0;
 	int *strengthModel, *eos;
 	double *onerad_dynamic, *onerad_frozen, *maxrad_dynamic, *maxrad_frozen;
-
-	/*
-	 * per type pair arrays
-	 */
-	double *Q1, *Q2;
-	double *hg_coeff;
 
 
 	/*
@@ -128,12 +121,22 @@ protected:
 	double cut_comm;
 
 	enum {
-		LINEAR_DEFGRAD, LINEAR_STRENGTH, LINEAR_PLASTICITY, STRENGTH_JOHNSON_COOK,
-		STRENGTH_NONE,
-		EOS_LINEAR, EOS_SHOCK, EOS_POLYNOMIAL,
-		EOS_NONE,
-		UPDATE_CONSTANT_THRESHOLD, UPDATE_PAIRWISE_RATIO
+		LINEAR_DEFGRAD = 0, LINEAR_STRENGTH = 1, LINEAR_PLASTICITY = 2, STRENGTH_JOHNSON_COOK = 3,
+		STRENGTH_NONE = 4,
+		EOS_LINEAR = 5, EOS_SHOCK = 6, EOS_POLYNOMIAL = 7,
+		EOS_NONE = 8,
+		UPDATE_CONSTANT_THRESHOLD = 9, UPDATE_PAIRWISE_RATIO = 10,
+		REFERENCE_DENSITY = 11, YOUNGS_MODULUS = 12, POISSON_RATIO = 13,
+		HOURGLASS_CONTROL_AMPLITUDE = 14, HEAT_CAPACITY = 15,
+		LAME_LAMBDA = 16, SHEAR_MODULUS = 17, M_MODULUS = 18,
+		SIGNAL_VELOCITY = 19, BULK_MODULUS = 20,
+		VISCOSITY_Q1 = 21, VISCOSITY_Q2 = 22, YIELD_STRESS = 23,
+		FAILURE_MAX_PLASTIC_STRAIN_THRESHOLD = 24,
+
+		MAX_KEY_VALUE = 25
 	};
+
+
 
 	// C++ std dictionary to hold material model settings per particle type
 	typedef std::map<std::pair<std::string, int>, double> Dict;
@@ -149,6 +152,7 @@ protected:
 private:
 	double SafeLookup(std::string str, int itype);
 	bool CheckKeywordPresent(std::string str, int itype);
+	double **Lookup; // holds per-type material parameters for the quantities defined in enum statement above.
 };
 
 }

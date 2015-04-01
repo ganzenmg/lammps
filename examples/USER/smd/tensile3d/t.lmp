@@ -1,4 +1,4 @@
-processors      4 1 1
+#processors      4 1 1
 variable        rho equal 2700.0e-9
 variable        h equal 0.82
 variable        E equal 10 # Young's modulus
@@ -39,11 +39,11 @@ group           tlsph union all
 velocity        top set  ${vel} 0 0 sum no units box
 velocity        bot set -${vel} 0 0 sum no units box
 
-pair_style      tlsph *UPDATE_CONSTANT 4.0 # activate Total-Lagrangian SPH
+pair_style      tlsph *UPDATE_PAIRWISE 4.0 # activate Total-Lagrangian SPH
 #                           rh0    E    nu    Q1    Q2   hg    Cp
 pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.5  0.0   10 1.0 &
-                *LINEAR_PLASTICITY 10.1 &
-		*FAILURE_MAX_PLASTIC_STRAIN 2.0 &
+                *LINEAR_PLASTICITY ${sigy} &
+		*FAILURE_MAX_PLASTIC_STRAIN 0.5 &
 		*EOS_LINEAR &
                 *END
 
@@ -77,7 +77,7 @@ variable        stress equal v_force/150
 fix             output_fix all print 10 "${disp} ${force} ${strain} ${stress}" file force_displacement.dat screen no
 
 
-variable        nrun equal round((1.0/${vel})/${dt})
+variable        nrun equal round((10.0/${vel})/${dt})
 print "running for ${nrun} steps"
 
 variable        dumpFreq equal round(${nrun}/1000)
@@ -93,7 +93,7 @@ thermo          100
 thermo_style    custom step ke pe v_etot c_alleint dt f_dtfix time f_dtfix[1] c_vol
 #thermo_modify   lost ignore
 
-run             ${nrun}
+run            	${nrun}
 #
 #
 #

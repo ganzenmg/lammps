@@ -12,7 +12,7 @@ SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
 LINK =		clang++
-LINKFLAGS =	-O -g
+LINKFLAGS =	-O2 -g
 LIB =       -lprofiler
 SIZE =		size
 
