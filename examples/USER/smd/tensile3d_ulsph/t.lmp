@@ -6,6 +6,7 @@ variable        nu equal 0.3 # Poisson ratio
 variable        sigy equal  0.7
 variable        vel equal 10.0
 variable        hg equal 1000.0
+variable        L0 equal 129
 # ----
 variable        c0 equal sqrt(${E}/${rho})
 variable        dt equal 0.125*${h}/${c0}
@@ -66,10 +67,10 @@ fix             dtfix all smd/adjust_dt 0.1
 fix             force_fix1 top setforce 0 0 0
 fix             force_fix2 bot setforce 0 0 0
 fix             integration_fix all smd/integrate_ulsph #adjust_radius 1.2
-variable        a equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
+variable        force equal 0.5*(f_force_fix2[1]-f_force_fix1[1])
 variable        disp equal 2.0*${vel}*f_dtfix
 variable        strain equal v_disp/${L0}
-variable        stress equal ${force}/150
+variable        stress equal v_force/150
 fix             output_fix all print 10 "${disp} ${force} ${strain} ${stress}" file force_displacement.dat screen no
 
 
@@ -89,13 +90,15 @@ thermo          100
 thermo_style    custom step ke pe v_etot c_alleint dt f_dtfix
 thermo_modify   lost ignore
 
-label	    loop
-variable    i loop 5
-print	    "A = $i"
-next	    i
-run         200
-write_restart   restart_%_file
-jump	    t.lmp loop
+run 500
+
+#label	    loop
+#variable    i loop 5
+#print	    "A = $i"
+#next	    i
+#run         200
+#write_restart   restart_%_file
+#jump	    t.lmp loop
 
 
 

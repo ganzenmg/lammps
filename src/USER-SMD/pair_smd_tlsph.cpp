@@ -492,25 +492,19 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 	dtRelative = 1.0e22;
 
 	for (i = 0; i < nlocal; i++) {
-
 		if (mol[i] < 0) {
 			continue; // Particle i is not a valid SPH particle (anymore). Skip all interactions with this particle.
 		}
 
 		itype = type[i];
 		jnum = npartner[i];
+		voli = vfrac[i];
 
 		for (idim = 0; idim < 3; idim++) {
 			x0i(idim) = x0[i][idim];
 			xi(idim) = x[i][idim];
 			vi(idim) = v[i][idim];
 		}
-
-//		x0i << x0[i][0], x0[i][1], x0[i][2];
-//		xi << x[i][0], x[i][1], x[i][2];
-//		vi << v[i][0], v[i][1], v[i][2];
-
-		voli = vfrac[i];
 
 		for (jj = 0; jj < jnum; jj++) {
 			if (partner[i][jj] == 0)
@@ -570,7 +564,6 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 			/*
 			 * artificial viscosity
 			 */
-			//spiky_kernel_and_derivative(h, r0, wf, wfd); // call a different kernel and its gradient weights for artificial viscosity and hourglass correction
 			delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
 			LimitDoubleMagnitude(delVdotDelR, 0.01 * Lookup[SIGNAL_VELOCITY][itype]);
 			mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
@@ -2162,17 +2155,18 @@ void PairTlsph::ComputeDamage(const int i, const Matrix3d strain, const double p
 		damage_increment = 0.0;
 	}
 }
-void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
+
+	void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
 
 	/*
 	 * Spiky kernel
 	 */
 
-	if (r >= h) {
-		//printf("r=%f > h=%f in Spiky kernel\n", r, h);
-		wf = wfd = 0.0;
-		return;
-	}
+//	if (r >= h) {
+//		//printf("r=%f > h=%f in Spiky kernel\n", r, h);
+//		wf = wfd = 0.0;
+//		return;
+//	}
 
 	double hr = h - r; // [m]
 	if (domain->dimension == 2) {
