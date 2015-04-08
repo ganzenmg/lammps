@@ -4,7 +4,7 @@ variable        h equal 0.82
 variable        E equal 10 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
 variable        sigy equal 0.1
-variable        vel equal 1.0
+variable        vel equal 10.0
 variable        hg equal 1.0
 # ----
 variable        c0 equal sqrt(${E}/${rho})
@@ -39,9 +39,9 @@ group           tlsph union all
 velocity        top set  ${vel} 0 0 sum no units box
 velocity        bot set -${vel} 0 0 sum no units box
 
-pair_style      tlsph *UPDATE_PAIRWISE 0.05 # activate Total-Lagrangian SPH
+pair_style      tlsph *UPDATE_PAIRWISE 1.0 # activate Total-Lagrangian SPH
 #                           rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.5  0.0   10 1.0 &
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 1.0  0.0   0 1.0 &
                 *LINEAR_PLASTICITY ${sigy} &
 		*FAILURE_MAX_PLASTIC_STRAIN 0.5 &
 		*EOS_LINEAR &

@@ -242,6 +242,9 @@ void PairTlsph::PreCompute() {
 			spiky_kernel_and_derivative(h, r0, wf, wfd);
 			g = (wfd / r0) * dx0;
 
+
+
+
 			/* build matrices */
 			Ktmp = g * dx0.transpose();
 			Ftmp = (dx - dx0) * g.transpose();
@@ -567,7 +570,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 			delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
 			LimitDoubleMagnitude(delVdotDelR, 0.01 * Lookup[SIGNAL_VELOCITY][itype]);
 			mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
-			visc_magnitude = (-Lookup[VISCOSITY_Q1][itype] * Lookup[SIGNAL_VELOCITY][itype] * mu_ij + Lookup[VISCOSITY_Q2][itype] * mu_ij * mu_ij) / Lookup[REFERENCE_DENSITY][itype]; // units: m^5/(s^2 kg))
+			visc_magnitude = (-Lookup[VISCOSITY_Q1][itype] * Lookup[SIGNAL_VELOCITY][itype] * mu_ij
+					+ Lookup[VISCOSITY_Q2][itype] * mu_ij * mu_ij) / Lookup[REFERENCE_DENSITY][itype]; // units: m^5/(s^2 kg))
 			f_visc = rmass[i] * rmass[j] * visc_magnitude * wfd * dx / (r + 1.0e-2 * h); // units: kg^2 * m^5/(s^2 kg) * m^-4 = kg m / s^2 = N
 
 			/*
@@ -587,7 +591,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 				delta = gamma.dot(dx);
 				if (delVdotDelR * delta < 0.0) {
 					hg_err = MAX(hg_err, 0.1); // limit hg_err to avoid numerical instabilities
-					hg_mag = -hg_err * Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * Lookup[SIGNAL_VELOCITY][itype] * mu_ij / Lookup[REFERENCE_DENSITY][itype]; // this has units of pressure
+					hg_mag = -hg_err * Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] * Lookup[SIGNAL_VELOCITY][itype] * mu_ij
+							/ Lookup[REFERENCE_DENSITY][itype]; // this has units of pressure
 				} else {
 					hg_mag = 0.0;
 				}
@@ -670,7 +675,7 @@ void PairTlsph::AssembleStress() {
 	int i, itype;
 	int nlocal = atom->nlocal;
 	double dt = update->dt;
-	double M, p_wave_speed, mass_specific_energy, vol_specific_energy, rho, damage_increment;
+	double M_eff, p_wave_speed, mass_specific_energy, vol_specific_energy, rho, damage_increment;
 	Matrix3d sigma_rate, eye, sigmaInitial, sigmaFinal, T, Jaumann_rate, sigma_rate_check;
 	Matrix3d d_dev, sigmaInitial_dev, sigmaFinal_dev, sigma_dev_rate, strain, sigma_damaged;
 	Vector3d x0i, xi, xp;
@@ -821,10 +826,12 @@ void PairTlsph::AssembleStress() {
 				p_rate = deltaSigma.trace() / (3.0 * dt);
 				sigma_dev_rate = Deviator(deltaSigma) / dt;
 
-				M = effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev, sigma_dev_rate, damage[i]);
-				p_wave_speed = sqrt(M / (rmass[i] / vfrac[i]));
-				//printf("c0 = %f\n", c0[i]);
-				dtCFL = MIN(dtCFL, radius[i] / p_wave_speed);
+				double K_eff, mu_eff;
+				effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev, sigma_dev_rate, damage[i], K_eff, mu_eff, M_eff);
+				p_wave_speed = sqrt(M_eff / rho);
+				dtCFL = MIN(dtCFL, 2.0 * radius[i] / p_wave_speed);
+
+				//dtCFL = MIN(dtCFL, radius[i] / p_wave_speed);
 
 			} else { // end if delete_flag == 0
 				PK1[i].setZero();
@@ -1032,7 +1039,8 @@ void PairTlsph::coeff(int narg, char **arg) {
 			/ ((1.0 + Lookup[POISSON_RATIO][itype] * (1.0 - 2.0 * Lookup[POISSON_RATIO][itype])));
 	Lookup[SHEAR_MODULUS][itype] = Lookup[YOUNGS_MODULUS][itype] / (2.0 * (1.0 + Lookup[POISSON_RATIO][itype]));
 	Lookup[M_MODULUS][itype] = Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype];
-	Lookup[SIGNAL_VELOCITY][itype] =  sqrt(	(Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype]) / Lookup[REFERENCE_DENSITY][itype]);
+	Lookup[SIGNAL_VELOCITY][itype] = sqrt(
+			(Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype]) / Lookup[REFERENCE_DENSITY][itype]);
 	Lookup[BULK_MODULUS][itype] = Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype] / 3.0;
 
 	if (comm->me == 0) {
@@ -1883,51 +1891,73 @@ double PairTlsph::TestMatricesEqual(Matrix3d A, Matrix3d B, double eps) {
  determined by longitudinal modulus
  ------------------------------------------------------------------------- */
 
-double PairTlsph::effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev,
-		Matrix3d sigma_dev_rate, double damage) {
-	double K3; // 3 times the effective bulk modulus, see Pronto 2d eqn 3.4.6
-	double mu2; // 2 times the effective shear modulus, see Pronto 2d eq. 3.4.7
-	double shear_rate_sq;
-	double M; //effective longitudinal modulus
+void PairTlsph::effective_longitudinal_modulus(const int itype, const double dt, const double d_iso, const double p_rate,
+		const Matrix3d d_dev, const Matrix3d sigma_dev_rate, const double damage, double &K_eff, double &mu_eff, double &M_eff) {
 	double M0; // initial longitudinal modulus
+	double shear_rate_sq;
+
+//	if (damage >= 0.5) {
+//		M_eff = Lookup[M_MODULUS][itype];
+//		K_eff = Lookup[BULK_MODULUS][itype];
+//		mu_eff = Lookup[SHEAR_MODULUS][itype];
+//		return;
+//	}
 
 	M0 = Lookup[M_MODULUS][itype];
 
 	if (dt * d_iso > 1.0e-6) {
-		K3 = 3.0 * p_rate / d_iso;
+		K_eff = p_rate / d_iso;
+		if (K_eff < 0.0) { // it is possible for K_eff to become negative due to strain softening
+			if (damage == 0.0) {
+				error->one(FLERR, "computed a negative effective bulk modulus but particle is not damaged.");
+			}
+			K_eff = Lookup[BULK_MODULUS][itype];
+		}
 	} else {
-		K3 = 3.0 * M0;
+		K_eff = Lookup[BULK_MODULUS][itype];
 	}
 
 	if (domain->dimension == 3) {
-		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1)) + sigma_dev_rate(0, 2) / (d_dev(0, 2)) + sigma_dev_rate(1, 2) / (d_dev(1, 2));
+		// Calculate 2 mu by looking at ratio shear stress / shear strain. Use numerical softening to avoid divide-by-zero.
+		mu_eff = 0.5
+				* (sigma_dev_rate(0, 1) / (d_dev(0, 1) + 1.0e-16) + sigma_dev_rate(0, 2) / (d_dev(0, 2) + 1.0e-16)
+						+ sigma_dev_rate(1, 2) / (d_dev(1, 2) + 1.0e-16));
+
+		// Calculate magnitude of deviatoric strain rate. This is used for deciding if shear modulus should be computed from current rate or be taken as the initial value.
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1) + d_dev(0, 2) * d_dev(0, 2) + d_dev(1, 2) * d_dev(1, 2);
 	} else {
-		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1));
+		mu_eff = 0.5 * (sigma_dev_rate(0, 1) / (d_dev(0, 1) + 1.0e-16));
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1);
 	}
 
 	if (dt * dt * shear_rate_sq < 1.0e-8) {
-		mu2 = 0.5 * (3.0 * M0 - K3); // Formel stimmt
+		mu_eff = Lookup[SHEAR_MODULUS][itype];
 	}
 
-	M = (K3 + 2.0 * mu2) / 3.0; // effective dilational modulus, see Pronto 2d eqn 3.4.8
-
-	if (M < M0) { // do not allow effective dilatational modulus to decrease beyond its initial value
-		M = M0;
+	if (mu_eff < Lookup[SHEAR_MODULUS][itype]) { // it is possible for mu_eff to become negative due to strain softening
+//		if (damage == 0.0) {
+//			printf("mu_eff = %f, tau=%f, gamma=%f\n", mu_eff, sigma_dev_rate(0, 1), d_dev(0, 1));
+//			error->message(FLERR, "computed a negative effective shear modulus but particle is not damaged.");
+//		}
+		mu_eff = Lookup[SHEAR_MODULUS][itype];
 	}
 
-	/*
-	 * damaged particles potentially have a very high dilatational modulus, even though damage degradation scales down the
-	 * effective stress. we simply use the initial modulus for damaged particles.
-	 */
+	//mu_eff = Lookup[SHEAR_MODULUS][itype];
 
-	if (damage > 0.99) {
-		M = M0; //
+	if (K_eff < 0.0) {
+		printf("K_eff = %f, p_rate=%f, vol_rate=%f\n", K_eff, p_rate, d_iso);
 	}
 
-	return M;
+	if (mu_eff < 0.0) {
+		printf("mu_eff = %f, tau=%f, gamma=%f\n", mu_eff, sigma_dev_rate(0, 1), d_dev(0, 1));
+		error->one(FLERR, "");
+	}
 
+	M_eff = (K_eff + 4.0 * mu_eff / 3.0); // effective dilational modulus, see Pronto 2d eqn 3.4.8
+
+	if (M_eff < M0) { // do not allow effective dilatational modulus to decrease beyond its initial value
+		M_eff = M0;
+	}
 }
 
 double PairTlsph::SafeLookup(std::string str, int itype) {
@@ -2025,8 +2055,8 @@ void PairTlsph::ComputePressure(const int i, const double pInitial, const double
 		break;
 	case EOS_SHOCK:
 		//  rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
-		ShockEOS(rho, Lookup[REFERENCE_DENSITY][itype], mass_specific_energy, 0.0, SafeLookup("eos_shock_c0", itype), SafeLookup("eos_shock_s", itype),
-				SafeLookup("eos_shock_gamma", itype), pInitial, dt, pFinal, p_rate);
+		ShockEOS(rho, Lookup[REFERENCE_DENSITY][itype], mass_specific_energy, 0.0, SafeLookup("eos_shock_c0", itype),
+				SafeLookup("eos_shock_s", itype), SafeLookup("eos_shock_gamma", itype), pInitial, dt, pFinal, p_rate);
 		break;
 	case EOS_POLYNOMIAL:
 		polynomialEOS(rho, Lookup[REFERENCE_DENSITY][itype], vol_specific_energy, SafeLookup("eos_polynomial_c0", itype),
@@ -2150,13 +2180,13 @@ void PairTlsph::ComputeDamage(const int i, const Matrix3d strain, const double p
 	 */
 
 	if (damage_flag == true) {
-		damage_increment = dt * Lookup[SIGNAL_VELOCITY][itype] / (10.0 * radius[i]);
+		damage_increment = dt * Lookup[SIGNAL_VELOCITY][itype] / (100.0 * radius[i]);
 	} else {
 		damage_increment = 0.0;
 	}
 }
 
-	void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
+void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
 
 	/*
 	 * Spiky kernel
@@ -2167,8 +2197,7 @@ void PairTlsph::ComputeDamage(const int i, const Matrix3d strain, const double p
 //		wf = wfd = 0.0;
 //		return;
 //	}
-
-	double hr = h - r; // [m]
+	double hr = h - r;		// [m]
 	if (domain->dimension == 2) {
 		double n = 0.3141592654e0 * h * h * h * h * h; // [m^5]
 		wfd = -3.0e0 * hr * hr / n; // [m*m/m^5] = [1/m^3] ==> correct for dW/dr in 2D

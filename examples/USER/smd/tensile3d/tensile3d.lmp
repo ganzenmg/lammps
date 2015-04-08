@@ -1,4 +1,4 @@
-processors      4 1 1
+#processors      4 1 1
 variable        rho equal 2700.0e-9
 variable        l0 equal 1.0
 variable        vol_one equal ${l0}^3
@@ -94,7 +94,7 @@ dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
 
 dump_modify     dump_id first yes
 
-run             ${nrun}
+run             200 #${nrun}
 #
 #
 #

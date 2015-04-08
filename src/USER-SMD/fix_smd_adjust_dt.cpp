@@ -132,6 +132,48 @@ void FixSMDTlsphDtReset::end_of_step() {
 		dtmin = MIN(dtmin, *dt_HERTZ);
 	}
 
+	double **v = atom->v;
+	double **f = atom->f;
+	double *rmass = atom->rmass;
+	double *radius = atom->radius;
+	int *mask = atom->mask;
+	int nlocal = atom->nlocal;
+	double dtv, dtf, dtsq;
+	double vsq, fsq, massinv, xmax;
+	double delx, dely, delz, delr;
+
+	for (int i = 0; i < nlocal; i++) {
+		if (mask[i] & groupbit) {
+//			xmax = 0.005 * radius[i];
+//			massinv = 1.0 / rmass[i];
+//			vsq = v[i][0] * v[i][0] + v[i][1] * v[i][1] + v[i][2] * v[i][2];
+//			fsq = f[i][0] * f[i][0] + f[i][1] * f[i][1] + f[i][2] * f[i][2];
+//			dtv = dtf = BIG;
+//			if (vsq > 0.0)
+//				dtv = xmax / sqrt(vsq);
+//			if (fsq > 0.0)
+//				dtf = sqrt(2.0 * xmax / (sqrt(fsq) * massinv));
+//			dt = MIN(dtv, dtf);
+//			dtmin = MIN(dtmin, dt);
+//			dtsq = dt * dt;
+//			delx = dt * v[i][0] + 0.5 * dtsq * massinv * f[i][0];
+//			dely = dt * v[i][1] + 0.5 * dtsq * massinv * f[i][1];
+//			delz = dt * v[i][2] + 0.5 * dtsq * massinv * f[i][2];
+//			delr = sqrt(delx * delx + dely * dely + delz * delz);
+//			if (delr > xmax)
+//				dt *= xmax / delr;
+//			dtmin = MIN(dtmin, dt);
+
+			xmax = 0.05 * radius[i];
+			massinv = 1.0 / rmass[i];
+			fsq = f[i][0] * f[i][0] + f[i][1] * f[i][1] + f[i][2] * f[i][2];
+			dtf = BIG;
+			if (fsq > 0.0)
+				dtf = sqrt(2.0 * xmax / (sqrt(fsq) * massinv));
+			dtmin = MIN(dtmin, dtf);
+		}
+	}
+
 	dtmin *= safety_factor; // apply safety factor
 
 	MPI_Allreduce(&dtmin, &dt, 1, MPI_DOUBLE, MPI_MIN, world);
@@ -156,30 +198,28 @@ double FixSMDTlsphDtReset::compute_scalar() {
 }
 
 /* ----------------------------------------------------------------------
-   pack entire state of Fix into one write
-------------------------------------------------------------------------- */
+ pack entire state of Fix into one write
+ ------------------------------------------------------------------------- */
 
-void FixSMDTlsphDtReset::write_restart(FILE *fp)
-{
-  int n = 0;
-  double list[1];
-  list[n++] = t_elapsed;
+void FixSMDTlsphDtReset::write_restart(FILE *fp) {
+	int n = 0;
+	double list[1];
+	list[n++] = t_elapsed;
 
-  if (comm->me == 0) {
-    int size = n * sizeof(double);
-    fwrite(&size,sizeof(int),1,fp);
-    fwrite(list,sizeof(double),n,fp);
-  }
+	if (comm->me == 0) {
+		int size = n * sizeof(double);
+		fwrite(&size, sizeof(int), 1, fp);
+		fwrite(list, sizeof(double), n, fp);
+	}
 }
 
 /* ----------------------------------------------------------------------
-   use state info from restart file to restart the Fix
-------------------------------------------------------------------------- */
+ use state info from restart file to restart the Fix
+ ------------------------------------------------------------------------- */
 
-void FixSMDTlsphDtReset::restart(char *buf)
-{
-  int n = 0;
-  double *list = (double *) buf;
-  t_elapsed = list[n++];
+void FixSMDTlsphDtReset::restart(char *buf) {
+	int n = 0;
+	double *list = (double *) buf;
+	t_elapsed = list[n++];
 }
 

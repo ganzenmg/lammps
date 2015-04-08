@@ -21,7 +21,7 @@ SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
 LINK =		clang++
-LINKFLAGS =	-O0 -g -fsanitize=address -fno-omit-frame-pointer
+LINKFLAGS =	-O0 -g -fsanitize=address -fno-omit-frame-pointer -lprofiler
 LIB =           
 SIZE =		size
 

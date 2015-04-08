@@ -10,6 +10,8 @@ variable        vol_one equal ${l0}^2 # volume of one particle
 variable        mass_one equal ${vol_one}*${rho} # mass of one particle
 variable        skin equal 0.9*${l0} # Verlet list range
 variable        vel equal 0.005 # pull velocity
+variable        dtCFL equal ${h}/sqrt((0.52+4.0*0.38/3.0)/${rho})
+print           "CFL timestep is ${dtCFL}"
 
 units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
 dimension       2 # this is a 2d plane-strain simulation
@@ -37,11 +39,11 @@ group           top region top # top row of particles
 group           bot region bot # bottom row of particles
 group           tlsph union all
 
-pair_style      tlsph *UPDATE_CONSTANT 4.0 # activate Total-Lagrangian SPH
+pair_style      tlsph *UPDATE_PAIRWISE 1.0 # activate Total-Lagrangian SPH
 #                           rh0    E    nu    Q1    Q2   hg    Cp
 pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.5  0.0   10 1.0 &
                 *LINEAR_PLASTICITY 0.1 &
-		*FAILURE_MAX_PLASTIC_STRAIN 2.0 &
+		*FAILURE_MAX_PLASTIC_STRAIN 0.5 &
 		*EOS_LINEAR &
                 *END
 
@@ -68,11 +70,12 @@ fix             botfix bot setforce 0 0 0
 fix             dtfix all smd/adjust_dt 0.1
 variable        stress equal 0.5*(f_botfix[2]-f_topfix[2])/20 
 variable        strain equal (2.0*${vel}*f_dtfix/20) # strain: relative elongation
+variable        dt equal f_dtfix
 fix             integration_fix all smd/integrate_tlsph xsph
-fix             stress_curve all print 10 "${strain} ${stress}" file stress_strain.dat screen no
+fix             stress_curve all print 10 "${strain} ${stress} ${dt}" file stress_strain.dat screen no
 
 
 thermo 100
 thermo_style    custom step dt f_dtfix time v_strain
 
-run             20000
+run             10000

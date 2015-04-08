@@ -44,6 +44,7 @@ FixSMD_TLSPH_ReferenceConfiguration::FixSMD_TLSPH_ReferenceConfiguration(LAMMPS 
 	maxpartner = 1;
 	npartner = NULL;
 	partner = NULL;
+	damage_per_interaction = NULL;
 	grow_arrays(atom->nmax);
 	atom->add_callback(0);
 	//atom->add_callback(1);
@@ -74,6 +75,7 @@ FixSMD_TLSPH_ReferenceConfiguration::~FixSMD_TLSPH_ReferenceConfiguration() {
 
 	memory->destroy(npartner);
 	memory->destroy(partner);
+	memory->destroy(damage_per_interaction);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -258,8 +260,12 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 
 	grow_arrays(nmax);
 
-	for (i = 0; i < nlocal; i++)
+	for (i = 0; i < nlocal; i++){
 		npartner[i] = 0;
+		for (jj = 0; jj < maxpartner; jj++) {
+			damage_per_interaction[i][jj] = 0.0;
+		}
+	}
 
 	for (ii = 0; ii < inum; ii++) {
 		i = ilist[ii];
@@ -322,6 +328,7 @@ double FixSMD_TLSPH_ReferenceConfiguration::memory_usage() {
 	int nmax = atom->nmax;
 	int bytes = nmax * sizeof(int);
 	bytes += nmax * maxpartner * sizeof(tagint); // partner array
+	bytes += nmax * maxpartner * sizeof(float); // damage_per_interaction array
 	bytes += nmax * sizeof(int); // npartner array
 	return bytes;
 
@@ -333,8 +340,9 @@ double FixSMD_TLSPH_ReferenceConfiguration::memory_usage() {
 
 void FixSMD_TLSPH_ReferenceConfiguration::grow_arrays(int nmax) {
 	//printf("in FixSMD_TLSPH_ReferenceConfiguration::grow_arrays\n");
-	memory->grow(npartner, nmax, "peri_neigh:npartner");
-	memory->grow(partner, nmax, maxpartner, "peri_neigh:partner");
+	memory->grow(npartner, nmax, "tlsph_refconfig_neigh:npartner");
+	memory->grow(partner, nmax, maxpartner, "tlsph_refconfig_neigh:partner");
+	memory->grow(damage_per_interaction, nmax, maxpartner, "tlsph_refconfig_neigh:damage_per_interaction");
 }
 
 /* ----------------------------------------------------------------------
@@ -345,6 +353,7 @@ void FixSMD_TLSPH_ReferenceConfiguration::copy_arrays(int i, int j, int delflag)
 	npartner[j] = npartner[i];
 	for (int m = 0; m < npartner[j]; m++) {
 		partner[j][m] = partner[i][m];
+		damage_per_interaction[j][m] = damage_per_interaction[i][m];
 	}
 }
 
@@ -362,6 +371,7 @@ int FixSMD_TLSPH_ReferenceConfiguration::pack_exchange(int i, double *buf) {
 	buf[m++] = npartner[i];
 	for (int n = 0; n < npartner[i]; n++) {
 		buf[m++] = partner[i][n];
+		buf[m++] = damage_per_interaction[i][n];
 	}
 	return m;
 
@@ -379,7 +389,7 @@ int FixSMD_TLSPH_ReferenceConfiguration::unpack_exchange(int nlocal, double *buf
 		grow_arrays(nmax);
 
 		error->message(FLERR,
-				"in FixPeriNeighGCG::unpack_exchange: local arrays too small for receiving partner information; growing arrays");
+				"in Fixtlsph_refconfigNeighGCG::unpack_exchange: local arrays too small for receiving partner information; growing arrays");
 	}
 //printf("nlocal=%d, nmax=%d\n", nlocal, nmax);
 
@@ -387,6 +397,7 @@ int FixSMD_TLSPH_ReferenceConfiguration::unpack_exchange(int nlocal, double *buf
 	npartner[nlocal] = static_cast<int>(buf[m++]);
 	for (int n = 0; n < npartner[nlocal]; n++) {
 		partner[nlocal][n] = static_cast<tagint>(buf[m++]);
+		damage_per_interaction[nlocal][n] = static_cast<float>(buf[m++]);
 	}
 	return m;
 }
@@ -401,6 +412,7 @@ int FixSMD_TLSPH_ReferenceConfiguration::pack_restart(int i, double *buf) {
 	buf[m++] = npartner[i];
 	for (int n = 0; n < npartner[i]; n++) {
 		buf[m++] = partner[i][n];
+		buf[m++] = damage_per_interaction[i][n];
 	}
 	return m;
 }
