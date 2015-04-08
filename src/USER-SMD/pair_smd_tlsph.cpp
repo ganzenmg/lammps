@@ -242,9 +242,6 @@ void PairTlsph::PreCompute() {
 			spiky_kernel_and_derivative(h, r0, wf, wfd);
 			g = (wfd / r0) * dx0;
 
-
-
-
 			/* build matrices */
 			Ktmp = g * dx0.transpose();
 			Ftmp = (dx - dx0) * g.transpose();
@@ -1220,27 +1217,27 @@ void PairTlsph::coeff(int narg, char **arg) {
 				error->all(FLERR, str);
 			}
 
-			matProp2[std::make_pair("JC_A", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
-			matProp2[std::make_pair("JC_B", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
-			matProp2[std::make_pair("JC_a", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
-			matProp2[std::make_pair("JC_C", itype)] = force->numeric(FLERR, arg[ioffset + 4]);
-			matProp2[std::make_pair("JC_epdot0", itype)] = force->numeric(FLERR, arg[ioffset + 5]);
-			matProp2[std::make_pair("JC_T0", itype)] = force->numeric(FLERR, arg[ioffset + 6]);
-			matProp2[std::make_pair("JC_Tmelt", itype)] = force->numeric(FLERR, arg[ioffset + 7]);
-			matProp2[std::make_pair("JC_M", itype)] = force->numeric(FLERR, arg[ioffset + 8]);
+			Lookup[JC_A][itype] = force->numeric(FLERR, arg[ioffset + 1]);
+			Lookup[JC_B][itype] = force->numeric(FLERR, arg[ioffset + 2]);
+			Lookup[JC_a][itype] = force->numeric(FLERR, arg[ioffset + 3]);
+			Lookup[JC_C][itype] = force->numeric(FLERR, arg[ioffset + 4]);
+			Lookup[JC_epdot0][itype] = force->numeric(FLERR, arg[ioffset + 5]);
+			Lookup[JC_T0][itype] = force->numeric(FLERR, arg[ioffset + 6]);
+			Lookup[JC_Tmelt][itype] = force->numeric(FLERR, arg[ioffset + 7]);
+			Lookup[JC_M][itype] = force->numeric(FLERR, arg[ioffset + 8]);
 
 			if (comm->me == 0) {
 				printf("%60s\n", "Johnson Cook material strength model");
-				printf("%60s : %g\n", "A: initial yield stress", SafeLookup("JC_A", itype));
-				printf("%60s : %g\n", "B : proportionality factor for plastic strain dependency", SafeLookup("JC_B", itype));
-				printf("%60s : %g\n", "a : exponent for plastic strain dependency", SafeLookup("JC_a", itype));
+				printf("%60s : %g\n", "A: initial yield stress", Lookup[JC_A][itype]);
+				printf("%60s : %g\n", "B : proportionality factor for plastic strain dependency", Lookup[JC_B][itype]);
+				printf("%60s : %g\n", "a : exponent for plastic strain dependency", Lookup[JC_a][itype]);
 				printf("%60s : %g\n", "C : proportionality factor for logarithmic plastic strain rate dependency",
-						SafeLookup("JC_C", itype));
+						Lookup[JC_C][itype]);
 				printf("%60s : %g\n", "epdot0 : dimensionality factor for plastic strain rate dependency",
-						SafeLookup("JC_epdot0", itype));
-				printf("%60s : %g\n", "T0 : reference (room) temperature", SafeLookup("JC_T0", itype));
-				printf("%60s : %g\n", "Tmelt : melting temperature", SafeLookup("JC_Tmelt", itype));
-				printf("%60s : %g\n", "M : exponent for temperature dependency", SafeLookup("JC_M", itype));
+						Lookup[JC_epdot0][itype]);
+				printf("%60s : %g\n", "T0 : reference (room) temperature", Lookup[JC_T0][itype]);
+				printf("%60s : %g\n", "Tmelt : melting temperature", Lookup[JC_Tmelt][itype]);
+				printf("%60s : %g\n", "M : exponent for temperature dependency", Lookup[JC_M][itype]);
 			}
 
 		} else if (strcmp(arg[ioffset], "*EOS_NONE") == 0) {
@@ -1345,14 +1342,14 @@ void PairTlsph::coeff(int narg, char **arg) {
 				error->all(FLERR, str);
 			}
 
-			matProp2[std::make_pair("eos_shock_c0", itype)] = force->numeric(FLERR, arg[ioffset + 1]);
-			matProp2[std::make_pair("eos_shock_s", itype)] = force->numeric(FLERR, arg[ioffset + 2]);
-			matProp2[std::make_pair("eos_shock_gamma", itype)] = force->numeric(FLERR, arg[ioffset + 3]);
+			Lookup[EOS_SHOCK_C0][itype] = force->numeric(FLERR, arg[ioffset + 1]);
+			Lookup[EOS_SHOCK_S][itype] = force->numeric(FLERR, arg[ioffset + 2]);
+			Lookup[EOS_SHOCK_GAMMA][itype] = force->numeric(FLERR, arg[ioffset + 3]);
 			if (comm->me == 0) {
 				printf("\n%60s\n", "shock EOS based on strain rate");
-				printf("%60s : %g\n", "reference speed of sound", SafeLookup("eos_shock_c0", itype));
-				printf("%60s : %g\n", "Hugoniot parameter S", SafeLookup("eos_shock_s", itype));
-				printf("%60s : %g\n", "Grueneisen Gamma", SafeLookup("eos_shock_gamma", itype));
+				printf("%60s : %g\n", "reference speed of sound", Lookup[EOS_SHOCK_C0][itype]);
+				printf("%60s : %g\n", "Hugoniot parameter S", Lookup[EOS_SHOCK_S][itype]);
+				printf("%60s : %g\n", "Grueneisen Gamma", Lookup[EOS_SHOCK_GAMMA][itype]);
 			}
 		} // end shock eos
 
@@ -2055,8 +2052,8 @@ void PairTlsph::ComputePressure(const int i, const double pInitial, const double
 		break;
 	case EOS_SHOCK:
 		//  rho,  rho0,  e,  e0,  c0,  S,  Gamma,  pInitial,  dt,  &pFinal,  &p_rate);
-		ShockEOS(rho, Lookup[REFERENCE_DENSITY][itype], mass_specific_energy, 0.0, SafeLookup("eos_shock_c0", itype),
-				SafeLookup("eos_shock_s", itype), SafeLookup("eos_shock_gamma", itype), pInitial, dt, pFinal, p_rate);
+		ShockEOS(rho, Lookup[REFERENCE_DENSITY][itype], mass_specific_energy, 0.0, Lookup[EOS_SHOCK_C0][itype],
+				Lookup[EOS_SHOCK_S][itype], Lookup[EOS_SHOCK_GAMMA][itype], pInitial, dt, pFinal, p_rate);
 		break;
 	case EOS_POLYNOMIAL:
 		polynomialEOS(rho, Lookup[REFERENCE_DENSITY][itype], vol_specific_energy, SafeLookup("eos_polynomial_c0", itype),
@@ -2112,9 +2109,9 @@ void PairTlsph::ComputeStressDeviator(const int i, const Matrix3d sigmaInitial_d
 		break;
 	case STRENGTH_JOHNSON_COOK:
 		JohnsonCookStrength(Lookup[SHEAR_MODULUS][itype], Lookup[HEAT_CAPACITY][itype], mass_specific_energy,
-				SafeLookup("JC_A", itype), SafeLookup("JC_B", itype), SafeLookup("JC_a", itype), SafeLookup("JC_C", itype),
-				SafeLookup("JC_epdot0", itype), SafeLookup("JC_T0", itype), SafeLookup("JC_Tmelt", itype),
-				SafeLookup("JC_M", itype), dt, eff_plastic_strain[i], eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev,
+				Lookup[JC_A][itype], Lookup[JC_B][itype], Lookup[JC_a][itype], Lookup[JC_C][itype],
+				Lookup[JC_epdot0][itype], Lookup[JC_T0][itype], Lookup[JC_Tmelt][itype],
+				Lookup[JC_M][itype], dt, eff_plastic_strain[i], eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev,
 				sigmaFinal_dev, sigma_dev_rate, plastic_strain_increment);
 		break;
 	case STRENGTH_NONE:

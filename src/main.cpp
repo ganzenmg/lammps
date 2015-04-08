@@ -15,7 +15,7 @@
 #include "lammps.h"
 #include "input.h"
 #include "string.h"
-#include "google/profiler.h"
+//#include "google/profiler.h"
 
 using namespace LAMMPS_NS;
 
@@ -29,10 +29,10 @@ int main(int argc, char **argv)
 
   LAMMPS *lammps = new LAMMPS(argc,argv,MPI_COMM_WORLD);
 
-  ProfilerStart("profile.log");
+  //ProfilerStart("profile.log");
   lammps->input->file();
   delete lammps;
-  ProfilerStop();
+  //ProfilerStop();
 
   MPI_Barrier(MPI_COMM_WORLD);
   MPI_Finalize();
