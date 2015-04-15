@@ -248,6 +248,7 @@ void LinearPlasticStrength(const double G, const double yieldStress, const Matri
 	 */
 	J2 = sqrt(3. / 2.) * sigmaTrial_dev.norm();
 
+
 	if (J2 < yieldStress) {
 		/*
 		 * no yielding has occured.

@@ -128,13 +128,18 @@ void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
 		error->all(FLERR, "FixSMDIntegrateTlsph::updateReferenceConfiguration() failed to access Fincr array");
 	}
 
+	int *nn = (int *) force->pair->extract("smd/tlsph/numNeighsRefConfig_ptr", itmp);
+	if (nn == NULL) {
+		error->all(FLERR, "FixSMDIntegrateTlsph::updateReferenceConfiguration() failed to access numNeighsRefConfig_ptr array");
+	}
+
 	// sum all update flag across processors
 	int updateFlag;
 	MPI_Allreduce(updateFlag_ptr, &updateFlag, 1, MPI_INT, MPI_MAX, world);
 
 	if (updateFlag > 0) {
 		if (comm->me == 0) {
-			printf("updating ref config at step: %ld\n", update->ntimestep);
+			printf("**** updating ref config at step: %ld\n", update->ntimestep);
 		}
 
 		for (i = 0; i < nlocal; i++) {
@@ -180,7 +185,13 @@ void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
 				J = MIN(J, 1.2);
 				vfrac[i] *= J;
 
-				radius[i] *= pow(J, 1.0 / domain->dimension);
+				if (nn[i] < 15) {
+					radius[i] *= 1.2;
+				} else {
+					radius[i] *= pow(J, 1.0 / domain->dimension);
+				}
+
+
 			}
 		}
 

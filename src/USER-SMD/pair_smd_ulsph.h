@@ -93,8 +93,8 @@ private:
 		EOS_TAIT_EXPONENT = 7, REFERENCE_SOUNDSPEED = 8, REFERENCE_DENSITY = 9,
 		EOS_PERFECT_GAS_GAMMA = 10,
 		SHEAR_MODULUS = 11, YIELD_STRENGTH = 12, YOUNGS_MODULUS = 13, POISSON_RATIO = 14,
-		LAME_LAMBDA = 15, HEAT_CAPACITY = 16, M_MODULUS = 17,
-		MAX_KEY_VALUE = 18
+		LAME_LAMBDA = 15, HEAT_CAPACITY = 16, M_MODULUS = 17, HARDENING_PARAMETER = 18,
+		MAX_KEY_VALUE = 19
 	};
 	double **Lookup; // holds per-type material parameters for the quantities defined in enum statement above.
 

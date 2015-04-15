@@ -185,32 +185,6 @@ void FixSMDIntegrateTlsph::initial_integrate(int vflag) {
 	if (igroup == atom->firstgroup)
 		nlocal = atom->nfirst;
 
-	/*
-	 * update the reference configuration if needed
-	 */
-
-	if (updateReferenceConfigurationFlag) {
-		int *updateFlag_ptr = (int *) force->pair->extract("smd/tlsph/updateFlag_ptr", itmp);
-		if (updateFlag_ptr == NULL) {
-			error->one(FLERR,
-					"fix smd/integrate_tlsph failed to access updateFlag pointer. Check if a pair style exist which calculates this quantity.");
-		}
-
-		// sum all update flag across processors
-		int updateFlag;
-		MPI_Allreduce(updateFlag_ptr, &updateFlag, 1, MPI_INT, MPI_MAX, world);
-
-		if (updateFlag > 0) {
-			if ((neighbor->ago == 0) && update->ntimestep > update->firststep + 1) {
-				if (comm->me == 0) {
-					printf("updating ref config at step: %ld\n", update->ntimestep);
-				}
-
-				FixSMDIntegrateTlsph::updateReferenceConfiguration();
-			}
-		}
-	}
-
 	Vector3d *smoothVelDifference = (Vector3d *) force->pair->extract("smd/tlsph/smoothVel_ptr", itmp);
 
 	if (xsphFlag) {
@@ -330,102 +304,6 @@ void FixSMDIntegrateTlsph::reset_dt() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixSMDIntegrateTlsph::updateReferenceConfiguration() {
-	double **defgrad0 = atom->tlsph_fold;
-	double *radius = atom->radius;
-	//double *contact_radius = atom->contact_radius;
-	double **x = atom->x;
-	double **x0 = atom->x0;
-	double *vfrac = atom->vfrac;
-	int nlocal = atom->nlocal;
-	int i, itmp;
-	double J;
-	Matrix3d Ftotal;
-	Matrix3d C, eye;
-	int *mask = atom->mask;
-	if (igroup == atom->firstgroup) {
-		nlocal = atom->nfirst;
-	}
-
-	eye.setIdentity();
-
-	Matrix3d F0;
-	// access current deformation gradient
-	// copy data to output array
-	itmp = 0;
-
-	Matrix3d *Fincr = (Matrix3d *) force->pair->extract("smd/tlsph/Fincr_ptr", itmp);
-	if (Fincr == NULL) {
-		error->all(FLERR, "FixSMDIntegrateTlsph::updateReferenceConfiguration() failed to access Fincr array");
-	}
-
-	int *numNeighsRefConfig = (int *) force->pair->extract("smd/tlsph/numNeighsRefConfig_ptr", itmp);
-	if (numNeighsRefConfig == NULL) {
-		error->all(FLERR, "FixSMDIntegrateTlsph::updateReferenceConfiguration() failed to access numNeighsRefConfig array");
-	}
-
-	nRefConfigUpdates++;
-
-	for (i = 0; i < nlocal; i++) {
-
-		if (mask[i] & groupbit) {
-
-			// need determinant of old deformation gradient associated with reference configuration
-			F0(0, 0) = defgrad0[i][0];
-			F0(0, 1) = defgrad0[i][1];
-			F0(0, 2) = defgrad0[i][2];
-			F0(1, 0) = defgrad0[i][3];
-			F0(1, 1) = defgrad0[i][4];
-			F0(1, 2) = defgrad0[i][5];
-			F0(2, 0) = defgrad0[i][6];
-			F0(2, 1) = defgrad0[i][7];
-			F0(2, 2) = defgrad0[i][8];
-
-			// re-set x0 coordinates
-			x0[i][0] = x[i][0];
-			x0[i][1] = x[i][1];
-			x0[i][2] = x[i][2];
-
-			// compute current total deformation gradient
-			Ftotal = F0 * Fincr[i];	// this is the total deformation gradient: reference deformation times incremental deformation
-
-			// store the current deformation gradient the reference deformation gradient
-			defgrad0[i][0] = Ftotal(0, 0);
-			defgrad0[i][1] = Ftotal(0, 1);
-			defgrad0[i][2] = Ftotal(0, 2);
-			defgrad0[i][3] = Ftotal(1, 0);
-			defgrad0[i][4] = Ftotal(1, 1);
-			defgrad0[i][5] = Ftotal(1, 2);
-			defgrad0[i][6] = Ftotal(2, 0);
-			defgrad0[i][7] = Ftotal(2, 1);
-			defgrad0[i][8] = Ftotal(2, 2);
-
-			/*
-			 * Adjust particle volume as the reference configuration is changed.
-			 * We safeguard against excessive deformations by limiting the adjustment range
-			 * to the intervale J \in [0.9..1.1]
-			 */
-			J = Fincr[i].determinant();
-			J = MAX(J, 0.9);
-			J = MIN(J, 1.1);
-			vfrac[i] *= J;
-
-			if (adjust_radius_flag) {
-				radius[i] *= pow(J, 1. / domain->dimension);
-			}
-
-			//do not allow radius to grow excessively
-			//radius[i] = MIN(radius[i], 10.0 * contact_radius[i]); // this only makes sense for well defined contact radii with compact regular initial node spacings
-			//radius[i] = MAX(radius[i], 2.0 * contact_radius[i]);
-
-		}
-
-	}
-
-	// update of reference config could have changed x0, vfrac, radius
-	// communicate these quantities now to ghosts: x0, vfrac, radius
-	comm->forward_comm_fix(this);
-}
 
 /* ---------------------------------------------------------------------- */
 

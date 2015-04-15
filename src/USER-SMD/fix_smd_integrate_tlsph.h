@@ -48,7 +48,6 @@ public:
     virtual void initial_integrate(int);
     virtual void final_integrate();
     virtual void reset_dt();
-    void updateReferenceConfiguration();
     int pack_forward_comm(int, int *, double *, int, int *);
     void unpack_forward_comm(int, int, double *);
 

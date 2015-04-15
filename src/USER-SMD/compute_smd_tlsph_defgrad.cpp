@@ -95,9 +95,9 @@ void ComputeSMDTLSPHDefgrad::compute_peratom() {
         error->all(FLERR, "compute smd/tlsph_defgrad failed to access detF array");
     }
 
-    Matrix3d *F = (Matrix3d *) force->pair->extract("smd/tlsph/F_ptr", itmp);
-    if (F == NULL) {
-        error->all(FLERR, "compute smd/tlsph_defgrad failed to access F array");
+    Matrix3d *Fincr = (Matrix3d *) force->pair->extract("smd/tlsph/Fincr_ptr", itmp);
+    if (Fincr == NULL) {
+        error->all(FLERR, "compute smd/tlsph_defgrad failed to access Fincr array");
     }
 
     int *mask = atom->mask;
@@ -105,15 +105,15 @@ void ComputeSMDTLSPHDefgrad::compute_peratom() {
 
     for (int i = 0; i < nlocal; i++) {
         if (mask[i] & groupbit) {
-            defgradVector[i][0] = F[i](0, 0);
-            defgradVector[i][1] = F[i](0, 1);
-            defgradVector[i][2] = F[i](0, 2);
-            defgradVector[i][3] = F[i](1, 0);
-            defgradVector[i][4] = F[i](1, 1);
-            defgradVector[i][5] = F[i](1, 2);
-            defgradVector[i][6] = F[i](2, 0);
-            defgradVector[i][7] = F[i](2, 1);
-            defgradVector[i][8] = F[i](2, 2);
+            defgradVector[i][0] = Fincr[i](0, 0);
+            defgradVector[i][1] = Fincr[i](0, 1);
+            defgradVector[i][2] = Fincr[i](0, 2);
+            defgradVector[i][3] = Fincr[i](1, 0);
+            defgradVector[i][4] = Fincr[i](1, 1);
+            defgradVector[i][5] = Fincr[i](1, 2);
+            defgradVector[i][6] = Fincr[i](2, 0);
+            defgradVector[i][7] = Fincr[i](2, 1);
+            defgradVector[i][8] = Fincr[i](2, 2);
             defgradVector[i][9] = detF[i];
         } else {
             for (int j = 0; j < size_peratom_cols; j++) {

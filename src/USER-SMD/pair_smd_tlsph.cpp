@@ -58,7 +58,7 @@ using namespace LAMMPS_NS;
 using namespace SMD_Math;
 
 #define JAUMANN false
-#define DETF_MIN 0.1 // maximum compression deformation allowed
+#define DETF_MIN 0.01 // maximum compression deformation allowed
 #define DETF_MAX 40.0 // maximum tension deformation allowed
 #define TLSPH_DEBUG 0
 #define PLASTIC_STRAIN_AVERAGE_WINDOW 100.0
@@ -1170,12 +1170,13 @@ void PairTlsph::coeff(int narg, char **arg) {
 				error->all(FLERR, str);
 			}
 
-			if (iNextKwd - ioffset != 1 + 1) {
-				sprintf(str, "expected 1 arguments following *LINEAR_PLASTICITY but got %d\n", iNextKwd - ioffset - 1);
+			if (iNextKwd - ioffset != 2 + 1) {
+				sprintf(str, "expected 2 arguments following *LINEAR_PLASTICITY but got %d\n", iNextKwd - ioffset - 1);
 				error->all(FLERR, str);
 			}
 
 			Lookup[YIELD_STRESS][itype] = force->numeric(FLERR, arg[ioffset + 1]);
+			Lookup[HARDENING_PARAMETER][itype] = force->numeric(FLERR, arg[ioffset + 2]);
 
 			if (comm->me == 0) {
 				printf("%60s\n", "Linear elastic / perfectly plastic strength based on strain rate");
@@ -1183,6 +1184,7 @@ void PairTlsph::coeff(int narg, char **arg) {
 				printf("%60s : %g\n", "Poisson ratio", Lookup[POISSON_RATIO][itype]);
 				printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
 				printf("%60s : %g\n", "constant yield stress", Lookup[YIELD_STRESS][itype]);
+				printf("%60s : %g\n", "constant hardening parameter", Lookup[HARDENING_PARAMETER][itype]);
 			}
 		} // end Linear Elastic / perfectly plastic strength only model based on strain rate
 
@@ -1905,9 +1907,9 @@ void PairTlsph::effective_longitudinal_modulus(const int itype, const double dt,
 	if (dt * d_iso > 1.0e-6) {
 		K_eff = p_rate / d_iso;
 		if (K_eff < 0.0) { // it is possible for K_eff to become negative due to strain softening
-			if (damage == 0.0) {
-				error->one(FLERR, "computed a negative effective bulk modulus but particle is not damaged.");
-			}
+//			if (damage == 0.0) {
+//				error->one(FLERR, "computed a negative effective bulk modulus but particle is not damaged.");
+//			}
 			K_eff = Lookup[BULK_MODULUS][itype];
 		}
 	} else {
@@ -2080,6 +2082,7 @@ void PairTlsph::ComputeStressDeviator(const int i, const Matrix3d sigmaInitial_d
 	//double *vfrac = atom->vfrac;
 	double *e = atom->e;
 	double dt = update->dt;
+	double yieldStress;
 	int itype;
 
 	double mass_specific_energy = e[i] / rmass[i]; // energy per unit mass
@@ -2104,7 +2107,9 @@ void PairTlsph::ComputeStressDeviator(const int i, const Matrix3d sigmaInitial_d
 		R[i].setIdentity();
 		break;
 	case LINEAR_PLASTICITY:
-		LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], Lookup[YIELD_STRESS][itype], sigmaInitial_dev, d_dev, dt,
+
+		yieldStress = Lookup[YIELD_STRESS][itype] + Lookup[HARDENING_PARAMETER][itype] * eff_plastic_strain[i];
+		LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], yieldStress, sigmaInitial_dev, d_dev, dt,
 				sigmaFinal_dev, sigma_dev_rate, plastic_strain_increment);
 		break;
 	case STRENGTH_JOHNSON_COOK:

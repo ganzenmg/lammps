@@ -629,7 +629,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
-				 * Monaghan–Balsara form of the artificial viscosity
+				 * MonaghanBalsara form of the artificial viscosity
 				 */
 
 				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
@@ -767,7 +767,7 @@ void PairULSPH::ComputePressure() {
 	Matrix3d D, Ddev, W, V, sigma_diag;
 	Matrix3d eye, stressRate, Jaumann_rate;
 	Matrix3d sigmaInitial_dev, d_dev, sigmaFinal_dev, stressRate_dev;
-	double plastic_strain_increment;
+	double plastic_strain_increment, yieldStress;
 	double dt = update->dt;
 	double vol;
 
@@ -823,7 +823,9 @@ void PairULSPH::ComputePressure() {
 				double p_rate = Lookup[BULK_MODULUS][itype] * d_iso;
 
 				sigmaInitial_dev = Deviator(stressTensor[i]);
-				LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], Lookup[YIELD_STRENGTH][itype], sigmaInitial_dev, d_dev, dt,
+
+				yieldStress = Lookup[YIELD_STRENGTH][itype] + Lookup[HARDENING_PARAMETER][itype] * eff_plastic_strain[i];
+				LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], yieldStress, sigmaInitial_dev, d_dev, dt,
 						sigmaFinal_dev, stressRate_dev, plastic_strain_increment);
 				stressRate = p_rate * eye + stressRate_dev;
 				eff_plastic_strain[i] += plastic_strain_increment;
@@ -1125,14 +1127,15 @@ void PairULSPH::coeff(int narg, char **arg) {
 					error->all(FLERR, str);
 				}
 
-				if (iNextKwd - ioffset != 3 + 1) {
-					sprintf(str, "expected 3 arguments following *LINEAR_PLASTIC but got %d\n", iNextKwd - ioffset - 1);
+				if (iNextKwd - ioffset != 4 + 1) {
+					sprintf(str, "expected 4 arguments following *LINEAR_PLASTIC but got %d\n", iNextKwd - ioffset - 1);
 					error->all(FLERR, str);
 				}
 
 				Lookup[YOUNGS_MODULUS][itype] = force->numeric(FLERR, arg[ioffset + 1]);
 				Lookup[POISSON_RATIO][itype] = force->numeric(FLERR, arg[ioffset + 2]);
 				Lookup[YIELD_STRENGTH][itype] = force->numeric(FLERR, arg[ioffset + 3]);
+				Lookup[HARDENING_PARAMETER][itype] = force->numeric(FLERR, arg[ioffset + 4]);
 
 				Lookup[LAME_LAMBDA][itype] = Lookup[YOUNGS_MODULUS][itype] * Lookup[POISSON_RATIO][itype]
 						/ ((1.0 + Lookup[POISSON_RATIO][itype] * (1.0 - 2.0 * Lookup[POISSON_RATIO][itype])));
@@ -1144,6 +1147,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 					printf("%60s : %g\n", "Youngs modulus", Lookup[YOUNGS_MODULUS][itype]);
 					printf("%60s : %g\n", "poisson_ratio", Lookup[POISSON_RATIO][itype]);
 					printf("%60s : %g\n", "yield_strength", Lookup[YIELD_STRENGTH][itype]);
+					printf("%60s : %g\n", "constant hardening parameter", Lookup[HARDENING_PARAMETER][itype]);
 					printf("%60s : %g\n", "Lame constant lambda", Lookup[LAME_LAMBDA][itype]);
 					printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
 					printf("%60s : %g\n", "p-wave modulus", Lookup[M_MODULUS][itype]);
