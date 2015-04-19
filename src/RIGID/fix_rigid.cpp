@@ -1575,6 +1575,10 @@ void FixRigid::setup_bodies_static()
     MPI_Allreduce(&flag,&extended,1,MPI_INT,MPI_MAX,world);
   }
 
+  if (atom->smd_flag == 1) {
+	  extended = 0; // turn off extended flag for mooth-Mach Dynamics package
+  }
+
   // grow extended arrays and set extended flags for each particle
   // orientflag = 4 if any particle stores ellipsoid or tri orientation
   // orientflag = 1 if any particle stores line orientation

@@ -9,7 +9,6 @@
  *
  * ----------------------------------------------------------------------- */
 
-
 #ifndef SMD_KERNEL_FUNCTIONS_H_
 #define SMD_KERNEL_FUNCTIONS_H_
 
@@ -27,10 +26,10 @@ static inline double Kernel_Cubic_Spline(const double r, const double h) {
 	double q = 2.0 * r / h;
 	if (q > 2.0) {
 		return 0.0;
-	} else if ((q <= 2.0) &&  (q > 1.0)) {
+	} else if ((q <= 2.0) && (q > 1.0)) {
 		return pow(2.0 - q, 3.0) / 6.0;
 	} else if ((q >= 0.0) && (q <= 1.0)) {
-		return 2./3. - q*q + 0.5*q*q*q;
+		return 2. / 3. - q * q + 0.5 * q * q * q;
 	} else {
 		return 0.0;
 	}
@@ -43,29 +42,49 @@ static inline double Kernel_Barbara(const double r, const double h) {
 	return -2.639490040 * sin(arg) / (hsq * h);
 }
 
-//static inline void spiky_kernel_and_derivative(const double h, const double r, const int dimension, double &wf, double &wfd) {
-//
-//	/*
-//	 * Spiky kernel
-//	 */
-//
-//	if (r > h) {
-//		//printf("r=%f > h=%f in Spiky kernel\n", r, h);
-//		wf = wfd = 0.0;
-//		return;
-//	}
-//
-//	double hr = h - r; // [m]
-//	if (dimension == 2) {
-//		double n = 0.3141592654e0 * h * h * h * h * h; // [m^5]
-//		wfd = -3.0e0 * hr * hr / n; // [m*m/m^5] = [1/m^3] ==> correct for dW/dr in 2D
-//		wf = -0.333333333333e0 * hr * wfd; // [m/m^3] ==> [1/m^2] correct for W in 2D
-//	} else {
-//		wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
-//		wf = -0.333333333333e0 * hr * wfd; // [m/m^4] ==> [1/m^3] correct for W in 3D
-//	}
-//
-//}
+static inline void spiky_kernel_and_derivative_3d(const double h, const double r, double &wf, double &wfd) {
+
+	/*
+	 * Spiky kernel in 3d
+	 */
+
+	double hr = h - r;		// [m]
+
+	if (hr < 0.0) {
+		wfd = 0.0;
+		wf = 0.0;
+		return;
+	}
+
+	wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
+	wf = -0.333333333333e0 * hr * wfd; // [m/m^4] ==> [1/m^3] correct for W in 3D
+
+}
+
+
+static inline void spiky_kernel_and_derivative(const double h, const double r, const int dimension, double &wf, double &wfd) {
+
+	/*
+	 * Spiky kernel
+	 */
+
+	if (r > h) {
+		//printf("r=%f > h=%f in Spiky kernel\n", r, h);
+		wf = wfd = 0.0;
+		return;
+	}
+
+	double hr = h - r; // [m]
+	if (dimension == 2) {
+		double n = 0.3141592654e0 * h * h * h * h * h; // [m^5]
+		wfd = -3.0e0 * hr * hr / n; // [m*m/m^5] = [1/m^3] ==> correct for dW/dr in 2D
+		wf = -0.333333333333e0 * hr * wfd; // [m/m^3] ==> [1/m^2] correct for W in 2D
+	} else {
+		wfd = -14.0323944878e0 * hr * hr / (h * h * h * h * h * h); // [1/m^4] ==> correct for dW/dr in 3D
+		wf = -0.333333333333e0 * hr * wfd; // [m/m^4] ==> [1/m^3] correct for W in 3D
+	}
+
+}
 
 static inline void barbara_kernel_and_derivative(const double h, const double r, const int dimension, double &wf, double &wfd) {
 

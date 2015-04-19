@@ -39,23 +39,25 @@ group           top region top # top row of particles
 group           bot region bot # bottom row of particles
 group           tlsph union all
 
-pair_style      tlsph *UPDATE_PAIRWISE 1.0 # activate Total-Lagrangian SPH
+pair_style      tlsph *UPDATE_PAIRWISE 0.1 # activate Total-Lagrangian SPH
 #                           rh0    E    nu    Q1    Q2   hg    Cp
 pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.5  0.0   10 1.0 &
-                *LINEAR_PLASTICITY 0.1 &
-		*FAILURE_MAX_PLASTIC_STRAIN 0.5 &
+                *LINEAR_PLASTICITY 0.1 0.0 &
+		*FAILURE_MAX_PLASTIC_STRAIN 100.5 &
 		*EOS_LINEAR &
                 *END
 
 compute         p all smd/plastic_strain
 compute         S all smd/tlsph_stress # Cauchy stress tensor
 compute         D all smd/tlsph_strain_rate
+compute         F all smd/tlsph_defgrad
 compute         nn all smd/tlsph_num_neighs # number of neighbors for each particle
 compute         damage all smd/damage
 
 dump            dump_id all custom 10 dump.LAMMPS id type x y z &
                 c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] c_nn c_p &
-		c_D[1] c_D[2] c_D[4] c_damage radius
+		c_D[1] c_D[2] c_D[4] c_damage radius &
+		c_F[1] c_F[2] c_F[3] c_F[4] c_F[5] c_F[6] c_F[7] c_F[8] c_F[9] c_F[10]
 
 dump_modify     dump_id first yes
 

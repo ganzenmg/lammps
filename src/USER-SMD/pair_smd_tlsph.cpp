@@ -148,6 +148,8 @@ void PairTlsph::PreCompute() {
 
 	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
 	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
+	float **wfd_list = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->wfd_list;
+	float **wf_list = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->wf_list;
 	double r0, r0Sq, wf, wfd, h, irad, voli, volj;
 	Vector3d dx0, dx, dv, g;
 	Matrix3d Ktmp, Fdottmp, Ftmp, L, Fold, U, eye;
@@ -239,7 +241,9 @@ void PairTlsph::PreCompute() {
 			dvint = vintj - vinti;
 
 			//barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
-			spiky_kernel_and_derivative(h, r0, wf, wfd);
+			//spiky_kernel_and_derivative(h, r0, wf, wfd);
+			wf = wf_list[i][jj];
+			wfd = wfd_list[i][jj];
 			g = (wfd / r0) * dx0;
 
 			/* build matrices */
@@ -477,6 +481,8 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 
 	tagint **partner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->partner;
 	int *npartner = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->npartner;
+	float **wfd_list = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->wfd_list;
+	float **wf_list = ((FixSMD_TLSPH_ReferenceConfiguration *) modify->fix[ifix_tlsph])->wf_list;
 
 	if (eflag || vflag)
 		ev_setup(eflag, vflag);
@@ -553,7 +559,9 @@ void PairTlsph::ComputeForces(int eflag, int vflag) {
 			r = dx.norm(); // current distance
 
 			//barbara_kernel_and_derivative(h, r0, domain->dimension, wf, wfd);
-			spiky_kernel_and_derivative(h, r0, wf, wfd);
+			//spiky_kernel_and_derivative(h, r0, wf, wfd);
+			wf = wf_list[i][jj];
+			wfd = wfd_list[i][jj];
 			g = (wfd / r0) * dx0; // uncorrected kernel gradient
 
 			/*
@@ -2109,15 +2117,14 @@ void PairTlsph::ComputeStressDeviator(const int i, const Matrix3d sigmaInitial_d
 	case LINEAR_PLASTICITY:
 
 		yieldStress = Lookup[YIELD_STRESS][itype] + Lookup[HARDENING_PARAMETER][itype] * eff_plastic_strain[i];
-		LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], yieldStress, sigmaInitial_dev, d_dev, dt,
-				sigmaFinal_dev, sigma_dev_rate, plastic_strain_increment);
+		LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], yieldStress, sigmaInitial_dev, d_dev, dt, sigmaFinal_dev,
+				sigma_dev_rate, plastic_strain_increment);
 		break;
 	case STRENGTH_JOHNSON_COOK:
-		JohnsonCookStrength(Lookup[SHEAR_MODULUS][itype], Lookup[HEAT_CAPACITY][itype], mass_specific_energy,
-				Lookup[JC_A][itype], Lookup[JC_B][itype], Lookup[JC_a][itype], Lookup[JC_C][itype],
-				Lookup[JC_epdot0][itype], Lookup[JC_T0][itype], Lookup[JC_Tmelt][itype],
-				Lookup[JC_M][itype], dt, eff_plastic_strain[i], eff_plastic_strain_rate[i], sigmaInitial_dev, d_dev,
-				sigmaFinal_dev, sigma_dev_rate, plastic_strain_increment);
+		JohnsonCookStrength(Lookup[SHEAR_MODULUS][itype], Lookup[HEAT_CAPACITY][itype], mass_specific_energy, Lookup[JC_A][itype],
+				Lookup[JC_B][itype], Lookup[JC_a][itype], Lookup[JC_C][itype], Lookup[JC_epdot0][itype], Lookup[JC_T0][itype],
+				Lookup[JC_Tmelt][itype], Lookup[JC_M][itype], dt, eff_plastic_strain[i], eff_plastic_strain_rate[i],
+				sigmaInitial_dev, d_dev, sigmaFinal_dev, sigma_dev_rate, plastic_strain_increment);
 		break;
 	case STRENGTH_NONE:
 		sigmaFinal_dev.setZero();

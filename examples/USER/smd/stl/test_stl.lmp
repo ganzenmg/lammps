@@ -42,7 +42,7 @@ change_box      all boundary s s s
 
 
 pair_style      hybrid/overlay ulsph  smd/tri_surface 1.0
-pair_coeff      1 1 ulsph *COMMON ${rho} ${c0} 1.0 1 &
+pair_coeff      1 1 ulsph *COMMON ${rho} ${c0} 1.0 1 0 &
 		*EOS_TAIT 2 &
 	        *END
 pair_coeff      2 2 none

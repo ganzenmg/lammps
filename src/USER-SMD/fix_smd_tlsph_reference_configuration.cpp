@@ -27,10 +27,13 @@
 #include "error.h"
 #include "domain.h"
 #include <Eigen/Eigen>
+#include "smd_kernels.h"
 
 using namespace Eigen;
 using namespace LAMMPS_NS;
 using namespace FixConst;
+using namespace SMD_Kernels;
+using namespace std;
 #define DELTA 16384
 
 /* ---------------------------------------------------------------------- */
@@ -44,20 +47,18 @@ FixSMD_TLSPH_ReferenceConfiguration::FixSMD_TLSPH_ReferenceConfiguration(LAMMPS 
 	maxpartner = 1;
 	npartner = NULL;
 	partner = NULL;
-	damage_per_interaction = NULL;
+	wfd_list = NULL;
+	wf_list = NULL;
 	grow_arrays(atom->nmax);
 	atom->add_callback(0);
-	//atom->add_callback(1);
-	//atom->add_callback(2); // for border communication
 
 	// initialize npartner to 0 so neighbor list creation is OK the 1st time
-
 	int nlocal = atom->nlocal;
 	for (int i = 0; i < nlocal; i++) {
 		npartner[i] = 0;
 	}
 
-	comm_forward = 5;
+	comm_forward = 14;
 
 	//error->one(FLERR, "hurz!");
 }
@@ -68,14 +69,12 @@ FixSMD_TLSPH_ReferenceConfiguration::~FixSMD_TLSPH_ReferenceConfiguration() {
 	// unregister this fix so atom class doesn't invoke it any more
 
 	atom->delete_callback(id, 0);
-	atom->delete_callback(id, 1);
-	atom->delete_callback(id, 2);
-
 // delete locally stored arrays
 
 	memory->destroy(npartner);
 	memory->destroy(partner);
-	memory->destroy(damage_per_interaction);
+	memory->destroy(wfd_list);
+	memory->destroy(wf_list);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -92,6 +91,8 @@ void FixSMD_TLSPH_ReferenceConfiguration::init() {
 	if (atom->tag_enable == 0)
 		error->all(FLERR, "Pair style tlsph requires atoms have IDs");
 }
+
+/* ---------------------------------------------------------------------- */
 
 void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
 	//return;
@@ -191,7 +192,6 @@ void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
 					radius[i] *= pow(J, 1.0 / domain->dimension);
 				}
 
-
 			}
 		}
 
@@ -209,10 +209,13 @@ void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
  ------------------------------------------------------------------------- */
 
 void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
-	int i, j, ii, jj, m, n, inum, jnum;
+	int i, j, ii, jj, n, inum, jnum;
 	int *ilist, *jlist, *numneigh, **firstneigh;
 	int itype, jtype;
-	double delx, dely, delz, rsq, h;
+	double delx, dely, delz, rsq, r, h, wf, wfd;
+	Matrix3d F0i, F0j, F0ij;
+	Vector3d dx, dx_scaled;
+	double **defgrad0 = atom->tlsph_fold;
 
 	int nlocal = atom->nlocal;
 	nmax = atom->nmax;
@@ -243,16 +246,41 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 
+		F0i(0, 0) = defgrad0[i][0];
+		F0i(0, 1) = defgrad0[i][1];
+		F0i(0, 2) = defgrad0[i][2];
+		F0i(1, 0) = defgrad0[i][3];
+		F0i(1, 1) = defgrad0[i][4];
+		F0i(1, 2) = defgrad0[i][5];
+		F0i(2, 0) = defgrad0[i][6];
+		F0i(2, 1) = defgrad0[i][7];
+		F0i(2, 2) = defgrad0[i][8];
+
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
-
-			delx = x0[i][0] - x0[j][0];
-			dely = x0[i][1] - x0[j][1];
-			delz = x0[i][2] - x0[j][2];
-			rsq = delx * delx + dely * dely + delz * delz;
 			jtype = type[j];
+
+			dx(0) = x0[i][0] - x0[j][0];
+			dx(1) = x0[i][1] - x0[j][1];
+			dx(2) = x0[i][2] - x0[j][2];
+			rsq = dx.squaredNorm();
+
+			F0j(0, 0) = defgrad0[j][0];
+			F0j(0, 1) = defgrad0[j][1];
+			F0j(0, 2) = defgrad0[j][2];
+			F0j(1, 0) = defgrad0[j][3];
+			F0j(1, 1) = defgrad0[j][4];
+			F0j(1, 2) = defgrad0[j][5];
+			F0j(2, 0) = defgrad0[j][6];
+			F0j(2, 1) = defgrad0[j][7];
+			F0j(2, 2) = defgrad0[j][8];
+
 			h = radius[i] + radius[j];
+			r = sqrt(rsq);
+			dx_scaled = 0.5 * (F0i + F0j) * (dx / r);
+			h *= dx_scaled.norm();
+
 			if (rsq <= h * h) {
 				npartner[i]++;
 				if (j < nlocal) {
@@ -271,10 +299,11 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 
 	grow_arrays(nmax);
 
-	for (i = 0; i < nlocal; i++){
+	for (i = 0; i < nlocal; i++) {
 		npartner[i] = 0;
 		for (jj = 0; jj < maxpartner; jj++) {
-			damage_per_interaction[i][jj] = 0.0;
+			wfd_list[i][jj] = 0.0;
+			wf_list[i][jj] = 0.0;
 		}
 	}
 
@@ -284,21 +313,52 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 
+		F0i(0, 0) = defgrad0[i][0];
+		F0i(0, 1) = defgrad0[i][1];
+		F0i(0, 2) = defgrad0[i][2];
+		F0i(1, 0) = defgrad0[i][3];
+		F0i(1, 1) = defgrad0[i][4];
+		F0i(1, 2) = defgrad0[i][5];
+		F0i(2, 0) = defgrad0[i][6];
+		F0i(2, 1) = defgrad0[i][7];
+		F0i(2, 2) = defgrad0[i][8];
+
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
 
-			delx = x0[i][0] - x0[j][0];
-			dely = x0[i][1] - x0[j][1];
-			delz = x0[i][2] - x0[j][2];
-			rsq = delx * delx + dely * dely + delz * delz;
+			dx(0) = x0[i][0] - x0[j][0];
+			dx(1) = x0[i][1] - x0[j][1];
+			dx(2) = x0[i][2] - x0[j][2];
+			rsq = dx.squaredNorm();
 			jtype = type[j];
+
+			F0j(0, 0) = defgrad0[j][0];
+			F0j(0, 1) = defgrad0[j][1];
+			F0j(0, 2) = defgrad0[j][2];
+			F0j(1, 0) = defgrad0[j][3];
+			F0j(1, 1) = defgrad0[j][4];
+			F0j(1, 2) = defgrad0[j][5];
+			F0j(2, 0) = defgrad0[j][6];
+			F0j(2, 1) = defgrad0[j][7];
+			F0j(2, 2) = defgrad0[j][8];
+
+			r = sqrt(rsq);
+			dx_scaled = 0.5 * (F0i + F0j) * (dx / r);
 			h = radius[i] + radius[j];
+			h *= dx_scaled.norm();
+
 			if (rsq <= h * h) {
+				spiky_kernel_and_derivative_3d(h, r, wf, wfd);
+
 				partner[i][npartner[i]] = tag[j];
+				wfd_list[i][npartner[i]] = wfd;
+				wf_list[i][npartner[i]] = wf;
 				npartner[i]++;
 				if (j < nlocal) {
 					partner[j][npartner[j]] = tag[i];
+					wfd_list[j][npartner[j]] = wfd;
+					wf_list[j][npartner[j]] = wf;
 					npartner[j]++;
 				}
 			}
@@ -353,7 +413,8 @@ void FixSMD_TLSPH_ReferenceConfiguration::grow_arrays(int nmax) {
 	//printf("in FixSMD_TLSPH_ReferenceConfiguration::grow_arrays\n");
 	memory->grow(npartner, nmax, "tlsph_refconfig_neigh:npartner");
 	memory->grow(partner, nmax, maxpartner, "tlsph_refconfig_neigh:partner");
-	memory->grow(damage_per_interaction, nmax, maxpartner, "tlsph_refconfig_neigh:damage_per_interaction");
+	memory->grow(wfd_list, nmax, maxpartner, "tlsph_refconfig_neigh:wfd");
+	memory->grow(wf_list, nmax, maxpartner, "tlsph_refconfig_neigh:wf");
 }
 
 /* ----------------------------------------------------------------------
@@ -364,7 +425,8 @@ void FixSMD_TLSPH_ReferenceConfiguration::copy_arrays(int i, int j, int delflag)
 	npartner[j] = npartner[i];
 	for (int m = 0; m < npartner[j]; m++) {
 		partner[j][m] = partner[i][m];
-		damage_per_interaction[j][m] = damage_per_interaction[i][m];
+		wfd_list[j][m] = wfd_list[i][m];
+		wf_list[j][m] = wf_list[i][m];
 	}
 }
 
@@ -382,7 +444,8 @@ int FixSMD_TLSPH_ReferenceConfiguration::pack_exchange(int i, double *buf) {
 	buf[m++] = npartner[i];
 	for (int n = 0; n < npartner[i]; n++) {
 		buf[m++] = partner[i][n];
-		buf[m++] = damage_per_interaction[i][n];
+		buf[m++] = wfd_list[i][n];
+		buf[m++] = wf_list[i][n];
 	}
 	return m;
 
@@ -408,7 +471,8 @@ int FixSMD_TLSPH_ReferenceConfiguration::unpack_exchange(int nlocal, double *buf
 	npartner[nlocal] = static_cast<int>(buf[m++]);
 	for (int n = 0; n < npartner[nlocal]; n++) {
 		partner[nlocal][n] = static_cast<tagint>(buf[m++]);
-		damage_per_interaction[nlocal][n] = static_cast<float>(buf[m++]);
+		wfd_list[nlocal][n] = static_cast<float>(buf[m++]);
+		wf_list[nlocal][n] = static_cast<float>(buf[m++]);
 	}
 	return m;
 }
@@ -423,7 +487,8 @@ int FixSMD_TLSPH_ReferenceConfiguration::pack_restart(int i, double *buf) {
 	buf[m++] = npartner[i];
 	for (int n = 0; n < npartner[i]; n++) {
 		buf[m++] = partner[i][n];
-		buf[m++] = damage_per_interaction[i][n];
+		buf[m++] = wfd_list[i][n];
+		buf[m++] = wf_list[i][n];
 	}
 	return m;
 }
@@ -479,6 +544,7 @@ int FixSMD_TLSPH_ReferenceConfiguration::pack_forward_comm(int n, int *list, dou
 	double *radius = atom->radius;
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
+	double **defgrad0 = atom->tlsph_fold;
 
 	//printf("FixSMD_TLSPH_ReferenceConfiguration:::pack_forward_comm\n");
 	m = 0;
@@ -490,6 +556,17 @@ int FixSMD_TLSPH_ReferenceConfiguration::pack_forward_comm(int n, int *list, dou
 
 		buf[m++] = vfrac[j];
 		buf[m++] = radius[j];
+
+		buf[m++] = defgrad0[i][0];
+		buf[m++] = defgrad0[i][1];
+		buf[m++] = defgrad0[i][2];
+		buf[m++] = defgrad0[i][3];
+		buf[m++] = defgrad0[i][4];
+		buf[m++] = defgrad0[i][5];
+		buf[m++] = defgrad0[i][6];
+		buf[m++] = defgrad0[i][7];
+		buf[m++] = defgrad0[i][8];
+
 	}
 	return m;
 }
@@ -501,6 +578,7 @@ void FixSMD_TLSPH_ReferenceConfiguration::unpack_forward_comm(int n, int first, 
 	double *radius = atom->radius;
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
+	double **defgrad0 = atom->tlsph_fold;
 
 	m = 0;
 	last = first + n;
@@ -511,5 +589,15 @@ void FixSMD_TLSPH_ReferenceConfiguration::unpack_forward_comm(int n, int first, 
 
 		vfrac[i] = buf[m++];
 		radius[i] = buf[m++];
+
+		defgrad0[i][0] = buf[m++];
+		defgrad0[i][1] = buf[m++];
+		defgrad0[i][2] = buf[m++];
+		defgrad0[i][3] = buf[m++];
+		defgrad0[i][4] = buf[m++];
+		defgrad0[i][5] = buf[m++];
+		defgrad0[i][6] = buf[m++];
+		defgrad0[i][7] = buf[m++];
+		defgrad0[i][8] = buf[m++];
 	}
 }

@@ -60,7 +60,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 		Pair(lmp) {
 
 	Q1 = NULL;
-	eos = NULL;
+	eos = strength = NULL;
 	c0_type = NULL;
 	pressure = NULL;
 	c0 = NULL;
@@ -93,6 +93,7 @@ PairULSPH::~PairULSPH() {
 		memory->destroy(Q1);
 		memory->destroy(rho0);
 		memory->destroy(eos);
+		memory->destroy(strength);
 		memory->destroy(c0_type);
 		memory->destroy(gradient_correction);
 		memory->destroy(hourglass_amplitude);
@@ -269,9 +270,6 @@ void PairULSPH::PreCompute() {
 			xi(idim) = x[i][idim];
 			vi(idim) = v[i][idim];
 		}
-		//x0i << x0[i][0], x0[i][1], x0[i][2];
-		//xi << x[i][0], x[i][1], x[i][2];
-		//vi << v[i][0], v[i][1], v[i][2];
 
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
@@ -283,10 +281,6 @@ void PairULSPH::PreCompute() {
 				vj(idim) = v[j][idim];
 			}
 
-//			x0j << x0[j][0], x0[j][1], x0[j][2];
-//			xj << x[j][0], x[j][1], x[j][2];
-//			vj << v[j][0], v[j][1], v[j][2];
-
 			dx = xj - xi;
 			rSq = dx.squaredNorm();
 			h = irad + radius[j];
@@ -296,9 +290,9 @@ void PairULSPH::PreCompute() {
 				jtype = type[j];
 				jvol = rmass[j] / rho[j];
 
-				if (itype != jtype) {
-					error->one(FLERR, "type of particle i does not equal type of particle j. Something is very wrong.");
-				}
+//				if (itype != jtype) {
+//					error->one(FLERR, "type of particle i does not equal type of particle j. Something is very wrong.");
+//				}
 
 				// distance vectors in current and reference configuration, velocity difference
 				dv = vj - vi;
@@ -625,7 +619,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				 * force -- the classical SPH way
 				 */
 
-				f_stress = ivol * jvol * S * g;
+				f_stress = -ivol * jvol * S * g;
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
@@ -640,7 +634,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
 				rho_ij = 0.5 * (rho[i] + rho[j]);
 				visc_magnitude = 0.5 * (Q1[itype] + Q1[jtype]) * c_ij * mu_ij / rho_ij;
-				f_visc = rmass[i] * rmass[j] * visc_magnitude * g;
+				f_visc = -rmass[i] * rmass[j] * visc_magnitude * g;
 
 				/*
 				 * hourglass treatment
@@ -651,7 +645,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 				dx0(2) = x0[j][2] - x0[i][2];
 				r0Sq = dx0.squaredNorm();
 				du = dx - dx0;
-
 
 				if ((hourglass_amplitude[itype] > 0.0) && (gradient_correction_possible[i] == true)
 						&& (gradient_correction_possible[j] == true)) {
@@ -667,7 +660,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 //					}
 
 					gamma_dot_dx = gamma.dot(dx) / (r + 0.1 * h); // project hourglass error vector onto normalized pair distance vector
-
 
 					if (rSq - r0Sq < 0) { // compression mode, we limit hourglass correction force
 						LimitDoubleMagnitude(gamma_dot_dx, 0.005 * r);
@@ -689,13 +681,13 @@ void PairULSPH::compute(int eflag, int vflag) {
 					f_hg.setZero();
 				}
 
-				sumForces = f_stress + f_visc + f_hg;
+				sumForces = f_stress + f_visc; // + f_hg;
 
 				// energy rate -- project velocity onto force vector
 				deltaE = 0.5 * sumForces.dot(dv);
 
 				// change in mass density
-				drho[i] -= rmass[j] * wfd * delVdotDelR;
+				drho[i] += rho[i] * jvol * wfd * delVdotDelR;
 
 				// apply forces to pair of particles
 				f[i][0] += sumForces(0);
@@ -713,7 +705,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 					f[j][1] -= sumForces(1);
 					f[j][2] -= sumForces(2);
 					de[j] += deltaE;
-					drho[j] -= rmass[i] * wfd * delVdotDelR;
+					drho[j] += rho[j] * ivol * wfd * delVdotDelR;
 
 					shepardWeight[j] += ivol * wf;
 					smoothVel[j] -= ivol * wf * dvint;
@@ -765,14 +757,16 @@ void PairULSPH::ComputePressure() {
 	int i, itype;
 	int nlocal = atom->nlocal;
 	Matrix3d D, Ddev, W, V, sigma_diag;
-	Matrix3d eye, stressRate, Jaumann_rate;
-	Matrix3d sigmaInitial_dev, d_dev, sigmaFinal_dev, stressRate_dev;
+	Matrix3d eye, stressRate, StressRateDevJaumann;
+	Matrix3d sigmaInitial_dev, d_dev, sigmaFinal_dev, stressRateDev, oldStressDeviator, newStressDeviator;
 	double plastic_strain_increment, yieldStress;
 	double dt = update->dt;
-	double vol;
+	double vol, newPressure;
 
 	dtCFL = 1.0e22;
 	eye.setIdentity();
+	newStressDeviator.setZero();
+	newPressure = 0.0;
 
 	for (i = 0; i < nlocal; i++) {
 		itype = type[i];
@@ -790,74 +784,74 @@ void PairULSPH::ComputePressure() {
 				break;
 			case EOS_TAIT:
 				TaitEOS_density(Lookup[EOS_TAIT_EXPONENT][itype], Lookup[REFERENCE_SOUNDSPEED][itype],
-						Lookup[REFERENCE_DENSITY][itype], rho[i], pFinal, c0[i]);
-				stressTensor[i] += -pFinal * eye;
+						Lookup[REFERENCE_DENSITY][itype], rho[i], newPressure, c0[i]);
+				//printf("new pressure =%f\n", newPressure);
+
 				break;
 			case EOS_PERFECT_GAS:
 
-				PerfectGasEOS(Lookup[EOS_PERFECT_GAS_GAMMA][itype], vol, rmass[i], e[i], pFinal, c0[i]);
-				stressTensor[i] += -pFinal * eye;
+				PerfectGasEOS(Lookup[EOS_PERFECT_GAS_GAMMA][itype], vol, rmass[i], e[i], newPressure, c0[i]);
 				break;
+			}
 
-			case STRENGTH:
+			/*
+			 * ******************************* STRENGTH MODELS ************************************************
+			 */
+
+			if (strength[itype] != NONE) {
+
 				/*
 				 * initial stress state: given by the unrotateted Cauchy stress.
 				 * Assemble Eigen 3d matrix from stored stress state
 				 */
-				stressTensor[i](0, 0) = tlsph_stress[i][0];
-				stressTensor[i](0, 1) = tlsph_stress[i][1];
-				stressTensor[i](0, 2) = tlsph_stress[i][2];
-				stressTensor[i](1, 1) = tlsph_stress[i][3];
-				stressTensor[i](1, 2) = tlsph_stress[i][4];
-				stressTensor[i](2, 2) = tlsph_stress[i][5];
-				stressTensor[i](1, 0) = stressTensor[i](0, 1);
-				stressTensor[i](2, 0) = stressTensor[i](0, 2);
-				stressTensor[i](2, 1) = stressTensor[i](1, 2);
+				oldStressDeviator(0, 0) = tlsph_stress[i][0];
+				oldStressDeviator(0, 1) = tlsph_stress[i][1];
+				oldStressDeviator(0, 2) = tlsph_stress[i][2];
+				oldStressDeviator(1, 1) = tlsph_stress[i][3];
+				oldStressDeviator(1, 2) = tlsph_stress[i][4];
+				oldStressDeviator(2, 2) = tlsph_stress[i][5];
+				oldStressDeviator(1, 0) = oldStressDeviator(0, 1);
+				oldStressDeviator(2, 0) = oldStressDeviator(0, 2);
+				oldStressDeviator(2, 1) = oldStressDeviator(1, 2);
 
 				D = 0.5 * (L[i] + L[i].transpose());
 				W = 0.5 * (L[i] - L[i].transpose()); // spin tensor:: need this for Jaumann rate
-
 				double d_iso = D.trace();
 				d_dev = Deviator(D);
 
-				double p_rate = Lookup[BULK_MODULUS][itype] * d_iso;
+				switch (strength[itype]) {
+				default:
+					error->one(FLERR, "unknown strength model.");
+					break;
+				case STRENGTH_LINEAR:
+					stressRateDev = -2.0 * Lookup[SHEAR_MODULUS][itype] * d_dev;
+					//cout << "stress rate deviator is " << endl << stressRateDev << endl;
+					break;
+				case STRENGTH:
+					error->one(FLERR, "unknown EOS.");
+					break;
+				}
 
-				sigmaInitial_dev = Deviator(stressTensor[i]);
+				//double m = effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev, stressRate_dev, damage);
 
-				yieldStress = Lookup[YIELD_STRENGTH][itype] + Lookup[HARDENING_PARAMETER][itype] * eff_plastic_strain[i];
-				LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], yieldStress, sigmaInitial_dev, d_dev, dt,
-						sigmaFinal_dev, stressRate_dev, plastic_strain_increment);
-				stressRate = p_rate * eye + stressRate_dev;
-				eff_plastic_strain[i] += plastic_strain_increment;
+				StressRateDevJaumann = stressRateDev - W * oldStressDeviator + oldStressDeviator * W;
+				newStressDeviator = oldStressDeviator + dt * StressRateDevJaumann;
 
-				double damage = 0.0;
-				double m = effective_longitudinal_modulus(itype, dt, d_iso, p_rate, d_dev, stressRate_dev, damage);
 
-//				if (fabs(m - 10.38) > 1.0) {
-//					printf("M = %f\n", m);
-//				}
+				tlsph_stress[i][0] = newStressDeviator(0, 0);
+				tlsph_stress[i][1] = newStressDeviator(0, 1);
+				tlsph_stress[i][2] = newStressDeviator(0, 2);
+				tlsph_stress[i][3] = newStressDeviator(1, 1);
+				tlsph_stress[i][4] = newStressDeviator(1, 2);
+				tlsph_stress[i][5] = newStressDeviator(2, 2);
+			} // end if (strength[itype] != NONE)
 
-				// simple linear elastic model
-				//stressRate = bulk_modulus * D.trace() * eye + 2.0 * G * d_dev;
 
-				Jaumann_rate = stressRate - W * stressTensor[i] + stressTensor[i] * W;
-				stressTensor[i] += dt * Jaumann_rate;
-				c0[i] = sqrt(m / rho[i]); //c0_type[itype];
+			/*
+			 * assemble stress Tensor from pressure and deviatoric parts
+			 */
 
-//				if (fabs(c0[i] - 1924.5) > 100.0) {
-//					printf("M = %f, rho=%f, c0=%f\n", m, rho[i], c0[i]);
-//				}
-
-				//c0[i] = c0_type[itype];
-
-				tlsph_stress[i][0] = stressTensor[i](0, 0);
-				tlsph_stress[i][1] = stressTensor[i](0, 1);
-				tlsph_stress[i][2] = stressTensor[i](0, 2);
-				tlsph_stress[i][3] = stressTensor[i](1, 1);
-				tlsph_stress[i][4] = stressTensor[i](1, 2);
-				tlsph_stress[i][5] = stressTensor[i](2, 2);
-				break;
-			}
+			stressTensor[i] = -newPressure * eye + newStressDeviator;
 
 			/*
 			 * kernel gradient correction
@@ -900,6 +894,7 @@ void PairULSPH::allocate() {
 	memory->create(rho0, n + 1, "pair:Q2");
 	memory->create(c0_type, n + 1, "pair:c0_type");
 	memory->create(eos, n + 1, "pair:eosmodel");
+	memory->create(strength, n + 1, "pair:strengthmodel");
 	memory->create(gradient_correction, n + 1, "pair:gradient_correction");
 	memory->create(hourglass_amplitude, n + 1, "pair:hourglass_correction");
 	memory->create(Lookup, MAX_KEY_VALUE, n + 1, "pair:LookupTable");
@@ -948,8 +943,6 @@ void PairULSPH::coeff(int narg, char **arg) {
 	 */
 
 	if (force->inumeric(FLERR, arg[0]) == force->inumeric(FLERR, arg[1])) {
-//sprintf(str, "ULSPH coefficients can only be specified between particles of same type!");
-//error->all(FLERR, str);
 
 		itype = force->inumeric(FLERR, arg[0]);
 
@@ -965,7 +958,6 @@ void PairULSPH::coeff(int narg, char **arg) {
 			sprintf(str, "common keyword missing!");
 			error->all(FLERR, str);
 		} else {
-//printf("common keyword found\n");
 		}
 
 		t = string("*");
@@ -1016,7 +1008,7 @@ void PairULSPH::coeff(int narg, char **arg) {
 		if (comm->me == 0) {
 			printf("next kwd is %s\n", arg[iNextKwd]);
 		}
-		eos[itype] = NONE;
+		eos[itype] = strength[itype] = NONE;
 
 		while (true) {
 			if (strcmp(arg[iNextKwd], "*END") == 0) {
@@ -1101,13 +1093,13 @@ void PairULSPH::coeff(int narg, char **arg) {
 					printf("%60s : %g\n", "Heat Capacity Ratio Gamma", Lookup[EOS_PERFECT_GAS_GAMMA][itype]);
 				}
 			} // end Perfect Gas EOS
-			else if (strcmp(arg[ioffset], "*LINEAR_PLASTIC") == 0) {
+			else if (strcmp(arg[ioffset], "*STRENGTH_LINEAR_PLASTIC") == 0) {
 
 				/*
 				 * linear elastic / ideal plastic material model with strength
 				 */
 
-				eos[itype] = STRENGTH;
+				strength[itype] = STRENGTH_LINEAR_PLASTIC;
 				artificial_stress_flag = true;
 				velocity_gradient_required = true;
 				//printf("reading *LINEAR_PLASTIC\n");
@@ -1123,16 +1115,15 @@ void PairULSPH::coeff(int narg, char **arg) {
 				}
 
 				if (iNextKwd < 0) {
-					sprintf(str, "no *KEYWORD terminates *LINEAR_PLASTIC");
+					sprintf(str, "no *KEYWORD terminates *STRENGTH_LINEAR_PLASTIC");
 					error->all(FLERR, str);
 				}
 
 				if (iNextKwd - ioffset != 4 + 1) {
-					sprintf(str, "expected 4 arguments following *LINEAR_PLASTIC but got %d\n", iNextKwd - ioffset - 1);
+					sprintf(str, "expected 4 arguments following *STRENGTH_LINEAR_PLASTIC but got %d\n", iNextKwd - ioffset - 1);
 					error->all(FLERR, str);
 				}
 
-				Lookup[YOUNGS_MODULUS][itype] = force->numeric(FLERR, arg[ioffset + 1]);
 				Lookup[POISSON_RATIO][itype] = force->numeric(FLERR, arg[ioffset + 2]);
 				Lookup[YIELD_STRENGTH][itype] = force->numeric(FLERR, arg[ioffset + 3]);
 				Lookup[HARDENING_PARAMETER][itype] = force->numeric(FLERR, arg[ioffset + 4]);
@@ -1152,7 +1143,41 @@ void PairULSPH::coeff(int narg, char **arg) {
 					printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
 					printf("%60s : %g\n", "p-wave modulus", Lookup[M_MODULUS][itype]);
 				}
-			} // end *LINEAR_PLASTIC
+			} // end *STRENGTH_LINEAR_PLASTIC
+			else if (strcmp(arg[ioffset], "*STRENGTH_LINEAR") == 0) {
+
+				/*
+				 * linear elastic / ideal plastic material model with strength
+				 */
+
+				strength[itype] = STRENGTH_LINEAR;
+				t = string("*");
+				iNextKwd = -1;
+				for (iarg = ioffset + 1; iarg < narg; iarg++) {
+					s = string(arg[iarg]);
+					if (s.compare(0, t.length(), t) == 0) {
+						iNextKwd = iarg;
+						break;
+					}
+				}
+
+				if (iNextKwd < 0) {
+					sprintf(str, "no *KEYWORD terminates *STRENGTH_LINEAR");
+					error->all(FLERR, str);
+				}
+
+				if (iNextKwd - ioffset != 1 + 1) {
+					sprintf(str, "expected 1 arguments following *STRENGTH_LINEAR but got %d\n", iNextKwd - ioffset - 1);
+					error->all(FLERR, str);
+				}
+
+				Lookup[SHEAR_MODULUS][itype] = force->numeric(FLERR, arg[ioffset + 1]);
+
+				if (comm->me == 0) {
+					printf("\n%60s\n", "linear elastic strength model");
+					printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
+				}
+			} // end *STRENGTH_LINEAR
 
 			else if (strcmp(arg[ioffset], "*GRADIENT_CORRECTION") == 0) {
 
@@ -1395,26 +1420,22 @@ void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
  */
 
 void PairULSPH::kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
+	double hr = h - r;
 
 	/*
 	 * Spiky kernel
 	 */
 
-	double n;
 	if (domain->dimension == 2) {
-		n = 0.3141592654e0 * h * h * h * h * h;
+		double h5 = h * h * h * h * h;
+		wf = 3.183098861e0 * hr * hr * hr / h5;
+		wfd = -9.549296583 * hr * hr / h5;
+
 	} else {
-		n = 0.2094395103e0 * h * h * h * h * h * h;
+		double h6 = h * h * h * h * h * h;
+		wf = 4.774648292 * hr * hr * hr / h6;
+		wfd = -14.32394487 * hr * hr / h6;
 	}
-
-	double hr = h - r;
-	wfd = 3.0e0 * hr * hr / n;
-	wf = 0.333333333333e0 * hr * wfd;
-
-	/*
-	 * cubic spline - to do
-	 */
-
 }
 
 /*
@@ -1547,7 +1568,8 @@ double PairULSPH::effective_longitudinal_modulus(int itype, double dt, double d_
 	}
 
 	if (domain->dimension == 3) {
-		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1) + 1.0e-16) + sigma_dev_rate(0, 2) / (d_dev(0, 2) + 1.0e-16) + sigma_dev_rate(1, 2) / (d_dev(1, 2) + 1.0e-16);
+		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1) + 1.0e-16) + sigma_dev_rate(0, 2) / (d_dev(0, 2) + 1.0e-16)
+				+ sigma_dev_rate(1, 2) / (d_dev(1, 2) + 1.0e-16);
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1) + d_dev(0, 2) * d_dev(0, 2) + d_dev(1, 2) * d_dev(1, 2);
 	} else {
 		mu2 = sigma_dev_rate(0, 1) / (d_dev(0, 1));

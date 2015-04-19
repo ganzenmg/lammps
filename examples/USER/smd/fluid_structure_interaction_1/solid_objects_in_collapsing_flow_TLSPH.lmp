@@ -13,8 +13,8 @@ variable        rho_water equal 1000 # mass density water
 variable        rho_obj equal 300 # mass density solid objects
 variable        h equal 2.5*${l0} # SPH kernel diameter
 variable        c0 equal 10.0 # speed of sound for water
-variable        E equal 2.0e5 # Young's modulus for solid objects
-variable        sigma_yield equal 0.1*${E} # plastic yield stress for solid objects
+variable        E equal 2.0e6 # Young's modulus for solid objects
+variable        sigma_yield equal 10.1*${E} # plastic yield stress for solid objects
 variable        contact_stiffness equal 0.5*${c0}^2*${rho_water} # contact force amplitude
 variable        skin equal ${h} # Verlet list range
 variable        vol_one equal ${l0}^2 # initial particle volume for 2d simulation
@@ -61,11 +61,11 @@ set             group solids density ${rho_obj}
 
 # set pair styles
 pair_style      hybrid/overlay ulsph tlsph *UPDATE_PAIRWISE 10.0 smd/hertz 1.5
-pair_coeff      1 1 ulsph *COMMON ${rho_water} ${c0} 0.1 1 &
+pair_coeff      1 1 ulsph *COMMON ${rho_water} ${c0} 0.1 1 0 &
 		*EOS_TAIT 7.0 &
 	        *END
 pair_coeff      2 2 tlsph *COMMON ${rho_obj} ${E} 0.3 0.5 0.0 10 1.0 &
-                *LINEAR_PLASTICITY ${sigma_yield} &
+                *LINEAR_PLASTICITY ${sigma_yield} 0 &
 		*EOS_LINEAR &
                 *END
 pair_coeff      3 3 none

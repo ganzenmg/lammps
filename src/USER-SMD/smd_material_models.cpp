@@ -23,6 +23,7 @@
  ------------------------------------------------------------------------- */
 #include <iostream>
 #include "math_special.h"
+#include "stdio.h"
 
 #include <Eigen/Eigen>
 #include <Eigen/Dense>
@@ -129,6 +130,11 @@ void TaitEOS_density(const double exponent, const double c0_reference, const dou
 	pressure = B * (tmp - 1.0);
 	double bulk_modulus = B * tmp * exponent; // computed as rho * d(pressure)/d(rho)
 	sound_speed = sqrt(bulk_modulus / rho_current);
+
+//	if (fabs(pressure) > 0.01) {
+//		printf("tmp = %f, press=%f, K=%f\n", tmp, pressure, bulk_modulus);
+//	}
+
 }
 
 /* ----------------------------------------------------------------------
@@ -247,7 +253,6 @@ void LinearPlasticStrength(const double G, const double yieldStress, const Matri
 	 * check yield condition
 	 */
 	J2 = sqrt(3. / 2.) * sigmaTrial_dev.norm();
-
 
 	if (J2 < yieldStress) {
 		/*

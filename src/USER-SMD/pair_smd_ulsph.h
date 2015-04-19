@@ -69,7 +69,7 @@ protected:
 	double *c0_type; // reference speed of sound defined per particle type
 	double *rho0; // reference mass density per type
 	double *Q1; // linear artificial viscosity coeff
-	int *eos; // eos models
+	int *eos, *strength; // eos and strength material models
 
 	double *onerad_dynamic, *onerad_frozen;
 	double *maxrad_dynamic, *maxrad_frozen;
@@ -86,6 +86,10 @@ protected:
 	double dtCFL;
 
 private:
+	enum {
+		STRENGTH_LINEAR = 1000, STRENGTH_LINEAR_PLASTIC = 1001, STRENGTH_NEWTON_VISCOSITY = 1002
+	};
+
 	// enumerate some quantitities and associate these with integer values such that they can be used for lookup in an array structure
 	enum {
 		NONE = 0, EOS_PERFECT_GAS = 1, EOS_TAIT = 2, VISCOSITY_LINEAR = 3, STRENGTH = 4,

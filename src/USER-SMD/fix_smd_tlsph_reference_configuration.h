@@ -54,7 +54,7 @@ protected:
 	int maxpartner;
 	int *npartner;                // # of touching partners of each atom
 	tagint **partner;             // global atom IDs for the partners
-	float **damage_per_interaction; // damage parameter for this (i,j) pair interaction. 0: undamaged, 1: fully damaged
+	float **wfd_list, **wf_list;
 
 	class Pair *pair;
 
