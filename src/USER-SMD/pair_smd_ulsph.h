@@ -87,7 +87,8 @@ protected:
 
 private:
 	enum {
-		STRENGTH_LINEAR = 1000, STRENGTH_LINEAR_PLASTIC = 1001, STRENGTH_NEWTON_VISCOSITY = 1002
+		STRENGTH_LINEAR = 1000, STRENGTH_LINEAR_PLASTIC = 1001, STRENGTH_NEWTON_VISCOSITY = 1002,
+		STRENGTH_VISCOSITY_NEWTON = 1003
 	};
 
 	// enumerate some quantitities and associate these with integer values such that they can be used for lookup in an array structure
@@ -97,8 +98,8 @@ private:
 		EOS_TAIT_EXPONENT = 7, REFERENCE_SOUNDSPEED = 8, REFERENCE_DENSITY = 9,
 		EOS_PERFECT_GAS_GAMMA = 10,
 		SHEAR_MODULUS = 11, YIELD_STRENGTH = 12, YOUNGS_MODULUS = 13, POISSON_RATIO = 14,
-		LAME_LAMBDA = 15, HEAT_CAPACITY = 16, M_MODULUS = 17, HARDENING_PARAMETER = 18,
-		MAX_KEY_VALUE = 19
+		LAME_LAMBDA = 15, HEAT_CAPACITY = 16, M_MODULUS = 17, HARDENING_PARAMETER = 18, VISCOSITY_MU = 19,
+		MAX_KEY_VALUE = 20
 	};
 	double **Lookup; // holds per-type material parameters for the quantities defined in enum statement above.
 

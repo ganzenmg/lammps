@@ -18,19 +18,21 @@ comm_style      tiled
 neigh_modify    every 10 delay 0 check yes # re-build neighbor list every 10 steps
 newton          off # required for SMD simulations!
 comm_modify     vel yes # required for SMD simulations!
+atom_modify     map array
 
 # read particle data
 read_data       cbar_adjusted.data
 group           bar1 type 1
 group           bar2 type 2
+group           tlsph union all
 
-pair_style      hybrid/overlay tlsph smd/hertz # activate Total-Lagrangian SPH
+pair_style      hybrid/overlay tlsph *UPDATE_PAIRWISE 1.0 smd/hertz 1.5 # activate Total-Lagrangian SPH
 #                                 rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 tlsph *COMMON ${rho} ${E} ${nu} 0.56  0.0  100 1.0 &
+pair_coeff      1 1 tlsph *COMMON ${rho} ${E} ${nu} 0.56  0.0  0 1.0 &
                 *LINEAR_STRENGTH &
 		*EOS_LINEAR &
                 *END
-pair_coeff      2 2 tlsph *COMMON ${rho} ${E} ${nu} 1.06  0.0  100 1.0 &
+pair_coeff      2 2 tlsph *COMMON ${rho} ${E} ${nu} 1.06  0.0  0 1.0 &
                 *LINEAR_PLASTICITY ${sigma_yield} &
 		*EOS_LINEAR &
                 *END
@@ -60,4 +62,4 @@ thermo_style    custom step dt f_dtfix ke pe
 
 balance         1.0 rcb
 
-run             100
+run             100000

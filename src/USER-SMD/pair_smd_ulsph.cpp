@@ -81,7 +81,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
 	gradient_correction_possible = NULL;
 
-	comm_forward = 20; // this pair style communicates 20 doubles to ghost atoms
+	comm_forward = 26; // this pair style communicates 20 doubles to ghost atoms
 	updateFlag = 0;
 }
 
@@ -306,7 +306,7 @@ void PairULSPH::PreCompute() {
 
 				/* build correction matrix for kernel derivatives */
 				if (gradient_correction_flag) {
-					Ktmp = g * dx.transpose();
+					Ktmp = -g * dx.transpose();
 					K[i] += jvol * Ktmp;
 				}
 
@@ -619,7 +619,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				 * force -- the classical SPH way
 				 */
 
-				f_stress = -ivol * jvol * S * g;
+				f_stress = ivol * jvol * (stressTensor[i] * K[i] + stressTensor[j] * K[j]) * g;
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
@@ -687,7 +687,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				deltaE = 0.5 * sumForces.dot(dv);
 
 				// change in mass density
-				drho[i] += rho[i] * jvol * wfd * delVdotDelR;
+				drho[i] -= rho[i] * jvol * wfd * delVdotDelR;
 
 				// apply forces to pair of particles
 				f[i][0] += sumForces(0);
@@ -705,7 +705,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 					f[j][1] -= sumForces(1);
 					f[j][2] -= sumForces(2);
 					de[j] += deltaE;
-					drho[j] += rho[j] * ivol * wfd * delVdotDelR;
+					drho[j] -= rho[j] * ivol * wfd * delVdotDelR;
 
 					shepardWeight[j] += ivol * wf;
 					smoothVel[j] -= ivol * wf * dvint;
@@ -827,8 +827,9 @@ void PairULSPH::ComputePressure() {
 					stressRateDev = -2.0 * Lookup[SHEAR_MODULUS][itype] * d_dev;
 					//cout << "stress rate deviator is " << endl << stressRateDev << endl;
 					break;
-				case STRENGTH:
-					error->one(FLERR, "unknown EOS.");
+				case STRENGTH_VISCOSITY_NEWTON:
+					oldStressDeviator.setZero();
+					stressRateDev = 2.0 * Lookup[VISCOSITY_MU][itype] * d_dev / dt;
 					break;
 				}
 
@@ -837,7 +838,6 @@ void PairULSPH::ComputePressure() {
 				StressRateDevJaumann = stressRateDev - W * oldStressDeviator + oldStressDeviator * W;
 				newStressDeviator = oldStressDeviator + dt * StressRateDevJaumann;
 
-
 				tlsph_stress[i][0] = newStressDeviator(0, 0);
 				tlsph_stress[i][1] = newStressDeviator(0, 1);
 				tlsph_stress[i][2] = newStressDeviator(0, 2);
@@ -845,7 +845,6 @@ void PairULSPH::ComputePressure() {
 				tlsph_stress[i][4] = newStressDeviator(1, 2);
 				tlsph_stress[i][5] = newStressDeviator(2, 2);
 			} // end if (strength[itype] != NONE)
-
 
 			/*
 			 * assemble stress Tensor from pressure and deviatoric parts
@@ -856,10 +855,9 @@ void PairULSPH::ComputePressure() {
 			/*
 			 * kernel gradient correction
 			 */
-			if (gradient_correction[itype]) {
-				stressTensor[i] = stressTensor[i] * K[i];
-			}
-
+			//if (gradient_correction[itype]) {
+			//	stressTensor[i] = stressTensor[i] * K[i];
+			//}
 			pressure[i] = stressTensor[i].trace() / 3.0;
 
 			/*
@@ -1178,6 +1176,40 @@ void PairULSPH::coeff(int narg, char **arg) {
 					printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
 				}
 			} // end *STRENGTH_LINEAR
+			else if (strcmp(arg[ioffset], "*STRENGTH_VISCOSITY_NEWTON") == 0) {
+
+				/*
+				 * linear elastic / ideal plastic material model with strength
+				 */
+
+				strength[itype] = STRENGTH_VISCOSITY_NEWTON;
+				t = string("*");
+				iNextKwd = -1;
+				for (iarg = ioffset + 1; iarg < narg; iarg++) {
+					s = string(arg[iarg]);
+					if (s.compare(0, t.length(), t) == 0) {
+						iNextKwd = iarg;
+						break;
+					}
+				}
+
+				if (iNextKwd < 0) {
+					sprintf(str, "no *KEYWORD terminates *STRENGTH_VISCOSITY_NEWTON");
+					error->all(FLERR, str);
+				}
+
+				if (iNextKwd - ioffset != 1 + 1) {
+					sprintf(str, "expected 1 arguments following *STRENGTH_VISCOSITY_NEWTON but got %d\n", iNextKwd - ioffset - 1);
+					error->all(FLERR, str);
+				}
+
+				Lookup[VISCOSITY_MU][itype] = force->numeric(FLERR, arg[ioffset + 1]);
+
+				if (comm->me == 0) {
+					printf("\n%60s\n", "Newton viscosity model");
+					printf("%60s : %g\n", "viscosity mu", Lookup[VISCOSITY_MU][itype]);
+				}
+			} // end *STRENGTH_VISCOSITY_NEWTON
 
 			else if (strcmp(arg[ioffset], "*GRADIENT_CORRECTION") == 0) {
 
@@ -1370,6 +1402,13 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 		buf[m++] = F[j](2, 1);
 		buf[m++] = F[j](2, 2); // 9 + 9 = 18
 
+		buf[m++] = K[j](0, 0);
+		buf[m++] = K[j](1, 1);
+		buf[m++] = K[j](2, 2);
+		buf[m++] = K[j](0, 1);
+		buf[m++] = K[j](0, 2);
+		buf[m++] = K[j](1, 2); //9
+
 		buf[m++] = static_cast<double>(gradient_correction_possible[j]);
 		buf[m++] = eff_plastic_strain[j];
 	}
@@ -1409,6 +1448,16 @@ void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
 		F[i](2, 0) = buf[m++];
 		F[i](2, 1) = buf[m++];
 		F[i](2, 2) = buf[m++];
+
+		K[i](0, 0) = buf[m++];
+		K[i](1, 1) = buf[m++];
+		K[i](2, 2) = buf[m++];
+		K[i](0, 1) = buf[m++];
+		K[i](0, 2) = buf[m++];
+		K[i](1, 2) = buf[m++];
+		K[i](1, 0) = K[i](0, 1);
+		K[i](2, 0) = K[i](0, 2);
+		K[i](2, 1) = K[i](1, 2);
 
 		gradient_correction_possible[i] = static_cast<bool>(buf[m++]);
 		eff_plastic_strain[i] = buf[m++];

@@ -8,7 +8,7 @@ variable        h equal 2.01*${l0}
 variable        E equal 10 # Young's modulus
 variable        nu equal 0.3 # Poisson ratio
 variable        sigy equal 0.1
-variable        vel equal 20.0
+variable        vel equal 10.0
 variable        hg equal 0*${sigy}/${E}
 # ----
 variable        c0 equal sqrt(${E}/${rho})
@@ -19,7 +19,7 @@ variable        skin equal ${h} # Verlet list range
 units		si
 dimension       3
 boundary        s s s
-atom_style      tlsph
+atom_style      smd
 #atom_modify	map array
 neighbor        ${skin} bin
 neigh_modify    every 5 delay 0 check yes # only build neighbor list if particle has moved half the skin distance

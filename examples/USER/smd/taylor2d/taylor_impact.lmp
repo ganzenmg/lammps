@@ -51,7 +51,7 @@ set             group all density ${rho}
 
 pair_style      tlsph
 #                           rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  10.0 1.0 &
+pair_coeff      1 1 *COMMON ${rho} ${E} ${nu} 0.00  0.0  2.0 1.0 &
                 *LINEAR_PLASTICITY ${sigy} &
 		*EOS_LINEAR &
                 *END
