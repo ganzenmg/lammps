@@ -165,39 +165,36 @@ void FixPeriNeighGCG::setup(int vflag) {
 	for (ii = 0; ii < inum; ii++) {
 		i = ilist[ii];
 
-		if (molecule[i] == 1000) {
+		xtmp = x[i][0];
+		ytmp = x[i][1];
+		ztmp = x[i][2];
+		itype = type[i];
+		jlist = firstneigh[i];
+		jnum = numneigh[i];
 
-			xtmp = x[i][0];
-			ytmp = x[i][1];
-			ztmp = x[i][2];
-			itype = type[i];
-			jlist = firstneigh[i];
-			jnum = numneigh[i];
+		for (jj = 0; jj < jnum; jj++) {
+			j = jlist[jj];
+			j &= NEIGHMASK;
 
-			for (jj = 0; jj < jnum; jj++) {
-				j = jlist[jj];
-				j &= NEIGHMASK;
+			if (molecule[i] == molecule[j]) {
 
-				if (molecule[i] == molecule[j]) {
+				delx = xtmp - x[j][0];
+				dely = ytmp - x[j][1];
+				delz = ztmp - x[j][2];
+				rsq = delx * delx + dely * dely + delz * delz;
+				jtype = type[j];
 
-					delx = xtmp - x[j][0];
-					dely = ytmp - x[j][1];
-					delz = ztmp - x[j][2];
-					rsq = delx * delx + dely * dely + delz * delz;
-					jtype = type[j];
+				cutsq = (radius[i] + radius[j]) * (radius[i] + radius[j]);
 
-					cutsq = (radius[i] + radius[j]) * (radius[i] + radius[j]);
+				if (rsq <= cutsq) {
+					npartner[i]++;
 
-					if (rsq <= cutsq) {
-						npartner[i]++;
-
-						if (j < nlocal) {
-							npartner[j]++;
-						}
-					} // end check for distance
-				} // end check for molecule[i] == molecule[j]
-			}
-		} // end check for molecule[i] == 1000
+					if (j < nlocal) {
+						npartner[j]++;
+					}
+				} // end check for distance
+			} // end check for molecule[i] == molecule[j]
+		}
 	}
 
 	maxpartner = 0;
@@ -230,47 +227,43 @@ void FixPeriNeighGCG::setup(int vflag) {
 
 	for (ii = 0; ii < inum; ii++) {
 		i = ilist[ii];
+		xtmp = x[i][0];
+		ytmp = x[i][1];
+		ztmp = x[i][2];
+		itype = type[i];
+		jlist = firstneigh[i];
+		jnum = numneigh[i];
 
-		if (molecule[i] == 1000) {
+		for (jj = 0; jj < jnum; jj++) {
+			j = jlist[jj];
+			j &= NEIGHMASK;
 
-			xtmp = x[i][0];
-			ytmp = x[i][1];
-			ztmp = x[i][2];
-			itype = type[i];
-			jlist = firstneigh[i];
-			jnum = numneigh[i];
+			if (molecule[i] == molecule[j]) {
 
-			for (jj = 0; jj < jnum; jj++) {
-				j = jlist[jj];
-				j &= NEIGHMASK;
+				delx = xtmp - x[j][0];
+				dely = ytmp - x[j][1];
+				delz = ztmp - x[j][2];
+				rsq = delx * delx + dely * dely + delz * delz;
+				jtype = type[j];
 
-				if (molecule[i] == molecule[j]) {
+				cutsq = (radius[i] + radius[j]) * (radius[i] + radius[j]);
 
-					delx = xtmp - x[j][0];
-					dely = ytmp - x[j][1];
-					delz = ztmp - x[j][2];
-					rsq = delx * delx + dely * dely + delz * delz;
-					jtype = type[j];
+				if (rsq <= cutsq) {
+					partner[i][npartner[i]] = tag[j];
+					r0[i][npartner[i]] = sqrt(rsq);
+					plastic_stretch[i][npartner[i]] = 0.0;
+					npartner[i]++;
+					vinter[i] += vfrac[j];
 
-					cutsq = (radius[i] + radius[j]) * (radius[i] + radius[j]);
-
-					if (rsq <= cutsq) {
-						partner[i][npartner[i]] = tag[j];
-						r0[i][npartner[i]] = sqrt(rsq);
-						plastic_stretch[i][npartner[i]] = 0.0;
-						npartner[i]++;
-						vinter[i] += vfrac[j];
-
-						if (j < nlocal) {
-							partner[j][npartner[j]] = tag[i];
-							r0[j][npartner[j]] = sqrt(rsq);
-							plastic_stretch[j][npartner[j]] = 0.0;
-							npartner[j]++;
-							vinter[j] += vfrac[i];
-						}
-					} // end check for distance
-				} // end check for molecule[i] == molecule[j]
-			} // end check for molecule[i] == 1000
+					if (j < nlocal) {
+						partner[j][npartner[j]] = tag[i];
+						r0[j][npartner[j]] = sqrt(rsq);
+						plastic_stretch[j][npartner[j]] = 0.0;
+						npartner[j]++;
+						vinter[j] += vfrac[i];
+					}
+				} // end check for distance
+			} // end check for molecule[i] == molecule[j]
 		}
 	}
 
@@ -453,11 +446,12 @@ int FixPeriNeighGCG::unpack_exchange(int nlocal, double *buf) {
 
 		//printf("nlocal=%d, nmax=%d\n", nlocal, nmax);
 
-		nmax = nmax/DELTA * DELTA;
+		nmax = nmax / DELTA * DELTA;
 		nmax += DELTA;
 		grow_arrays(nmax);
 
-		error->message(FLERR, "in FixPeriNeighGCG::unpack_exchange: local arrays too small for receiving partner information; growing arrays");
+		error->message(FLERR,
+				"in FixPeriNeighGCG::unpack_exchange: local arrays too small for receiving partner information; growing arrays");
 	}
 	//printf("nlocal=%d, nmax=%d\n", nlocal, nmax);
 

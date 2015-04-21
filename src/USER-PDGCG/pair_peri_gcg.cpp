@@ -215,108 +215,106 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 
 	for (i = 0; i < nlocal; i++) {
 
-		if (molecule[i] == 1000) {
+		xtmp = x[i][0];
+		ytmp = x[i][1];
+		ztmp = x[i][2];
+		vxtmp = v[i][0];
+		vytmp = v[i][1];
+		vztmp = v[i][2];
+		itype = type[i];
+		jnum = npartner[i];
 
-			xtmp = x[i][0];
-			ytmp = x[i][1];
-			ztmp = x[i][2];
-			vxtmp = v[i][0];
-			vytmp = v[i][1];
-			vztmp = v[i][2];
-			itype = type[i];
-			jnum = npartner[i];
+		for (jj = 0; jj < jnum; jj++) {
 
-			for (jj = 0; jj < jnum; jj++) {
+			if (partner[i][jj] == 0)
+				continue;
+			j = atom->map(partner[i][jj]);
 
-				if (partner[i][jj] == 0)
-					continue;
-				j = atom->map(partner[i][jj]);
+			// check if lost a partner without first breaking bond
+			if (j < 0) {
+				partner[i][jj] = 0;
+				continue;
+			}
 
-				// check if lost a partner without first breaking bond
-				if (j < 0) {
-					partner[i][jj] = 0;
-					continue;
-				}
+			if (molecule[i] != molecule[j]) {
+				printf("ERROR: molecule[i] != molecule[j] :: itype=%d, imol=%d, jtype=%d, jmol=%d\n\n", itype, molecule[i], jtype,
+						molecule[j]);
+				error->all(FLERR, "molecule[i] != molecule[j]");
+			}
 
-				if (molecule[i] != molecule[j]) {
-					printf("ERROR: molecule[i] != molecule[j] :: itype=%d, imol=%d, jtype=%d, jmol=%d\n\n", itype, molecule[i],
-							jtype, molecule[j]);
-					error->all(FLERR, "molecule[i] != molecule[j]");
-				}
+			// initial distance in reference config
+			delx0 = x0[j][0] - x0[i][0];
+			dely0 = x0[j][1] - x0[i][1];
+			delz0 = x0[j][2] - x0[i][2];
+			double this_r0 = sqrt(delx0 * delx0 + dely0 * dely0 + delz0 * delz0);
 
-				// initial distance in reference config
-				delx0 = x0[j][0] - x0[i][0];
-				dely0 = x0[j][1] - x0[i][1];
-				delz0 = x0[j][2] - x0[i][2];
-				double this_r0 = sqrt(delx0 * delx0 + dely0 * dely0 + delz0 * delz0);
+			delx = xtmp - x[j][0];
+			dely = ytmp - x[j][1];
+			delz = ztmp - x[j][2];
 
-				delx = xtmp - x[j][0];
-				dely = ytmp - x[j][1];
-				delz = ztmp - x[j][2];
+			if (periodic)
+				domain->minimum_image(delx, dely, delz); // we need this periodic check because j can be non-ghosted
 
-				if (periodic)
-					domain->minimum_image(delx, dely, delz); // we need this periodic check because j can be non-ghosted
+			rsq = delx * delx + dely * dely + delz * delz;
+			jtype = type[j];
+			delta = radius[i] + radius[j];
+			r = sqrt(rsq);
+			dr = r - r0[i][jj];
 
-				rsq = delx * delx + dely * dely + delz * delz;
-				jtype = type[j];
-				delta = radius[i] + radius[j];
-				r = sqrt(rsq);
-				dr = r - r0[i][jj];
+			// avoid roundoff errors
+			if (fabs(dr) < 2.2204e-016)
+				dr = 0.0;
 
-				// avoid roundoff errors
-				if (fabs(dr) < 2.2204e-016)
-					dr = 0.0;
+			// bond stretch
+			stretch = dr / r0[i][jj]; // total stretch
 
-				// bond stretch
-				stretch = dr / r0[i][jj]; // total stretch
+//				// subtract plastic stretch from current stretch
+//				stretch -= plastic_stretch[i][jj];
+//
+//				// alternative plasticity based on plastic stretch
+//				if (stretch > syield[itype][jtype]) {
+//					double plastic_stretch_increment = stretch - syield[itype][jtype];
+//					plastic_stretch[i][jj] += plastic_stretch_increment;
+//					stretch = syield[itype][jtype];
+//				}
 
-				// subtract plastic stretch from current stretch
-				stretch -= plastic_stretch[i][jj];
+			if (domain->dimension == 2) {
+				c = 4.5 * bulkmodulus[itype][jtype] * (1.0 / vinter[i] + 1.0 / vinter[j]);
+			} else {
+				c = 9.0 * bulkmodulus[itype][jtype] * (1.0 / vinter[i] + 1.0 / vinter[j]);
+				//c = 9.0 * bulkmodulus[itype][jtype] * (1.0 / 20000.0 + 1.0 / 20000.0);
+			}
 
-				// alternative plasticity based on plastic stretch
-				if (stretch > syield[itype][jtype]) {
-					double plastic_stretch_increment = stretch - syield[itype][jtype];
-					plastic_stretch[i][jj] += plastic_stretch_increment;
-					stretch = syield[itype][jtype];
-				}
+			// use integration approach
+			//c = 2.865 * bulkmodulus[itype][jtype] / (1.0); // applicable to delta = 2.0 * (1/2)
 
-				if (domain->dimension == 2) {
-					c = 4.5 * bulkmodulus[itype][jtype] * (1.0 / vinter[i] + 1.0 / vinter[j]);
-				} else {
-					c = 9.0 * bulkmodulus[itype][jtype] * (1.0 / vinter[i] + 1.0 / vinter[j]);
-					//c = 9.0 * bulkmodulus[itype][jtype] * (1.0 / 20000.0 + 1.0 / 20000.0);
-				}
+			// force computation -- note we divide by a factor of r
+			evdwl = 0.5 * c * stretch * stretch * vfrac[i] * vfrac[j];
+			//printf("evdwl = %f\n", evdwl);
+			fbond = -c * vfrac[i] * vfrac[j] * stretch / r0[i][jj];
+			if (r > 0.0)
+				fbond = fbond / r;
+			else
+				fbond = 0.0;
 
-				// use integration approach
-				//c = 2.865 * bulkmodulus[itype][jtype] / (1.0); // applicable to delta = 2.0 * (1/2)
+			// project force -- missing factor of r is recovered here as delx, dely ... are not unit vectors
+			f[i][0] += delx * fbond;
+			f[i][1] += dely * fbond;
+			f[i][2] += delz * fbond;
 
-				// force computation -- note we divide by a factor of r
-				evdwl = 0.5 * c * stretch * stretch * vfrac[i] * vfrac[j];
-				//printf("evdwl = %f\n", evdwl);
-				fbond = -c * vfrac[i] * vfrac[j] * stretch / r0[i][jj];
-				if (r > 0.0)
-					fbond = fbond / r;
-				else
-					fbond = 0.0;
+			if (evflag) {
+				// since I-J is double counted, set newton off & use 1/2 factor and I,I
+				ev_tally(i, i, nlocal, 0, 0.5 * evdwl, 0.0, 0.5 * fbond, delx, dely, delz);
+				//printf("broken evdwl=%f, norm = %f %f\n", evdwl, vinter[i], vinter[j]);
+			}
 
-				// project force -- missing factor of r is recovered here as delx, dely ... are not unit vectors
-				f[i][0] += delx * fbond;
-				f[i][1] += dely * fbond;
-				f[i][2] += delz * fbond;
-
-				if (evflag) {
-					// since I-J is double counted, set newton off & use 1/2 factor and I,I
-					ev_tally(i, i, nlocal, 0, 0.5 * evdwl, 0.0, 0.5 * fbond, delx, dely, delz);
-					//printf("broken evdwl=%f, norm = %f %f\n", evdwl, vinter[i], vinter[j]);
-				}
-
-				// bond-based plasticity
+			// bond-based plasticity
 
 //			if (smax[itype][jtype] > 0.0) { // maximum-stretch based failure
-				if ((r - r0[i][jj]) / r0[i][jj] > smax[itype][jtype]) {
-					partner[i][jj] = 0;
-					nBroken += 1;
-					e[i] += 0.5 * evdwl;
+			if ((r - r0[i][jj]) / r0[i][jj] > smax[itype][jtype]) {
+				partner[i][jj] = 0;
+				nBroken += 1;
+				e[i] += 0.5 * evdwl;
 
 //					printf("nlocal=%d, i=%d, j=%d\n", nlocal, i, j);
 ////
@@ -331,9 +329,9 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 //
 //					printf("itype=%d, imol=%d, jtype=%d, jmol=%d\n\n", itype, molecule[i], jtype, molecule[j]);
 //					printf("-----------------------------------------------------------------------------\n");
-					//error->one(FLERR, "STOP");
-					//<
-				}
+				//error->one(FLERR, "STOP");
+				//<
+			}
 //			} else {
 //				printf("smax[%d][%d] = %f\n", itype, jtype, smax[itype][jtype]);
 //				printf("broken evdwl=%f, k=%f, v=%f %f, norm = %f %f, s=%f, r0=%f\n", evdwl, bulkmodulus[itype][jtype], vfrac[i],
@@ -352,8 +350,7 @@ void PairPeriGCG::compute(int eflag, int vflag) {
 //
 //			}
 
-			}
-		} //end if (molecule[i] == 1000)
+		}
 
 	}
 

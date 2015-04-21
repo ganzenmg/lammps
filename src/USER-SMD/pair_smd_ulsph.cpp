@@ -619,7 +619,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 				 * force -- the classical SPH way
 				 */
 
-				f_stress = ivol * jvol * (stressTensor[i] * K[i] + stressTensor[j] * K[j]) * g;
+				//f_stress = ivol * jvol * (stressTensor[i] * K[i] + stressTensor[j] * K[j]) * g;
+				f_stress = ivol * jvol * S * g;
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
@@ -855,9 +856,9 @@ void PairULSPH::ComputePressure() {
 			/*
 			 * kernel gradient correction
 			 */
-			//if (gradient_correction[itype]) {
-			//	stressTensor[i] = stressTensor[i] * K[i];
-			//}
+			if (gradient_correction[itype]) {
+				stressTensor[i] = stressTensor[i] * K[i];
+			}
 			pressure[i] = stressTensor[i].trace() / 3.0;
 
 			/*

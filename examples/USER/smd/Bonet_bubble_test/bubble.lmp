@@ -69,5 +69,5 @@ velocity        all ramp vy  -0.1 0.1 x  1.0 -1.0 units box
 #velocity       all set 0 -1 0 units box
 #fix             ywall all wall/reflect ylo -1.0
 
-run 50000
+run 5000
 
