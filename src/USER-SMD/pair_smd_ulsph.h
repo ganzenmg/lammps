@@ -62,7 +62,8 @@ public:
 	void PreCompute();
 	void PreCompute_DensitySummation();
 	Matrix3d Deviator(Matrix3d);
-	double effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev, Matrix3d sigma_dev_rate, double damage);
+	double effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev,
+			Matrix3d sigma_dev_rate, double damage);
 
 protected:
 
@@ -87,18 +88,34 @@ protected:
 
 private:
 	enum {
-		STRENGTH_LINEAR = 1000, STRENGTH_LINEAR_PLASTIC = 1001, STRENGTH_NEWTON_VISCOSITY = 1002,
-		STRENGTH_VISCOSITY_NEWTON = 1003
+		STRENGTH_LINEAR = 1000, STRENGTH_LINEAR_PLASTIC = 1001, STRENGTH_NEWTON_VISCOSITY = 1002, STRENGTH_VISCOSITY_NEWTON = 1003
+	};
+	enum {
+		EOS_LINEAR = 2000
 	};
 
 	// enumerate some quantitities and associate these with integer values such that they can be used for lookup in an array structure
 	enum {
-		NONE = 0, EOS_PERFECT_GAS = 1, EOS_TAIT = 2, VISCOSITY_LINEAR = 3, STRENGTH = 4,
-		BULK_MODULUS = 5, HOURGLASS_CONTROL_AMPLITUDE = 6,
-		EOS_TAIT_EXPONENT = 7, REFERENCE_SOUNDSPEED = 8, REFERENCE_DENSITY = 9,
+		NONE = 0,
+		EOS_PERFECT_GAS = 1,
+		EOS_TAIT = 2,
+		VISCOSITY_LINEAR = 3,
+		STRENGTH = 4,
+		BULK_MODULUS = 5,
+		HOURGLASS_CONTROL_AMPLITUDE = 6,
+		EOS_TAIT_EXPONENT = 7,
+		REFERENCE_SOUNDSPEED = 8,
+		REFERENCE_DENSITY = 9,
 		EOS_PERFECT_GAS_GAMMA = 10,
-		SHEAR_MODULUS = 11, YIELD_STRENGTH = 12, YOUNGS_MODULUS = 13, POISSON_RATIO = 14,
-		LAME_LAMBDA = 15, HEAT_CAPACITY = 16, M_MODULUS = 17, HARDENING_PARAMETER = 18, VISCOSITY_MU = 19,
+		SHEAR_MODULUS = 11,
+		YIELD_STRENGTH = 12,
+		YOUNGS_MODULUS = 13,
+		POISSON_RATIO = 14,
+		LAME_LAMBDA = 15,
+		HEAT_CAPACITY = 16,
+		M_MODULUS = 17,
+		HARDENING_PARAMETER = 18,
+		VISCOSITY_MU = 19,
 		MAX_KEY_VALUE = 20
 	};
 	double **Lookup; // holds per-type material parameters for the quantities defined in enum statement above.
@@ -117,6 +134,7 @@ private:
 	int updateFlag; // indicates if any relative particle pair movement is significant compared to smoothing length
 
 	bool *gradient_correction_possible;
+	bool density_summation, velocity_gradient;
 
 };
 

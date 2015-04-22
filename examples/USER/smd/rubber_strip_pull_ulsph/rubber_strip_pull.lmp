@@ -3,9 +3,9 @@
 # define initial parameters
 variable        l0 equal 1.0 # lattice spacing for creating particles
 variable        rho equal 1 # initial mass density
-variable        E equal 1.0 # Young's modulus
-variable        nu equal 0.3 # Poisson ratio
-variable        sigy equal 0.05*${E}
+variable        G equal 0.3 # Poisson ratio
+variable        SIGY equal 0.03
+variable        HARD equal 0.0
 variable        h equal 2.01*${l0} # SPH smoothing kernel diameter
 variable        vol_one equal ${l0}^2 # volume of one particle
 variable        mass_one equal ${vol_one}*${rho} # mass of one particle
@@ -13,7 +13,7 @@ variable        skin equal 0.9*${l0} # Verlet list range
 variable        vel equal 0.005 # pull velocity
 variable        c0 equal 1.0
 variable        crad equal ${l0}/2.0
-variable        hg equal 200.0
+variable        hg equal 20.0
 
 units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
 dimension       2 # this is a 2d plane-strain simulation
@@ -41,19 +41,24 @@ group           top region top # top row of particles
 group           bot region bot # bottom row of particles
 group           tlsph union all
 
-pair_style      ulsph
+pair_style      ulsph *VELOCITY_GRADIENT
 pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 1 ${hg} &
-		*LINEAR_PLASTIC ${E} ${nu} ${sigy} &
+                *EOS_LINEAR &
+		*STRENGTH_LINEAR_PLASTIC ${G} ${SIGY} ${HARD} &
 		*GRADIENT_CORRECTION &
 	        *END
 
 compute         S all smd/ulsph_stress # Cauchy stress tensor
+compute         E all smd/ulsph_strain # 
+
 compute         D all smd/ulsph_strain_rate
 compute         nn all smd/ulsph_num_neighs # number of neighbors for each particle
 
 dump            dump_id all custom 10 dump.LAMMPS id type x y z &
                 c_S[1] c_S[2] c_S[3] c_S[4] c_S[5] c_S[6] c_nn &
-		c_D[1] c_D[2] c_D[4] radius
+		c_D[1] c_D[2] c_D[4] radius &
+                c_E[1] c_E[2] c_E[4]
+
 
 dump_modify     dump_id first yes
 

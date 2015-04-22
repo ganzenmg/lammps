@@ -1,10 +1,10 @@
 #processors      4 1 1
 variable        rho equal 1000
 variable        h equal 0.08
-variable        K equal 2e7 # bulk modulus
+variable        K equal 2e5 # bulk modulus
 variable        vel equal 10.0
 variable        hg equal 0
-variable        visc equal 0.1
+variable        visc equal 1.0
 # ----
 variable        c0 equal sqrt(${K}/${rho})
 variable        dt equal 0.125*${h}/${c0}
@@ -24,15 +24,14 @@ newton          off
 read_data       disc_adjusted.data
 
 
-pair_style      ulsph
+#pair_style      ulsph *DENSITY_SUMMATION
+#pair_coeff      1 1 *COMMON ${rho} ${c0} ${visc} 0 ${hg} &
+#		*EOS_TAIT 7 &
+#	        *END
+pair_style      ulsph *DENSITY_SUMMATION
 pair_coeff      1 1 *COMMON ${rho} ${c0} ${visc} 0 ${hg} &
 		*EOS_TAIT 7 &
-                *STRENGTH_VISCOSITY_NEWTON 0.5 &
-		*GRADIENT_CORRECTION &
 	        *END
-
-
-
 
 compute         rho all smd/rho
 compute         nn all smd/ulsph_num_neighs
@@ -51,7 +50,7 @@ timestep        ${dt}
 fix             integration_fix all smd/integrate_ulsph #adjust_radius 1.2
 #fix             output_fix all print 10 "${disp} ${force} ${strain} ${stress}" file force_displacement.dat screen no
 
-variable        dumpFreq equal 100 #round(${nrun}/1000)
+variable        dumpFreq equal 1 #round(${nrun}/1000)
 dump            dump_id all custom ${dumpFreq} dump.LAMMPS id type x y z &
                 fx fy fz vx vy vz c_eint &
                 c_contact_radius c_nn mol c_rho c_S[1] c_S[2] c_S[4] radius
@@ -61,13 +60,20 @@ dump_modify     dump_id first yes
 thermo          100
 thermo_style    custom step ke pe v_etot c_alleint dt v_amz time
 
-velocity        all ramp vx  -0.1 0.1 y -1.0 1.0 units box
-velocity        all ramp vy  -0.1 0.1 x  1.0 -1.0 units box
+#velocity        all ramp vx  -0.1 0.1 y -1.0 1.0 units box
+#velocity        all ramp vy  -0.1 0.1 x  1.0 -1.0 units box
 #velocity        all ramp vx    1 -1 x -1.0 1.0 units box
 #velocity        all ramp vy    -1 1 y -1.0 1.0 units box
 
-#velocity       all set 0 -1 0 units box
-#fix             ywall all wall/reflect ylo -1.0
 
-run 5000
 
+#run 5000
+
+velocity       all set 0 -1 0 units box
+fix             ywall all wall/reflect ylo -1.0
+
+
+pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 0 ${hg} &
+		*EOS_TAIT 7 &
+	        *END
+run 500

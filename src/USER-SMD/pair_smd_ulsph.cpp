@@ -80,6 +80,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	artificial_stress_flag = false; // turn off artificial stress correction by default
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
 	gradient_correction_possible = NULL;
+	density_summation = velocity_gradient = false;
 
 	comm_forward = 26; // this pair style communicates 20 doubles to ghost atoms
 	updateFlag = 0;
@@ -311,7 +312,7 @@ void PairULSPH::PreCompute() {
 				}
 
 				// velocity gradient L
-				Ltmp = dv * g.transpose();
+				Ltmp = -dv * g.transpose();
 				L[i] += jvol * Ltmp;
 
 				// deformation gradient F in Eulerian frame
@@ -417,7 +418,7 @@ void PairULSPH::PreCompute() {
 
 				/*
 				 * accumulate strain increments
-				 * we abuse the atom array "tlsph_fold" for this purpose, which 3was originally designed to hold the deformation gradient.
+				 * we abuse the atom array "tlsph_fold" for this purpose, which was originally designed to hold the deformation gradient.
 				 */
 				D = update->dt * 0.5 * (L[i] + L[i].transpose());
 				atom_data9[i][0] += D(0, 0); // xx
@@ -523,7 +524,13 @@ void PairULSPH::compute(int eflag, int vflag) {
 		}
 	}
 
-	PairULSPH::PreCompute(); // get velocity gradient
+	if (density_summation) {
+		PreCompute_DensitySummation();
+	}
+	if (velocity_gradient) {
+		PairULSPH::PreCompute(); // get velocity gradient
+	}
+
 	PairULSPH::ComputePressure();
 
 	/*
@@ -619,8 +626,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				 * force -- the classical SPH way
 				 */
 
-				//f_stress = ivol * jvol * (stressTensor[i] * K[i] + stressTensor[j] * K[j]) * g;
-				f_stress = ivol * jvol * S * g;
+				f_stress = -ivol * jvol * S * g; // DO NOT TOUCH SIGN
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
@@ -647,8 +653,9 @@ void PairULSPH::compute(int eflag, int vflag) {
 				r0Sq = dx0.squaredNorm();
 				du = dx - dx0;
 
-				if ((hourglass_amplitude[itype] > 0.0) && (gradient_correction_possible[i] == true)
-						&& (gradient_correction_possible[j] == true)) {
+//				if ((hourglass_amplitude[itype] > 0.0) && (gradient_correction_possible[i] == true)
+//						&& (gradient_correction_possible[j] == true)) {
+				if (true) {
 
 					du_est = 0.5 * (F[i] + F[j]) * dx;
 					gamma = du_est - du;
@@ -678,17 +685,18 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 					hg_mag *= -ivol * jvol * wf; // hg_mag has dimensions [J*m^(-1)] = [N]
 					f_hg = (hg_mag / (r + 0.01 * h)) * dx;
+					//printf("hg_mag = %f\n", hg_mag);
 				} else {
 					f_hg.setZero();
 				}
 
-				sumForces = f_stress + f_visc; // + f_hg;
+				sumForces = f_stress + f_visc + f_hg;
 
 				// energy rate -- project velocity onto force vector
 				deltaE = 0.5 * sumForces.dot(dv);
 
 				// change in mass density
-				drho[i] -= rho[i] * jvol * wfd * delVdotDelR;
+				drho[i] += rho[i] * jvol * wfd * delVdotDelR; // positive sign here is consistent with negative sign for f_stress DO NOT TOUCH SIGN
 
 				// apply forces to pair of particles
 				f[i][0] += sumForces(0);
@@ -706,7 +714,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 					f[j][1] -= sumForces(1);
 					f[j][2] -= sumForces(2);
 					de[j] += deltaE;
-					drho[j] -= rho[j] * ivol * wfd * delVdotDelR;
+					drho[j] += rho[j] * ivol * wfd * delVdotDelR;
 
 					shepardWeight[j] += ivol * wf;
 					smoothVel[j] -= ivol * wf * dvint;
@@ -790,8 +798,11 @@ void PairULSPH::ComputePressure() {
 
 				break;
 			case EOS_PERFECT_GAS:
-
 				PerfectGasEOS(Lookup[EOS_PERFECT_GAS_GAMMA][itype], vol, rmass[i], e[i], newPressure, c0[i]);
+				break;
+			case EOS_LINEAR:
+				newPressure = Lookup[BULK_MODULUS][itype] * rho[i] / Lookup[REFERENCE_DENSITY][itype] - 1.0;
+				c0[i] = Lookup[REFERENCE_SOUNDSPEED][itype];
 				break;
 			}
 
@@ -825,8 +836,23 @@ void PairULSPH::ComputePressure() {
 					error->one(FLERR, "unknown strength model.");
 					break;
 				case STRENGTH_LINEAR:
-					stressRateDev = -2.0 * Lookup[SHEAR_MODULUS][itype] * d_dev;
+
+					// here in a version with pressure part
+//					stressRateDev = Lookup[BULK_MODULUS][itype] * d_iso * eye + 2.0 * Lookup[SHEAR_MODULUS][itype] * d_dev;
+//					c0[i] = Lookup[REFERENCE_SOUNDSPEED][itype];
+//					newPressure = 0.0;
+
+					// here only stress deviator
+					stressRateDev = 2.0 * Lookup[SHEAR_MODULUS][itype] * d_dev;
 					//cout << "stress rate deviator is " << endl << stressRateDev << endl;
+					break;
+
+				case STRENGTH_LINEAR_PLASTIC:
+					yieldStress = Lookup[YIELD_STRENGTH][itype] + Lookup[HARDENING_PARAMETER][itype] * eff_plastic_strain[i];
+					LinearPlasticStrength(Lookup[SHEAR_MODULUS][itype], yieldStress, oldStressDeviator, d_dev, dt,
+							newStressDeviator, stressRateDev, plastic_strain_increment);
+					eff_plastic_strain[i] += plastic_strain_increment;
+
 					break;
 				case STRENGTH_VISCOSITY_NEWTON:
 					oldStressDeviator.setZero();
@@ -917,8 +943,17 @@ void PairULSPH::allocate() {
  ------------------------------------------------------------------------- */
 
 void PairULSPH::settings(int narg, char **arg) {
-	if (narg != 0)
-		error->all(FLERR, "Illegal pair_style command");
+	if (narg != 1)
+		error->all(FLERR, "Illegal ulsph pair_style command");
+
+	if (strcmp(arg[0], "*DENSITY_SUMMATION") == 0) {
+		density_summation = true;
+	} else if (strcmp(arg[0], "*VELOCITY_GRADIENT") == 0) {
+		velocity_gradient = true;
+	} else {
+		error->all(FLERR, "Illegal settings keyword for pair style ulsph");
+	}
+
 }
 
 /* ----------------------------------------------------------------------
@@ -1092,7 +1127,44 @@ void PairULSPH::coeff(int narg, char **arg) {
 					printf("%60s : %g\n", "Heat Capacity Ratio Gamma", Lookup[EOS_PERFECT_GAS_GAMMA][itype]);
 				}
 			} // end Perfect Gas EOS
+			else if (strcmp(arg[ioffset], "*EOS_LINEAR") == 0) {
+
+				/*
+				 * Linear EOS
+				 */
+
+				eos[itype] = EOS_LINEAR;
+
+				t = string("*");
+				iNextKwd = -1;
+				for (iarg = ioffset + 1; iarg < narg; iarg++) {
+					s = string(arg[iarg]);
+					if (s.compare(0, t.length(), t) == 0) {
+						iNextKwd = iarg;
+						break;
+					}
+				}
+
+				if (iNextKwd < 0) {
+					sprintf(str, "no *KEYWORD terminates *EOS_LINEAR");
+					error->all(FLERR, str);
+				}
+
+				if (iNextKwd - ioffset != 0 + 1) {
+					sprintf(str, "expected 0 arguments following *EOS_LINEAR but got %d\n", iNextKwd - ioffset - 1);
+					error->all(FLERR, str);
+				}
+
+				if (comm->me == 0) {
+					printf("\n%60s\n", "Linear EOS");
+					printf("%60s : %g\n", "Bulk modulus", Lookup[BULK_MODULUS][itype]);
+				}
+			} // end Linear EOS
 			else if (strcmp(arg[ioffset], "*STRENGTH_LINEAR_PLASTIC") == 0) {
+
+				if (velocity_gradient != true) {
+					error->all(FLERR, "A strength model was requested but *VELOCITY_GRADIENT is not set");
+				}
 
 				/*
 				 * linear elastic / ideal plastic material model with strength
@@ -1118,32 +1190,37 @@ void PairULSPH::coeff(int narg, char **arg) {
 					error->all(FLERR, str);
 				}
 
-				if (iNextKwd - ioffset != 4 + 1) {
-					sprintf(str, "expected 4 arguments following *STRENGTH_LINEAR_PLASTIC but got %d\n", iNextKwd - ioffset - 1);
+				if (iNextKwd - ioffset != 3 + 1) {
+					sprintf(str, "expected 3 arguments following *STRENGTH_LINEAR_PLASTIC but got %d\n", iNextKwd - ioffset - 1);
 					error->all(FLERR, str);
 				}
 
-				Lookup[POISSON_RATIO][itype] = force->numeric(FLERR, arg[ioffset + 2]);
-				Lookup[YIELD_STRENGTH][itype] = force->numeric(FLERR, arg[ioffset + 3]);
-				Lookup[HARDENING_PARAMETER][itype] = force->numeric(FLERR, arg[ioffset + 4]);
+				Lookup[SHEAR_MODULUS][itype] = force->numeric(FLERR, arg[ioffset + 1]);
+				Lookup[YIELD_STRENGTH][itype] = force->numeric(FLERR, arg[ioffset + 2]);
+				Lookup[HARDENING_PARAMETER][itype] = force->numeric(FLERR, arg[ioffset + 3]);
 
-				Lookup[LAME_LAMBDA][itype] = Lookup[YOUNGS_MODULUS][itype] * Lookup[POISSON_RATIO][itype]
-						/ ((1.0 + Lookup[POISSON_RATIO][itype] * (1.0 - 2.0 * Lookup[POISSON_RATIO][itype])));
-				Lookup[SHEAR_MODULUS][itype] = Lookup[YOUNGS_MODULUS][itype] / (2.0 * (1.0 + Lookup[POISSON_RATIO][itype]));
-				Lookup[M_MODULUS][itype] = Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype];
+				//Lookup[POISSON_RATIO][itype] = force->numeric(FLERR, arg[ioffset + 2]);
+				//Lookup[LAME_LAMBDA][itype] = Lookup[YOUNGS_MODULUS][itype] * Lookup[POISSON_RATIO][itype]
+				//		/ ((1.0 + Lookup[POISSON_RATIO][itype] * (1.0 - 2.0 * Lookup[POISSON_RATIO][itype])));
+				//Lookup[SHEAR_MODULUS][itype] = Lookup[YOUNGS_MODULUS][itype] / (2.0 * (1.0 + Lookup[POISSON_RATIO][itype]));
+				//Lookup[M_MODULUS][itype] = Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype];
 
 				if (comm->me == 0) {
 					printf("\n%60s\n", "linear elastic / ideal plastic material mode");
-					printf("%60s : %g\n", "Youngs modulus", Lookup[YOUNGS_MODULUS][itype]);
-					printf("%60s : %g\n", "poisson_ratio", Lookup[POISSON_RATIO][itype]);
+					//printf("%60s : %g\n", "Youngs modulus", Lookup[YOUNGS_MODULUS][itype]);
+					//printf("%60s : %g\n", "poisson_ratio", Lookup[POISSON_RATIO][itype]);
 					printf("%60s : %g\n", "yield_strength", Lookup[YIELD_STRENGTH][itype]);
 					printf("%60s : %g\n", "constant hardening parameter", Lookup[HARDENING_PARAMETER][itype]);
-					printf("%60s : %g\n", "Lame constant lambda", Lookup[LAME_LAMBDA][itype]);
+					//printf("%60s : %g\n", "Lame constant lambda", Lookup[LAME_LAMBDA][itype]);
 					printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
 					printf("%60s : %g\n", "p-wave modulus", Lookup[M_MODULUS][itype]);
 				}
 			} // end *STRENGTH_LINEAR_PLASTIC
 			else if (strcmp(arg[ioffset], "*STRENGTH_LINEAR") == 0) {
+
+				if (velocity_gradient != true) {
+					error->all(FLERR, "A strength model was requested but *VELOCITY_GRADIENT is not set");
+				}
 
 				/*
 				 * linear elastic / ideal plastic material model with strength
@@ -1178,6 +1255,10 @@ void PairULSPH::coeff(int narg, char **arg) {
 				}
 			} // end *STRENGTH_LINEAR
 			else if (strcmp(arg[ioffset], "*STRENGTH_VISCOSITY_NEWTON") == 0) {
+
+				if (velocity_gradient != true) {
+					error->all(FLERR, "A viscosity model was requested but *VELOCITY_GRADIENT is not set");
+				}
 
 				/*
 				 * linear elastic / ideal plastic material model with strength
@@ -1217,6 +1298,10 @@ void PairULSPH::coeff(int narg, char **arg) {
 				/*
 				 * Gradient correction card
 				 */
+
+				if (velocity_gradient != true) {
+					error->all(FLERR, "A gradient correction can only be used with *VELOCITY_GRADIENT");
+				}
 
 				//printf("reading *GRADIENT_CORRECTION\n");
 				t = string("*");
