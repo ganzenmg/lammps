@@ -94,6 +94,8 @@ void FixSMDTlsphDtReset::setup(int vflag) {
 
 void FixSMDTlsphDtReset::initial_integrate(int vflag) {
 
+	//printf("in adjust_dt: dt = %20.10f\n", update->dt);
+
 	t_elapsed += update->dt;
 }
 
@@ -181,8 +183,8 @@ void FixSMDTlsphDtReset::end_of_step() {
 // if timestep didn't change, just return
 // else reset update->dt and other classes that depend on it
 
-	if (dt == update->dt)
-		return;
+	//if (dt == update->dt)
+	//	return;
 
 	update->dt = dt;
 	if (force->pair)

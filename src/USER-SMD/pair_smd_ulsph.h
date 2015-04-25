@@ -35,7 +35,6 @@ PairStyle(ulsph,PairULSPH)
 #include <Eigen/Eigen>
 #include <Eigen/Dense>
 #include <Eigen/SVD>
-#include <map>
 
 using namespace Eigen;
 using namespace std;
@@ -57,20 +56,19 @@ public:
 	void kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
 	void Poly6Kernel(const double hsq, const double h, const double rsq, double &wf);
 	Matrix3d pseudo_inverse_SVD(Matrix3d);
-	void ComputePressure();
+	void AssembleStressTensor();
 	void *extract(const char *, int &);
 	void PreCompute();
 	void PreCompute_DensitySummation();
 	Matrix3d Deviator(Matrix3d);
-	double effective_longitudinal_modulus(int itype, double dt, double d_iso, double p_rate, Matrix3d d_dev,
-			Matrix3d sigma_dev_rate, double damage);
+	double effective_shear_modulus(const Matrix3d d_dev, const Matrix3d stressRateDev, const int itype);
 
 protected:
 
 	double *c0_type; // reference speed of sound defined per particle type
 	double *rho0; // reference mass density per type
 	double *Q1; // linear artificial viscosity coeff
-	int *eos, *strength; // eos and strength material models
+	int *eos, *viscosity, *strength; // eos and strength material models
 
 	double *onerad_dynamic, *onerad_frozen;
 	double *maxrad_dynamic, *maxrad_frozen;
@@ -79,7 +77,7 @@ protected:
 
 	int nmax; // max number of atoms on this proc
 	int *numNeighs;
-	Matrix3d *K, *artStress;
+	Matrix3d *K;
 	double *shepardWeight, *c0;
 	Vector3d *smoothVel;
 	Matrix3d *stressTensor, *L, *F;
@@ -87,54 +85,50 @@ protected:
 	double dtCFL;
 
 private:
+
+	// enumerate EOSs. MUST BE IN THE RANGE [1000, 2000)
 	enum {
-		STRENGTH_LINEAR = 1000, STRENGTH_LINEAR_PLASTIC = 1001, STRENGTH_NEWTON_VISCOSITY = 1002, STRENGTH_VISCOSITY_NEWTON = 1003
+		EOS_LINEAR = 1000, EOS_PERFECT_GAS = 1001, EOS_TAIT = 1002,
 	};
+
+	// enumerate physical viscosity models. MUST BE IN THE RANGE [2000, 3000)
 	enum {
-		EOS_LINEAR = 2000
+		VISCOSITY_NEWTON = 2000
+	};
+
+	// enumerate strength models. MUST BE IN THE RANGE [3000, 4000)
+	enum {
+		STRENGTH_LINEAR = 3000, STRENGTH_LINEAR_PLASTIC = 3001
 	};
 
 	// enumerate some quantitities and associate these with integer values such that they can be used for lookup in an array structure
 	enum {
 		NONE = 0,
-		EOS_PERFECT_GAS = 1,
-		EOS_TAIT = 2,
-		VISCOSITY_LINEAR = 3,
-		STRENGTH = 4,
-		BULK_MODULUS = 5,
-		HOURGLASS_CONTROL_AMPLITUDE = 6,
-		EOS_TAIT_EXPONENT = 7,
-		REFERENCE_SOUNDSPEED = 8,
-		REFERENCE_DENSITY = 9,
-		EOS_PERFECT_GAS_GAMMA = 10,
-		SHEAR_MODULUS = 11,
-		YIELD_STRENGTH = 12,
-		YOUNGS_MODULUS = 13,
-		POISSON_RATIO = 14,
-		LAME_LAMBDA = 15,
-		HEAT_CAPACITY = 16,
-		M_MODULUS = 17,
-		HARDENING_PARAMETER = 18,
-		VISCOSITY_MU = 19,
-		MAX_KEY_VALUE = 20
+		BULK_MODULUS = 1,
+		HOURGLASS_CONTROL_AMPLITUDE = 2,
+		EOS_TAIT_EXPONENT = 3,
+		REFERENCE_SOUNDSPEED = 4,
+		REFERENCE_DENSITY = 5,
+		EOS_PERFECT_GAS_GAMMA = 6,
+		SHEAR_MODULUS = 7,
+		YIELD_STRENGTH = 8,
+		YOUNGS_MODULUS = 9,
+		POISSON_RATIO = 10,
+		LAME_LAMBDA = 11,
+		HEAT_CAPACITY = 12,
+		M_MODULUS = 13,
+		HARDENING_PARAMETER = 14,
+		VISCOSITY_MU = 15,
+		MAX_KEY_VALUE = 16
 	};
 	double **Lookup; // holds per-type material parameters for the quantities defined in enum statement above.
 
-	double *delete_flag;
-	double *pressure;
-	typedef std::map<std::pair<std::string, int>, double> Dict;
-	Dict matProp2;
-	double SafeLookup(std::string str, int itype);
-	bool CheckKeywordPresent(std::string str, int itype);
-
 	double *hourglass_amplitude;
-	bool *gradient_correction;
 	bool artificial_stress_flag; // artificial stress is needed for material models with strength
 	bool velocity_gradient_required;
 	int updateFlag; // indicates if any relative particle pair movement is significant compared to smoothing length
 
-	bool *gradient_correction_possible;
-	bool density_summation, velocity_gradient;
+	bool density_summation, velocity_gradient, gradient_correction_flag;
 
 };
 
