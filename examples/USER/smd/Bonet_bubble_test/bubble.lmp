@@ -4,7 +4,7 @@
 variable        rho equal 1000 # mass density of water dropt
 variable        h equal 0.08 # characteristic smoothing length, used here only for determining 
 variable        K equal 2e5 # bulk modulus of the fluid
-variable        hg equal 0 # hourglass control coefficient, zero for fluids.
+variable        hg equal 0 # hourglass control coefficient, must be zero for fluids.
 variable        art_visc equal 0.0 # We can set the artificial viscosity to zero if physical visc. is present.
 # ----
 variable        c0 equal sqrt(${K}/${rho}) # speed of sound
@@ -26,7 +26,8 @@ read_data       disc_adjusted.data # read a geometry.
 
 # this is an updated-Lagrangian pair style with Tait EOS and physical viscosity.
 pair_style      ulsph *VELOCITY_GRADIENT *NO_GRADIENT_CORRECTION
-pair_coeff      1 1 *COMMON ${rho} ${c0} ${art_visc} 0 ${hg} &
+#                           density speed_of_sound artif.visc.  heat.capacity hourglass
+pair_coeff      1 1 *COMMON ${rho}  ${c0}          ${art_visc}  0             ${hg} &
 		*VISCOSITY_NEWTON 100.0 &
 		*EOS_TAIT 7 &
 	        *END
@@ -72,4 +73,4 @@ velocity        all ramp vy    -1 1 y -1.0 1.0 units box
 #velocity       all set 0 -1 0 units box
 #fix             ywall all wall/reflect ylo -1.0
 
-run 50000
+run 10000

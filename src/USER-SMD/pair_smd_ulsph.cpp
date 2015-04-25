@@ -71,7 +71,6 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	smoothVel = NULL;
 	numNeighs = NULL;
 	F = NULL;
-	hourglass_amplitude = NULL;
 
 	artificial_stress_flag = false; // turn off artificial stress correction by default
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
@@ -92,7 +91,6 @@ PairULSPH::~PairULSPH() {
 		memory->destroy(viscosity);
 		memory->destroy(strength);
 		memory->destroy(c0_type);
-		memory->destroy(hourglass_amplitude);
 		memory->destroy(Lookup);
 
 		delete[] onerad_dynamic;
@@ -437,9 +435,9 @@ void PairULSPH::compute(int eflag, int vflag) {
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
 	Vector3d fi, fj, dx, dv, f_stress, g, vinti, vintj, dvint;
-	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new;
+	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new, gi, gj;
 	Vector3d gamma, f_hg, dx0, du_est, du;
-	double gamma_dot_dx, hg_mag;
+	double gamma_dot_dx, hg_mag, drho_i, drho_j;
 
 	// double ini_dist, weight;
 	// double *contact_radius = atom->contact_radius;
@@ -528,7 +526,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 		jnum = numneigh[i];
 		ivol = rmass[i] / rho[i];
 
-
 		// initialize Eigen data structures from LAMMPS data structures
 		for (iDim = 0; iDim < 3; iDim++) {
 			xi(iDim) = x[i][iDim];
@@ -569,8 +566,19 @@ void PairULSPH::compute(int eflag, int vflag) {
 				// uncorrected kernel gradient
 				g = (wfd / r) * dx;
 
-				// symmetric stress
-				S = stressTensor[i] + stressTensor[j];
+				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
+
+				if (gradient_correction_flag) {
+					gi = K[i] * g;
+					gj = K[j] * g;
+					f_stress = -ivol * jvol * (stressTensor[i] * gi + stressTensor[j] * gj); // DO NOT TOUCH SIGN
+					drho_i = rho[i] * jvol * dv.dot(gi);
+					drho_j = rho[j] * ivol * dv.dot(gj);
+				} else {
+					f_stress = -ivol * jvol * (stressTensor[i] + stressTensor[j]) * g; // DO NOT TOUCH SIGN
+					drho_i = rho[i] * jvol * wfd * delVdotDelR;
+					drho_j = rho[j] * ivol * wfd * delVdotDelR;
+				}
 
 				/*
 				 * artificial stress to control tensile instability
@@ -590,20 +598,14 @@ void PairULSPH::compute(int eflag, int vflag) {
 //					V = es.eigenvectors();
 //					S = V * D * V.inverse();
 //				}
-				/*
-				 * force -- the classical SPH way
-				 */
-
-				f_stress = -ivol * jvol * S * g; // DO NOT TOUCH SIGN
 
 				/*
 				 * artificial viscosity -- alpha is dimensionless
 				 * MonaghanBalsara form of the artificial viscosity
 				 */
 
-				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
-				c_ij = 0.5 * (c0[i] + c0[j]);
 
+				c_ij = 0.5 * (c0[i] + c0[j]);
 				LimitDoubleMagnitude(delVdotDelR, 1.1 * c_ij);
 
 				mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
@@ -621,10 +623,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 				r0Sq = dx0.squaredNorm();
 				du = dx - dx0;
 
-//				if ((hourglass_amplitude[itype] > 0.0) && (gradient_correction_possible[i] == true)
-//						&& (gradient_correction_possible[j] == true)) {
-				if (true) {
-
+				if ((Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] > 0.0) && (Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype] > 0.0)) {
 					du_est = 0.5 * (F[i] + F[j]) * dx;
 					gamma = du_est - du;
 
@@ -661,10 +660,10 @@ void PairULSPH::compute(int eflag, int vflag) {
 				sumForces = f_stress + f_visc + f_hg;
 
 				// energy rate -- project velocity onto force vector
-				deltaE = 0.5 * sumForces.dot(dv);
+				deltaE = sumForces.dot(dv);
 
 				// change in mass density
-				drho[i] += rho[i] * jvol * wfd * delVdotDelR; // positive sign here is consistent with negative sign for f_stress DO NOT TOUCH SIGN
+				drho[i] += drho_i;
 
 				// apply forces to pair of particles
 				f[i][0] += sumForces(0);
@@ -682,7 +681,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 					f[j][1] -= sumForces(1);
 					f[j][2] -= sumForces(2);
 					de[j] += deltaE;
-					drho[j] += rho[j] * ivol * wfd * delVdotDelR;
+					drho[j] += drho_j;
 
 					shepardWeight[j] += ivol * wf;
 					smoothVel[j] -= ivol * wf * dvint;
@@ -694,10 +693,10 @@ void PairULSPH::compute(int eflag, int vflag) {
 					ev_tally_xyz(i, j, nlocal, 0, 0.0, 0.0, sumForces(0), sumForces(1), sumForces(2), dx(0), dx(1), dx(2));
 				}
 
-				// check if a particle  has moved too much w.r.t another particle
-				if (du.norm() > 10.5 * dx0.norm()) {
-					updateFlag = 1;
-				}
+				// check if a particle  has moved too much w.r.t another particle ... deactivated for now.
+				//if (du.norm() > 10.5 * dx0.norm()) {
+				//	updateFlag = 1;
+				//}
 			}
 
 		}
@@ -871,8 +870,6 @@ void PairULSPH::AssembleStressTensor() {
 				// estimate effective shear modulus for time step stability
 				G_eff = effective_shear_modulus(d_dev, stressRateDev, itype);
 
-
-
 			} // end if (viscosity[itype] != NONE)
 
 			/*
@@ -884,10 +881,9 @@ void PairULSPH::AssembleStressTensor() {
 			/*
 			 * kernel gradient correction
 			 */
-			if (gradient_correction_flag) {
-				stressTensor[i] = stressTensor[i] * K[i];
-			}
-
+//			if (gradient_correction_flag) {
+//				stressTensor[i] = stressTensor[i] * K[i];
+//			}
 			/*
 			 * stable timestep based on speed-of-sound
 			 */
@@ -923,7 +919,6 @@ void PairULSPH::allocate() {
 	memory->create(eos, n + 1, "pair:eosmodel");
 	memory->create(viscosity, n + 1, "pair:viscositymodel");
 	memory->create(strength, n + 1, "pair:strengthmodel");
-	memory->create(hourglass_amplitude, n + 1, "pair:hourglass_correction");
 	memory->create(Lookup, MAX_KEY_VALUE, n + 1, "pair:LookupTable");
 
 	memory->create(cutsq, n + 1, n + 1, "pair:cutsq");		// always needs to be allocated, even with granular neighborlist
@@ -1314,6 +1309,21 @@ void PairULSPH::coeff(int narg, char **arg) {
 		rho0[itype] = Lookup[REFERENCE_DENSITY][itype];
 		c0_type[itype] = Lookup[REFERENCE_SOUNDSPEED][itype];
 		setflag[itype][itype] = 1;
+
+		/*
+		 * error checks
+		 */
+
+		if ((viscosity[itype] != NONE) && (strength[itype] != NONE)) {
+			sprintf(str, "cannot have both a strength and viscosity model for particle type %d", itype);
+			error->all(FLERR, str);
+		}
+
+		if (eos[itype] == NONE) {
+			sprintf(str, "must specify an EOS for particle type %d", itype);
+			error->all(FLERR, str);
+		}
+
 	} else {
 		/*
 		 * we are reading a cross-interaction line for particle types i, j
@@ -1608,14 +1618,14 @@ double PairULSPH::effective_shear_modulus(const Matrix3d d_dev, const Matrix3d s
 	double shear_rate_sq;
 
 	if (domain->dimension == 3) {
-		G_eff = 0.5 * (stressRateDev(0, 1) / (d_dev(0, 1) + 1.0e-16) + stressRateDev(0, 2) / (d_dev(0, 2) + 1.0e-16)
-				+ stressRateDev(1, 2) / (d_dev(1, 2) + 1.0e-16));
+		G_eff = 0.5
+				* (stressRateDev(0, 1) / (d_dev(0, 1) + 1.0e-16) + stressRateDev(0, 2) / (d_dev(0, 2) + 1.0e-16)
+						+ stressRateDev(1, 2) / (d_dev(1, 2) + 1.0e-16));
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1) + d_dev(0, 2) * d_dev(0, 2) + d_dev(1, 2) * d_dev(1, 2);
 	} else {
 		G_eff = 0.5 * (stressRateDev(0, 1) / (d_dev(0, 1)));
 		shear_rate_sq = d_dev(0, 1) * d_dev(0, 1);
 	}
-
 
 	/*
 	 * Take care of the special case that the shear rate is very small, in which case the effective

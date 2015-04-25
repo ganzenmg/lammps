@@ -123,7 +123,6 @@ private:
 	};
 	double **Lookup; // holds per-type material parameters for the quantities defined in enum statement above.
 
-	double *hourglass_amplitude;
 	bool artificial_stress_flag; // artificial stress is needed for material models with strength
 	bool velocity_gradient_required;
 	int updateFlag; // indicates if any relative particle pair movement is significant compared to smoothing length

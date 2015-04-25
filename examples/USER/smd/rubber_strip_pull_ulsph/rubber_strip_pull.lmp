@@ -4,7 +4,7 @@
 variable        l0 equal 1.0 # lattice spacing for creating particles
 variable        rho equal 1 # initial mass density
 variable        G equal 0.3 # Poisson ratio
-variable        SIGY equal 0.03
+variable        SIGY equal 0.3
 variable        HARD equal 0.0
 variable        h equal 2.01*${l0} # SPH smoothing kernel diameter
 variable        vol_one equal ${l0}^2 # volume of one particle
@@ -13,7 +13,7 @@ variable        skin equal 0.9*${l0} # Verlet list range
 variable        vel equal 0.005 # pull velocity
 variable        c0 equal 1.0
 variable        crad equal ${l0}/2.0
-variable        hg equal 20.0
+variable        hg equal 2.0
 
 units           si # si means: a consistent system of units is used. Here: mm / GPa / ms
 dimension       2 # this is a 2d plane-strain simulation
@@ -41,11 +41,10 @@ group           top region top # top row of particles
 group           bot region bot # bottom row of particles
 group           tlsph union all
 
-pair_style      ulsph *VELOCITY_GRADIENT
+pair_style      ulsph *VELOCITY_GRADIENT *YES_GRADIENT_CORRECTION
 pair_coeff      1 1 *COMMON ${rho} ${c0} 1.0 1 ${hg} &
                 *EOS_LINEAR &
 		*STRENGTH_LINEAR_PLASTIC ${G} ${SIGY} ${HARD} &
-		*GRADIENT_CORRECTION &
 	        *END
 
 compute         S all smd/ulsph_stress # Cauchy stress tensor
