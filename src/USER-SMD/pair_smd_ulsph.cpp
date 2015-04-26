@@ -55,6 +55,8 @@ using namespace SMD_Math;
 using namespace Eigen;
 
 #define ARTIFICIAL_STRESS false
+#define FORMAT1 "%60s : %g\n"
+#define FORMAT2 "\n.............................. %s \n"
 
 PairULSPH::PairULSPH(LAMMPS *lmp) :
 		Pair(lmp) {
@@ -71,12 +73,13 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	smoothVel = NULL;
 	numNeighs = NULL;
 	F = NULL;
+	rho = NULL;
 
 	artificial_stress_flag = false; // turn off artificial stress correction by default
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
 	density_summation = velocity_gradient = false;
 
-	comm_forward = 26; // this pair style communicates 20 doubles to ghost atoms
+	comm_forward = 24; // this pair style communicates 20 doubles to ghost atoms
 	updateFlag = 0;
 }
 
@@ -106,6 +109,7 @@ PairULSPH::~PairULSPH() {
 		delete[] L;
 		delete[] numNeighs;
 		delete[] F;
+		delete[] rho;
 
 	}
 }
@@ -121,7 +125,6 @@ void PairULSPH::PreCompute_DensitySummation() {
 	double *radius = atom->radius;
 	double **x = atom->x;
 	double *rmass = atom->rmass;
-	double *rho = atom->rho;
 	int *type = atom->type;
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
@@ -132,8 +135,10 @@ void PairULSPH::PreCompute_DensitySummation() {
 
 	// zero accumulators
 	for (i = 0; i < nlocal; i++) {
-		numNeighs[i] = 0;
+		rho[i] = 0.0;
 	}
+
+	//printf("... doing density summation\n");
 
 	/*
 	 * only recompute mass density if density summation is used.
@@ -182,13 +187,11 @@ void PairULSPH::PreCompute_DensitySummation() {
 				if (setflag[itype][itype] == 1) {
 					rho[i] += wf * rmass[j];
 				}
-				numNeighs[i] += 1;
 
 				if (j < nlocal) {
 					if (setflag[jtype][jtype] == 1) {
 						rho[j] += wf * rmass[i];
 					}
-					numNeighs[j] += 1;
 				}
 			}
 		} // end if check distance
@@ -208,8 +211,7 @@ void PairULSPH::PreCompute() {
 	double **x = atom->x;
 	double **x0 = atom->x0;
 	double **v = atom->vest;
-	double *rmass = atom->rmass;
-	double *rho = atom->rho;
+	double *vfrac = atom->vfrac;
 	int *type = atom->type;
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
@@ -233,7 +235,6 @@ void PairULSPH::PreCompute() {
 			}
 
 			L[i].setZero();
-			numNeighs[i] = 0;
 			F[i].setZero();
 		}
 	}
@@ -250,7 +251,7 @@ void PairULSPH::PreCompute() {
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 		irad = radius[i];
-		ivol = rmass[i] / rho[i];
+		ivol = vfrac[i];
 
 		// initialize Eigen data structures from LAMMPS data structures
 		for (idim = 0; idim < 3; idim++) {
@@ -276,11 +277,7 @@ void PairULSPH::PreCompute() {
 
 				r = sqrt(rSq);
 				jtype = type[j];
-				jvol = rmass[j] / rho[j];
-
-//				if (itype != jtype) {
-//					error->one(FLERR, "type of particle i does not equal type of particle j. Something is very wrong.");
-//				}
+				jvol = vfrac[j];
 
 				// distance vectors in current and reference configuration, velocity difference
 				dv = vj - vi;
@@ -307,8 +304,6 @@ void PairULSPH::PreCompute() {
 				Ftmp = du * g.transpose();
 				F[i] += jvol * Ftmp;
 
-				numNeighs[i] += 1;
-
 				if (j < nlocal) {
 
 					if (gradient_correction_flag) {
@@ -317,7 +312,6 @@ void PairULSPH::PreCompute() {
 
 					L[j] += ivol * Ltmp;
 					F[j] += ivol * Ftmp;
-					numNeighs[j] += 1;
 				}
 			} // end if check distance
 		} // end loop over j
@@ -350,6 +344,8 @@ void PairULSPH::PreCompute() {
 						es.compute(K2di);
 						if ((fabs(es.eigenvalues()(0)) > 0.1) && (fabs(es.eigenvalues()(1)) > 0.1)) {
 							Shape_Matrix_Inversion_Success = true;
+						} else {
+							cout << endl << "eigenvalues of K: " << endl << es.eigenvalues() << endl;
 						}
 					}
 
@@ -361,8 +357,12 @@ void PairULSPH::PreCompute() {
 						K[i](1, 1) = K2di(1, 1);
 						K[i](2, 2) = 1.0;
 					} else {
-						cout << "we have a problem with K; this is K" << endl << K2d << endl;
+						cout << endl << "we have a problem with K; this is K" << endl << K2d << endl;
+						cout << "this is Ki" << endl << K2di << endl;
+						printf("this is the determinant %g\n", K2d.determinant());
+
 						K[i].setIdentity();
+						error->one(FLERR, "");
 					}
 
 				} else { // 3d
@@ -418,14 +418,13 @@ void PairULSPH::compute(int eflag, int vflag) {
 	double **v = atom->vest;
 	double **vint = atom->v; // Velocity-Verlet algorithm velocities
 	double **f = atom->f;
+	double *vfrac = atom->vfrac;
 	double *de = atom->de;
-	double *drho = atom->drho;
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
 	double *plastic_strain = atom->eff_plastic_strain;
 	double **atom_data9 = atom->tlsph_fold;
 
-	double *rho = atom->rho;
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
 	int i, j, ii, jj, jnum, itype, jtype, iDim, inum;
@@ -435,9 +434,9 @@ void PairULSPH::compute(int eflag, int vflag) {
 	int *ilist, *jlist, *numneigh;
 	int **firstneigh;
 	Vector3d fi, fj, dx, dv, f_stress, g, vinti, vintj, dvint;
-	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new, gi, gj;
+	Vector3d xi, xj, vi, vj, f_visc, sumForces, f_stress_new;
 	Vector3d gamma, f_hg, dx0, du_est, du;
-	double gamma_dot_dx, hg_mag, drho_i, drho_j;
+	double gamma_dot_dx, hg_mag;
 
 	// double ini_dist, weight;
 	// double *contact_radius = atom->contact_radius;
@@ -469,6 +468,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 		numNeighs = new int[nmax];
 		delete[] F;
 		F = new Matrix3d[nmax];
+		delete[] rho;
+		rho = new double[nmax];
 	}
 
 // zero accumulators
@@ -496,7 +497,29 @@ void PairULSPH::compute(int eflag, int vflag) {
 		PreCompute_DensitySummation();
 	}
 	if (velocity_gradient) {
-		PairULSPH::PreCompute(); // get velocity gradient
+		PairULSPH::PreCompute(); // get velocity gradient and kernel gradient correction
+	}
+
+	/*
+	 * now we either have rho recomputed from scratch, or we know the volumetric strain increment.
+	 */
+
+	if (velocity_gradient) {
+		for (i = 0; i < nlocal; i++) {
+			itype = type[i];
+			if (setflag[itype][itype]) {
+				D = 0.5 * (L[i] + L[i].transpose());
+				double vol_increment = vfrac[i] * update->dt * D.trace(); // Jacobian of deformation
+				vfrac[i] += vol_increment;
+			}
+		}
+	} else {
+		for (i = 0; i < nlocal; i++) {
+			itype = type[i];
+			if (setflag[itype][itype]) {
+				vfrac[i] = rmass[i] / rho[i];
+			}
+		}
 	}
 
 	PairULSPH::AssembleStressTensor();
@@ -524,7 +547,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 		itype = type[i];
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
-		ivol = rmass[i] / rho[i];
+		ivol = vfrac[i];
 
 		// initialize Eigen data structures from LAMMPS data structures
 		for (iDim = 0; iDim < 3; iDim++) {
@@ -554,7 +577,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 				r = sqrt(rSq);
 				jtype = type[j];
-				jvol = rmass[j] / rho[j];
+				jvol = vfrac[j];
 
 				// distance vectors in current and reference configuration, velocity difference
 				dv = vj - vi;
@@ -568,17 +591,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 
 				delVdotDelR = dx.dot(dv) / (r + 0.1 * h); // project relative velocity onto unit particle distance vector [m/s]
 
-				if (gradient_correction_flag) {
-					gi = K[i] * g;
-					gj = K[j] * g;
-					f_stress = -ivol * jvol * (stressTensor[i] * gi + stressTensor[j] * gj); // DO NOT TOUCH SIGN
-					drho_i = rho[i] * jvol * dv.dot(gi);
-					drho_j = rho[j] * ivol * dv.dot(gj);
-				} else {
-					f_stress = -ivol * jvol * (stressTensor[i] + stressTensor[j]) * g; // DO NOT TOUCH SIGN
-					drho_i = rho[i] * jvol * wfd * delVdotDelR;
-					drho_j = rho[j] * ivol * wfd * delVdotDelR;
-				}
+				f_stress = -ivol * jvol * (stressTensor[i] + stressTensor[j]) * g; // DO NOT TOUCH SIGN
 
 				/*
 				 * artificial stress to control tensile instability
@@ -598,18 +611,16 @@ void PairULSPH::compute(int eflag, int vflag) {
 //					V = es.eigenvectors();
 //					S = V * D * V.inverse();
 //				}
-
 				/*
 				 * artificial viscosity -- alpha is dimensionless
 				 * MonaghanBalsara form of the artificial viscosity
 				 */
 
-
 				c_ij = 0.5 * (c0[i] + c0[j]);
 				LimitDoubleMagnitude(delVdotDelR, 1.1 * c_ij);
 
 				mu_ij = h * delVdotDelR / (r + 0.1 * h); // units: [m * m/s / m = m/s]
-				rho_ij = 0.5 * (rho[i] + rho[j]);
+				rho_ij = 0.5 * (rmass[i] / ivol + rmass[j] / jvol);
 				visc_magnitude = 0.5 * (Q1[itype] + Q1[jtype]) * c_ij * mu_ij / rho_ij;
 				f_visc = -rmass[i] * rmass[j] * visc_magnitude * g;
 
@@ -662,9 +673,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 				// energy rate -- project velocity onto force vector
 				deltaE = sumForces.dot(dv);
 
-				// change in mass density
-				drho[i] += drho_i;
-
 				// apply forces to pair of particles
 				f[i][0] += sumForces(0);
 				f[i][1] += sumForces(1);
@@ -681,7 +689,6 @@ void PairULSPH::compute(int eflag, int vflag) {
 					f[j][1] -= sumForces(1);
 					f[j][2] -= sumForces(2);
 					de[j] += deltaE;
-					drho[j] += drho_j;
 
 					shepardWeight[j] += ivol * wf;
 					smoothVel[j] -= ivol * wf * dvint;
@@ -724,7 +731,7 @@ void PairULSPH::compute(int eflag, int vflag) {
  ------------------------------------------------------------------------- */
 void PairULSPH::AssembleStressTensor() {
 	double *radius = atom->radius;
-	double *rho = atom->rho;
+	double *vfrac = atom->vfrac;
 	double *rmass = atom->rmass;
 	double *eff_plastic_strain = atom->eff_plastic_strain;
 	double **tlsph_stress = atom->tlsph_stress;
@@ -742,6 +749,7 @@ void PairULSPH::AssembleStressTensor() {
 	double G_eff = 0.0; // effective shear modulus
 	double K_eff; // effective bulk modulus
 	double M, p_wave_speed;
+	double rho;
 
 	dtCFL = 1.0e22;
 	eye.setIdentity();
@@ -752,7 +760,8 @@ void PairULSPH::AssembleStressTensor() {
 		itype = type[i];
 		if (setflag[itype][itype] == 1) {
 			stressTensor[i].setZero();
-			vol = rmass[i] / rho[i];
+			vol = vfrac[i];
+			rho = rmass[i] / vfrac[i];
 
 			switch (eos[itype]) {
 			default:
@@ -764,7 +773,7 @@ void PairULSPH::AssembleStressTensor() {
 				break;
 			case EOS_TAIT:
 				TaitEOS_density(Lookup[EOS_TAIT_EXPONENT][itype], Lookup[REFERENCE_SOUNDSPEED][itype],
-						Lookup[REFERENCE_DENSITY][itype], rho[i], newPressure, c0[i]);
+						Lookup[REFERENCE_DENSITY][itype], rho, newPressure, c0[i]);
 				//printf("new pressure =%f\n", newPressure);
 
 				break;
@@ -772,12 +781,12 @@ void PairULSPH::AssembleStressTensor() {
 				PerfectGasEOS(Lookup[EOS_PERFECT_GAS_GAMMA][itype], vol, rmass[i], e[i], newPressure, c0[i]);
 				break;
 			case EOS_LINEAR:
-				newPressure = Lookup[BULK_MODULUS][itype] * rho[i] / Lookup[REFERENCE_DENSITY][itype] - 1.0;
+				newPressure = Lookup[BULK_MODULUS][itype] * rho / Lookup[REFERENCE_DENSITY][itype] - 1.0;
 				c0[i] = Lookup[REFERENCE_SOUNDSPEED][itype];
 				break;
 			}
 
-			K_eff = c0[i] * c0[i] * rho[i]; // effective bulk modulus
+			K_eff = c0[i] * c0[i] * rho; // effective bulk modulus
 
 			/*
 			 * ******************************* STRENGTH MODELS ************************************************
@@ -881,15 +890,15 @@ void PairULSPH::AssembleStressTensor() {
 			/*
 			 * kernel gradient correction
 			 */
-//			if (gradient_correction_flag) {
-//				stressTensor[i] = stressTensor[i] * K[i];
-//			}
+			if (gradient_correction_flag) {
+				stressTensor[i] = stressTensor[i] * K[i];
+			}
 			/*
 			 * stable timestep based on speed-of-sound
 			 */
 
 			M = K_eff + 4.0 * G_eff / 3.0;
-			p_wave_speed = sqrt(M / rho[i]);
+			p_wave_speed = sqrt(M / rho);
 
 			dtCFL = MIN(radius[i] / p_wave_speed, dtCFL);
 
@@ -940,21 +949,43 @@ void PairULSPH::settings(int narg, char **arg) {
 		error->all(FLERR, "Illegal number of arguments for pair_style ulsph");
 	}
 
+	if (comm->me == 0) {
+		printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
+		printf("... SMD / ULSPH PROPERTIES\n\n");
+	}
+
 	if (strcmp(arg[0], "*DENSITY_SUMMATION") == 0) {
 		density_summation = true;
+		if (comm->me == 0)
+			printf("... density summation active\n");
 	} else if (strcmp(arg[0], "*VELOCITY_GRADIENT") == 0) {
 		velocity_gradient = true;
+		if (comm->me == 0)
+			printf("... density continuity and computation of velocity gradient active\n");
 	} else {
-		error->all(FLERR, "Illegal settings keyword for pair style ulsph");
+		error->all(FLERR,
+				"Illegal settings keyword for first keyword of pair style ulsph. Must be either *DENSITY_SUMMATION or *VELOCITY_GRADIENT");
 	}
 
 	if (strcmp(arg[1], "*YES_GRADIENT_CORRECTION") == 0) {
 		gradient_correction_flag = true;
+		if (comm->me == 0)
+			printf("... first order correction of kernel gradients is active\n");
 	} else if (strcmp(arg[1], "*NO_GRADIENT_CORRECTION") == 0) {
 		gradient_correction_flag = false;
+		if (comm->me == 0)
+			printf("... first order correction of kernel gradients is NOT active\n");
 	} else {
 		error->all(FLERR, "Illegal settings keyword for pair style ulsph");
 	}
+
+	// error check
+	if ((gradient_correction_flag == true) && (density_summation)) {
+		error->all(FLERR, "Cannot use *DENSITY_SUMMATION in combination with *YES_GRADIENT_CORRECTION");
+	}
+
+	if (comm->me == 0)
+		printf(">>========>>========>>========>>========>>========>>========>>========>>========\n");
 
 }
 
@@ -983,8 +1014,10 @@ void PairULSPH::coeff(int narg, char **arg) {
 		itype = force->inumeric(FLERR, arg[0]);
 		eos[itype] = viscosity[itype] = strength[itype] = NONE;
 
-		if (comm->me == 0)
-			printf("\n******************SMD / ULSPH PROPERTIES OF PARTICLE TYPE %d **************************\n", itype);
+		if (comm->me == 0) {
+			printf("\n>>========>>========>>========>>========>>========>>========>>========>>========\n");
+			printf("...SMD / ULSPH PROPERTIES OF PARTICLE TYPE %d\n\n", itype);
+		}
 
 		/*
 		 * read parameters which are common -- regardless of material / eos model
@@ -1029,29 +1062,28 @@ void PairULSPH::coeff(int narg, char **arg) {
 				* Lookup[REFERENCE_DENSITY][itype];
 
 		if (comm->me == 0) {
-			printf("\n material unspecific properties for SMD/ULSPH definition of particle type %d:\n", itype);
-			printf("%40s : %g\n", "reference density", Lookup[REFERENCE_DENSITY][itype]);
-			printf("%40s : %g\n", "reference speed of sound", Lookup[REFERENCE_SOUNDSPEED][itype]);
-			printf("%40s : %g\n", "linear viscosity coefficient", Q1[itype]);
-			printf("%40s : %g\n", "heat capacity [energy / (mass * temperature)]", Lookup[HEAT_CAPACITY][itype]);
-			printf("%40s : %g\n", "bulk modulus", Lookup[BULK_MODULUS][itype]);
-			printf("%40s : %g\n", "hourglass control amplitude", Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype]);
+			printf("material unspecific properties for SMD/ULSPH definition of particle type %d:\n", itype);
+			printf(FORMAT1, "reference density", Lookup[REFERENCE_DENSITY][itype]);
+			printf(FORMAT1, "reference speed of sound", Lookup[REFERENCE_SOUNDSPEED][itype]);
+			printf(FORMAT1, "linear viscosity coefficient", Q1[itype]);
+			printf(FORMAT1, "heat capacity [energy / (mass * temperature)]", Lookup[HEAT_CAPACITY][itype]);
+			printf(FORMAT1, "bulk modulus", Lookup[BULK_MODULUS][itype]);
+			printf(FORMAT1, "hourglass control amplitude", Lookup[HOURGLASS_CONTROL_AMPLITUDE][itype]);
 		}
 
 		/*
 		 * read following material cards
 		 */
 
-		if (comm->me == 0) {
-			printf("next kwd is %s\n", arg[iNextKwd]);
-		}
-
+//		if (comm->me == 0) {
+//			printf("next kwd is %s\n", arg[iNextKwd]);
+//		}
 		while (true) {
 			if (strcmp(arg[iNextKwd], "*END") == 0) {
-				if (comm->me == 0) {
-					sprintf(str, "found *END");
-					error->message(FLERR, str);
-				}
+//				if (comm->me == 0) {
+//					sprintf(str, "found *END");
+//					error->message(FLERR, str);
+//				}
 				break;
 			}
 
@@ -1088,8 +1120,8 @@ void PairULSPH::coeff(int narg, char **arg) {
 				Lookup[EOS_TAIT_EXPONENT][itype] = force->numeric(FLERR, arg[ioffset + 1]);
 
 				if (comm->me == 0) {
-					printf("\n%60s\n", "Tait EOS");
-					printf("%60s : %g\n", "Exponent", Lookup[EOS_TAIT_EXPONENT][itype]);
+					printf(FORMAT2, "Tait EOS");
+					printf(FORMAT1, "Exponent", Lookup[EOS_TAIT_EXPONENT][itype]);
 				}
 			} // end Tait EOS
 
@@ -1125,8 +1157,8 @@ void PairULSPH::coeff(int narg, char **arg) {
 				Lookup[EOS_PERFECT_GAS_GAMMA][itype] = force->numeric(FLERR, arg[ioffset + 1]);
 
 				if (comm->me == 0) {
-					printf("\n%60s\n", "Perfect Gas EOS");
-					printf("%60s : %g\n", "Heat Capacity Ratio Gamma", Lookup[EOS_PERFECT_GAS_GAMMA][itype]);
+					printf(FORMAT2, "Perfect Gas EOS");
+					printf(FORMAT1, "Heat Capacity Ratio Gamma", Lookup[EOS_PERFECT_GAS_GAMMA][itype]);
 				}
 			} // end Perfect Gas EOS
 			else if (strcmp(arg[ioffset], "*EOS_LINEAR") == 0) {
@@ -1158,8 +1190,8 @@ void PairULSPH::coeff(int narg, char **arg) {
 				}
 
 				if (comm->me == 0) {
-					printf("\n%60s\n", "Linear EOS");
-					printf("%60s : %g\n", "Bulk modulus", Lookup[BULK_MODULUS][itype]);
+					printf(FORMAT2, "Linear EOS");
+					printf(FORMAT1, "Bulk modulus", Lookup[BULK_MODULUS][itype]);
 				}
 			} // end Linear EOS
 			else if (strcmp(arg[ioffset], "*STRENGTH_LINEAR_PLASTIC") == 0) {
@@ -1201,21 +1233,11 @@ void PairULSPH::coeff(int narg, char **arg) {
 				Lookup[YIELD_STRENGTH][itype] = force->numeric(FLERR, arg[ioffset + 2]);
 				Lookup[HARDENING_PARAMETER][itype] = force->numeric(FLERR, arg[ioffset + 3]);
 
-				//Lookup[POISSON_RATIO][itype] = force->numeric(FLERR, arg[ioffset + 2]);
-				//Lookup[LAME_LAMBDA][itype] = Lookup[YOUNGS_MODULUS][itype] * Lookup[POISSON_RATIO][itype]
-				//		/ ((1.0 + Lookup[POISSON_RATIO][itype] * (1.0 - 2.0 * Lookup[POISSON_RATIO][itype])));
-				//Lookup[SHEAR_MODULUS][itype] = Lookup[YOUNGS_MODULUS][itype] / (2.0 * (1.0 + Lookup[POISSON_RATIO][itype]));
-				//Lookup[M_MODULUS][itype] = Lookup[LAME_LAMBDA][itype] + 2.0 * Lookup[SHEAR_MODULUS][itype];
-
 				if (comm->me == 0) {
-					printf("\n%60s\n", "linear elastic / ideal plastic material mode");
-					//printf("%60s : %g\n", "Youngs modulus", Lookup[YOUNGS_MODULUS][itype]);
-					//printf("%60s : %g\n", "poisson_ratio", Lookup[POISSON_RATIO][itype]);
-					printf("%60s : %g\n", "yield_strength", Lookup[YIELD_STRENGTH][itype]);
-					printf("%60s : %g\n", "constant hardening parameter", Lookup[HARDENING_PARAMETER][itype]);
-					//printf("%60s : %g\n", "Lame constant lambda", Lookup[LAME_LAMBDA][itype]);
-					printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
-					printf("%60s : %g\n", "p-wave modulus", Lookup[M_MODULUS][itype]);
+					printf(FORMAT2, "linear elastic / ideal plastic material mode");
+					printf(FORMAT1, "yield_strength", Lookup[YIELD_STRENGTH][itype]);
+					printf(FORMAT1, "constant hardening parameter", Lookup[HARDENING_PARAMETER][itype]);
+					printf(FORMAT1, "shear modulus", Lookup[SHEAR_MODULUS][itype]);
 				}
 			} // end *STRENGTH_LINEAR_PLASTIC
 			else if (strcmp(arg[ioffset], "*STRENGTH_LINEAR") == 0) {
@@ -1252,8 +1274,8 @@ void PairULSPH::coeff(int narg, char **arg) {
 				Lookup[SHEAR_MODULUS][itype] = force->numeric(FLERR, arg[ioffset + 1]);
 
 				if (comm->me == 0) {
-					printf("\n%60s\n", "linear elastic strength model");
-					printf("%60s : %g\n", "shear modulus", Lookup[SHEAR_MODULUS][itype]);
+					printf(FORMAT2, "linear elastic strength model");
+					printf(FORMAT1, "shear modulus", Lookup[SHEAR_MODULUS][itype]);
 				}
 			} // end *STRENGTH_LINEAR
 			else if (strcmp(arg[ioffset], "*VISCOSITY_NEWTON") == 0) {
@@ -1290,8 +1312,8 @@ void PairULSPH::coeff(int narg, char **arg) {
 				Lookup[VISCOSITY_MU][itype] = force->numeric(FLERR, arg[ioffset + 1]);
 
 				if (comm->me == 0) {
-					printf("\n%60s\n", "Newton viscosity model");
-					printf("%60s : %g\n", "viscosity mu", Lookup[VISCOSITY_MU][itype]);
+					printf(FORMAT2, "Newton viscosity model");
+					printf(FORMAT1, "viscosity mu", Lookup[VISCOSITY_MU][itype]);
 				}
 			} // end *STRENGTH_VISCOSITY_NEWTON
 
@@ -1354,6 +1376,10 @@ void PairULSPH::coeff(int narg, char **arg) {
 
 		setflag[itype][jtype] = 1;
 		setflag[jtype][itype] = 1;
+
+		if (comm->me == 0) {
+			printf(">>========>>========>>========>>========>>========>>========>>========>>========\n");
+		}
 
 	}
 }
@@ -1438,23 +1464,30 @@ double PairULSPH::memory_usage() {
 /* ---------------------------------------------------------------------- */
 
 int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
-	double *rho = atom->rho;
+	double *vfrac = atom->vfrac;
 	double *eff_plastic_strain = atom->eff_plastic_strain;
 	int i, j, m;
 
-//printf("packing comm\n");
+	//printf("packing comm\n");
 	m = 0;
 	for (i = 0; i < n; i++) {
 		j = list[i];
-		buf[m++] = rho[j];
+		buf[m++] = vfrac[j];
 		buf[m++] = c0[j]; //2
 
-		buf[m++] = stressTensor[j](0, 0);
+		buf[m++] = stressTensor[j](0, 0); // pack symmetric stress tensor
 		buf[m++] = stressTensor[j](1, 1);
 		buf[m++] = stressTensor[j](2, 2);
 		buf[m++] = stressTensor[j](0, 1);
 		buf[m++] = stressTensor[j](0, 2);
-		buf[m++] = stressTensor[j](1, 2); //8
+		buf[m++] = stressTensor[j](1, 2); // 2 + 6 = 8
+
+		buf[m++] = K[j](0, 0); // pack symmetric kernel gradient correction matrix
+		buf[m++] = K[j](1, 1);
+		buf[m++] = K[j](2, 2);
+		buf[m++] = K[j](0, 1);
+		buf[m++] = K[j](0, 2);
+		buf[m++] = K[j](1, 2); // 8 + 6 + 14
 
 		buf[m++] = F[j](0, 0); // F is not symmetric
 		buf[m++] = F[j](0, 1);
@@ -1464,9 +1497,9 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 		buf[m++] = F[j](1, 2);
 		buf[m++] = F[j](2, 0);
 		buf[m++] = F[j](2, 1);
-		buf[m++] = F[j](2, 2); // 8 + 9 = 17
+		buf[m++] = F[j](2, 2); // 14 + 9 = 23
 
-		buf[m++] = eff_plastic_strain[j]; // 18
+		buf[m++] = eff_plastic_strain[j]; // 24
 	}
 	return m;
 }
@@ -1474,25 +1507,35 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 /* ---------------------------------------------------------------------- */
 
 void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
-	double *rho = atom->rho;
+	double *vfrac = atom->vfrac;
 	double *eff_plastic_strain = atom->eff_plastic_strain;
 	int i, m, last;
 
 	m = 0;
 	last = first + n;
 	for (i = first; i < last; i++) {
-		rho[i] = buf[m++];
-		c0[i] = buf[m++];
+		vfrac[i] = buf[m++];
+		c0[i] = buf[m++]; // 2
 
 		stressTensor[i](0, 0) = buf[m++];
 		stressTensor[i](1, 1) = buf[m++];
 		stressTensor[i](2, 2) = buf[m++];
 		stressTensor[i](0, 1) = buf[m++];
 		stressTensor[i](0, 2) = buf[m++];
-		stressTensor[i](1, 2) = buf[m++];
+		stressTensor[i](1, 2) = buf[m++]; // 2 + 6 = 8
 		stressTensor[i](1, 0) = stressTensor[i](0, 1);
 		stressTensor[i](2, 0) = stressTensor[i](0, 2);
 		stressTensor[i](2, 1) = stressTensor[i](1, 2);
+
+		K[i](0, 0) = buf[m++];
+		K[i](1, 1) = buf[m++];
+		K[i](2, 2) = buf[m++];
+		K[i](0, 1) = buf[m++];
+		K[i](0, 2) = buf[m++];
+		K[i](1, 2) = buf[m++]; // 8 + 6 = 14
+		K[i](1, 0) = K[i](0, 1);
+		K[i](2, 0) = K[i](0, 2);
+		K[i](2, 1) = K[i](1, 2);
 
 		F[i](0, 0) = buf[m++];
 		F[i](0, 1) = buf[m++];
@@ -1502,9 +1545,9 @@ void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
 		F[i](1, 2) = buf[m++];
 		F[i](2, 0) = buf[m++];
 		F[i](2, 1) = buf[m++];
-		F[i](2, 2) = buf[m++];
+		F[i](2, 2) = buf[m++]; // 14 + 9 = 23
 
-		eff_plastic_strain[i] = buf[m++];
+		eff_plastic_strain[i] = buf[m++]; // 24
 	}
 }
 

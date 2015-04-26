@@ -78,7 +78,7 @@ protected:
 	int nmax; // max number of atoms on this proc
 	int *numNeighs;
 	Matrix3d *K;
-	double *shepardWeight, *c0;
+	double *shepardWeight, *c0, *rho;
 	Vector3d *smoothVel;
 	Matrix3d *stressTensor, *L, *F;
 

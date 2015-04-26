@@ -41,7 +41,7 @@ ComputeSMDContactRadius::ComputeSMDContactRadius(LAMMPS *lmp, int narg, char **a
   Compute(lmp, narg, arg)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute smd/contact_radius command");
-  if (atom->rho_flag != 1) error->all(FLERR,"compute smd/contact_radius command requires atom_style with contact_radius (e.g. smd)");
+  if (atom->contact_radius_flag != 1) error->all(FLERR,"compute smd/contact_radius command requires atom_style with contact_radius (e.g. smd)");
 
   peratom_flag = 1;
   size_peratom_cols = 0;

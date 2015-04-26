@@ -4,7 +4,7 @@
 variable        l0 equal 1.0 # lattice spacing for creating particles
 variable        rho equal 1 # initial mass density
 variable        G equal 0.3 # Poisson ratio
-variable        SIGY equal 0.3
+variable        SIGY equal 0.03
 variable        HARD equal 0.0
 variable        h equal 2.01*${l0} # SPH smoothing kernel diameter
 variable        vol_one equal ${l0}^2 # volume of one particle

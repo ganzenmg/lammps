@@ -258,8 +258,6 @@ void FixSMDIntegrateTlsph::final_integrate() {
 	double **f = atom->f;
 	double *e = atom->e;
 	double *de = atom->de;
-	double *rho = atom->rho;
-	double *drho = atom->drho;
 	double *rmass = atom->rmass;
 	int *mask = atom->mask;
 	int nlocal = atom->nlocal;
@@ -287,9 +285,6 @@ void FixSMDIntegrateTlsph::final_integrate() {
 			}
 
 			e[i] += dtv * de[i];
-			rho[i] += dtv * drho[i]; // ... and density
-
-
 		}
 	}
 }

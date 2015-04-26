@@ -52,8 +52,8 @@ using namespace FixConst;
 FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
 
-	if ((atom->e_flag != 1) || (atom->rho_flag != 1))
-		error->all(FLERR, "fix smd/integrate_ulsph command requires atom_style with both energy and density");
+	if ((atom->e_flag != 1) || (atom->vfrac_flag != 1))
+		error->all(FLERR, "fix smd/integrate_ulsph command requires atom_style with both energy and volume");
 
 	if (narg < 3)
 		error->all(FLERR, "Illegal number of arguments for fix smd/integrate_ulsph command");
@@ -115,7 +115,7 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 	}
 
 	// set comm sizes needed by this fix
-	comm_forward = 3;
+	comm_forward = 1;
 	atom->add_callback(0);
 
 	time_integrate = 1;
@@ -143,17 +143,10 @@ void FixSMDIntegrateUlsph::init() {
  ------------------------------------------------------------------------- */
 
 void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
-	// update v and x and rho and e of atoms in group
-
 	double **x = atom->x;
-	double **x0 = atom->x0;
 	double **v = atom->v;
 	double **f = atom->f;
 	double **vest = atom->vest;
-	double *rho = atom->rho;
-	double *drho = atom->drho;
-	double *e = atom->e;
-	double *de = atom->de;
 	double *rmass = atom->rmass;
 
 	int *mask = atom->mask;
@@ -161,26 +154,6 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 	int i, itmp;
 	double dtfm, vsq, scale;
 	double vxsph_x, vxsph_y, vxsph_z;
-
-	/*
-	 * update the reference configuration if needed
-	 */
-
-	int *updateFlag_ptr = (int *) force->pair->extract("smd/ulsph/updateFlag_ptr", itmp);
-	if (updateFlag_ptr == NULL) {
-		error->one(FLERR,
-				"fix smd/integrate_ulsph failed to access updateFlag pointer. Check if a pair style exist which calculates this quantity.");
-	}
-
-	// sum all update flag across processors
-	int updateFlag = 0;
-	MPI_Allreduce(updateFlag_ptr, &updateFlag, 1, MPI_INT, MPI_MAX, world);
-
-	if (updateFlag > 0) {
-		if (comm->me == 0) {
-			printf("updating ref config at step: %ld\n", update->ntimestep);
-		}
-	}
 
 	/*
 	 * get smoothed velocities from ULSPH pair style
@@ -201,9 +174,6 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 		if (mask[i] & groupbit) {
 			dtfm = dtf / rmass[i];
 
-			//e[i] += dtf * de[i]; // half-step update of particle internal energy
-			//rho[i] += dtf * drho[i]; // ... and density
-
 			v[i][0] += dtfm * f[i][0];
 			v[i][1] += dtfm * f[i][1];
 			v[i][2] += dtfm * f[i][2];
@@ -220,16 +190,6 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 					vest[i][1] = v[i][1];
 					vest[i][2] = v[i][2];
 				}
-			}
-
-			/*
-			 * store current coords in x0
-			 */
-
-			if (updateFlag > 0) {
-				x0[i][0] = x[i][0];
-				x0[i][1] = x[i][1];
-				x0[i][2] = x[i][2];
 			}
 
 			if (xsphFlag) {
@@ -260,26 +220,17 @@ void FixSMDIntegrateUlsph::initial_integrate(int vflag) {
 			}
 		}
 	}
-
-// update of reference config has changed x0
-// communicate these quantities now to ghosts
-	comm->forward_comm_fix(this);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixSMDIntegrateUlsph::final_integrate() {
-
-// update v, rho, and e of atoms in group
-
 	double **v = atom->v;
 	double **f = atom->f;
 	double *e = atom->e;
 	double *de = atom->de;
-	double *rho = atom->rho;
-	double *drho = atom->drho;
+	double *vfrac = atom->vfrac;
 	double *radius = atom->radius;
-	double *contact_radius = atom->contact_radius;
 	int *mask = atom->mask;
 	int nlocal = atom->nlocal;
 	if (igroup == atom->firstgroup)
@@ -316,25 +267,27 @@ void FixSMDIntegrateUlsph::final_integrate() {
 			}
 
 			e[i] += dtf * de[i];
-			rho[i] += dtf * drho[i];
 
 			if (adjust_radius_flag) {
-				radius[i] = adjust_radius_factor * pow(rmass[i] / rho[i], 1. / domain->dimension); // Monaghan approach for setting the radius
-//				double dh = - (adjust_radius_factor/domain->dimension) *
-//						pow(rmass[i] / rho[i], 1. / domain->dimension) * (1.0 / rho[i]) * drho[i];
-//				radius[i] += dh * dtv;
+				radius[i] = adjust_radius_factor * pow(vfrac[i], 1. / domain->dimension); // Monaghan approach for setting the radius
 			}
 
-			if (nn[i] < 20) {
-				radius[i] *= 1.01;
-			} //else if (nn[i] > 35) {
-			//	radius[i] /= 1.01;
-			//}
+
+//			if (nn[i] < 25) {
+//				//printf("NN=%d, increasing radius from %g ", nn[i], radius[i]);
+//				radius[i] *= 1.01;
+//				//printf(" to %g\n", radius[i]);
+//			}
 
 			//radius[i] = MAX(radius[i], 1.5*contact_radius[i]);
 //			radius[i] = MIN(radius[i], 4.0*contact_radius[i]);
 
 		}
+	}
+
+	// might have changed radius above, communicate updated radius to ghosts
+	if (adjust_radius_flag) {
+		comm->forward_comm_fix(this);
 	}
 }
 
@@ -349,15 +302,12 @@ void FixSMDIntegrateUlsph::reset_dt() {
 
 int FixSMDIntegrateUlsph::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	int i, j, m;
-	double **x0 = atom->x0;
+	double *radius = atom->radius;
 
-//printf("in FixSMDIntegrateTlsph::pack_forward_comm\n");
 	m = 0;
 	for (i = 0; i < n; i++) {
 		j = list[i];
-		buf[m++] = x0[j][0];
-		buf[m++] = x0[j][1];
-		buf[m++] = x0[j][2];
+		buf[m++] = radius[j];
 	}
 	return m;
 }
@@ -366,14 +316,12 @@ int FixSMDIntegrateUlsph::pack_forward_comm(int n, int *list, double *buf, int p
 
 void FixSMDIntegrateUlsph::unpack_forward_comm(int n, int first, double *buf) {
 	int i, m, last;
-	double **x0 = atom->x0;
+	double *radius = atom->radius;
 
-//printf("in FixSMDIntegrateTlsph::unpack_forward_comm\n");
+	//printf("in FixSMDIntegrateUlsph::unpack_forward_comm\n");
 	m = 0;
 	last = first + n;
 	for (i = first; i < last; i++) {
-		x0[i][0] = buf[m++];
-		x0[i][1] = buf[m++];
-		x0[i][2] = buf[m++];
+		radius[i] = buf[m++];
 	}
 }

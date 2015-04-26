@@ -41,7 +41,7 @@ ComputeSMDRho::ComputeSMDRho(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute smd/rho command");
-  if (atom->rho_flag != 1) error->all(FLERR,"compute smd/rho command requires atom_style with density (e.g. smd)");
+  if (atom->vfrac_flag != 1) error->all(FLERR,"compute smd/rho command requires atom_style with volume (e.g. smd)");
 
   peratom_flag = 1;
   size_peratom_cols = 0;
@@ -84,13 +84,14 @@ void ComputeSMDRho::compute_peratom()
     vector_atom = rhoVector;
   }
 
-  double *rho = atom->rho;
+  double *vfrac = atom->vfrac;
+  double *rmass = atom->rmass;
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
 
     for (int i = 0; i < nlocal; i++) {
       if (mask[i] & groupbit) {
-              rhoVector[i] = rho[i];
+              rhoVector[i] = rmass[i] / vfrac[i];
       }
       else {
               rhoVector[i] = 0.0;
