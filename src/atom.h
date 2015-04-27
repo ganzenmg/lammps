@@ -76,10 +76,10 @@ class Atom : protected Pointers {
   double *rho,*drho,*e,*de,*cv;
   double **vest;
 
-  // USER-SPH2 package
+  // USER-SMD package
   double *contact_radius;
-  double **tlsph_fold;
-  double **tlsph_stress;
+  double **smd_data_9;
+  double **smd_stress;
   double *eff_plastic_strain;
   double *eff_plastic_strain_rate;
   double *damage;
@@ -131,12 +131,12 @@ class Atom : protected Pointers {
   int cs_flag,csforce_flag,vforce_flag,ervelforce_flag,etag_flag;
   int rho_flag,e_flag,cv_flag,vest_flag;
 
-  // USER-SPH2 package
-  int contact_radius_flag;
-  int tlsph_fold_flag;
-  int tlsph_stress_flag;
-  int x0_flag;
+  // USER-SMD package
   int smd_flag;
+  int contact_radius_flag;
+  int smd_data_9_flag;
+  int smd_stress_flag;
+  int x0_flag;
   int eff_plastic_strain_flag;
   int eff_plastic_strain_rate_flag;
   int damage_flag;

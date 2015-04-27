@@ -53,8 +53,6 @@ public:
 	virtual double memory_usage();
 	int pack_forward_comm(int, int *, double *, int, int *);
 	void unpack_forward_comm(int, int, double *);
-	void kernel_and_derivative(const double h, const double r, double &wf, double &wfd);
-	void Poly6Kernel(const double hsq, const double h, const double rsq, double &wf);
 	Matrix3d pseudo_inverse_SVD(Matrix3d);
 	void AssembleStressTensor();
 	void *extract(const char *, int &);

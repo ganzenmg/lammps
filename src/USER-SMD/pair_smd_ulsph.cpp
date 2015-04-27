@@ -79,7 +79,7 @@ PairULSPH::PairULSPH(LAMMPS *lmp) :
 	velocity_gradient_required = false; // turn off computation of velocity gradient by default
 	density_summation = velocity_gradient = false;
 
-	comm_forward = 24; // this pair style communicates 20 doubles to ghost atoms
+	comm_forward = 18; // this pair style communicates 20 doubles to ghost atoms
 	updateFlag = 0;
 }
 
@@ -150,8 +150,9 @@ void PairULSPH::PreCompute_DensitySummation() {
 			// initialize particle density with self-contribution.
 			h = 2.0 * radius[i];
 			hsq = h * h;
-			Poly6Kernel(hsq, h, 0.0, wf);
+			Poly6Kernel(hsq, h, 0.0, domain->dimension, wf);
 			rho[i] = wf * rmass[i];
+			//printf("SIC to rho is %f\n", rho[i]);
 		}
 	}
 
@@ -182,7 +183,7 @@ void PairULSPH::PreCompute_DensitySummation() {
 			if (rSq < hsq) {
 
 				jtype = type[j];
-				Poly6Kernel(hsq, h, rSq, wf);
+				Poly6Kernel(hsq, h, rSq, domain->dimension, wf);
 
 				if (setflag[itype][itype] == 1) {
 					rho[i] += wf * rmass[j];
@@ -206,7 +207,7 @@ void PairULSPH::PreCompute_DensitySummation() {
  ---------------------------------------------------------------------- */
 
 void PairULSPH::PreCompute() {
-	double **atom_data9 = atom->tlsph_fold;
+	double **atom_data9 = atom->smd_data_9;
 	double *radius = atom->radius;
 	double **x = atom->x;
 	double **x0 = atom->x0;
@@ -284,7 +285,8 @@ void PairULSPH::PreCompute() {
 				dx0 = x0j - x0i;
 
 				// kernel and derivative
-				kernel_and_derivative(h, r, wf, wfd);
+				//kernel_and_derivative(h, r, wf, wfd);
+				spiky_kernel_and_derivative(h, r, domain->dimension, wf, wfd);
 
 				// uncorrected kernel gradient
 				g = (wfd / r) * dx;
@@ -338,14 +340,14 @@ void PairULSPH::PreCompute() {
 					K2d(1, 0) = K[i](1, 0);
 					K2d(1, 1) = K[i](1, 1);
 
-					if (fabs(K2d.determinant()) > 1.0e-16) {
+					if (fabs(K2d.determinant()) > 1.0e-2) {
 						K2di = K2d.inverse();
 						// check if inverse of K2d is reasonable
-						es.compute(K2di);
-						if ((fabs(es.eigenvalues()(0)) > 0.1) && (fabs(es.eigenvalues()(1)) > 0.1)) {
+						es.compute(K2d);
+						if ((fabs(es.eigenvalues()(0)) > 1.0e-1) && (fabs(es.eigenvalues()(1)) > 1.0e-1)) {
 							Shape_Matrix_Inversion_Success = true;
 						} else {
-							cout << endl << "eigenvalues of K: " << endl << es.eigenvalues() << endl;
+							//cout << endl << "eigenvalues of K: " << endl << es.eigenvalues() << endl;
 						}
 					}
 
@@ -357,12 +359,12 @@ void PairULSPH::PreCompute() {
 						K[i](1, 1) = K2di(1, 1);
 						K[i](2, 2) = 1.0;
 					} else {
-						cout << endl << "we have a problem with K; this is K" << endl << K2d << endl;
-						cout << "this is Ki" << endl << K2di << endl;
-						printf("this is the determinant %g\n", K2d.determinant());
+						//cout << endl << "we have a problem with K; this is K" << endl << K2d << endl;
+						//cout << "this is Ki" << endl << K2di << endl;
+						//printf("this is the determinant %g\n", K2d.determinant());
 
 						K[i].setIdentity();
-						error->one(FLERR, "");
+						//error->one(FLERR, "");
 					}
 
 				} else { // 3d
@@ -394,7 +396,7 @@ void PairULSPH::PreCompute() {
 
 				/*
 				 * accumulate strain increments
-				 * we abuse the atom array "tlsph_fold" for this purpose, which was originally designed to hold the deformation gradient.
+				 * we abuse the atom array "atom_data_9" for this purpose, which was originally designed to hold the deformation gradient.
 				 */
 				D = update->dt * 0.5 * (L[i] + L[i].transpose());
 				atom_data9[i][0] += D(0, 0); // xx
@@ -423,7 +425,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	double *rmass = atom->rmass;
 	double *radius = atom->radius;
 	double *plastic_strain = atom->eff_plastic_strain;
-	double **atom_data9 = atom->tlsph_fold;
+	double **atom_data9 = atom->smd_data_9;
 
 	int *type = atom->type;
 	int nlocal = atom->nlocal;
@@ -494,6 +496,7 @@ void PairULSPH::compute(int eflag, int vflag) {
 	}
 
 	if (density_summation) {
+		//printf("dens summ\n");
 		PreCompute_DensitySummation();
 	}
 	if (velocity_gradient) {
@@ -584,7 +587,8 @@ void PairULSPH::compute(int eflag, int vflag) {
 				dvint = vintj - vinti;
 
 				// kernel and derivative
-				kernel_and_derivative(h, r, wf, wfd);
+				//kernel_and_derivative(h, r, wf, wfd);
+				spiky_kernel_and_derivative(h, r, domain->dimension, wf, wfd);
 
 				// uncorrected kernel gradient
 				g = (wfd / r) * dx;
@@ -734,7 +738,7 @@ void PairULSPH::AssembleStressTensor() {
 	double *vfrac = atom->vfrac;
 	double *rmass = atom->rmass;
 	double *eff_plastic_strain = atom->eff_plastic_strain;
-	double **tlsph_stress = atom->tlsph_stress;
+	double **tlsph_stress = atom->smd_stress;
 	double *e = atom->e;
 	int *type = atom->type;
 	double pFinal;
@@ -1482,13 +1486,6 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 		buf[m++] = stressTensor[j](0, 2);
 		buf[m++] = stressTensor[j](1, 2); // 2 + 6 = 8
 
-		buf[m++] = K[j](0, 0); // pack symmetric kernel gradient correction matrix
-		buf[m++] = K[j](1, 1);
-		buf[m++] = K[j](2, 2);
-		buf[m++] = K[j](0, 1);
-		buf[m++] = K[j](0, 2);
-		buf[m++] = K[j](1, 2); // 8 + 6 + 14
-
 		buf[m++] = F[j](0, 0); // F is not symmetric
 		buf[m++] = F[j](0, 1);
 		buf[m++] = F[j](0, 2);
@@ -1497,9 +1494,9 @@ int PairULSPH::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, in
 		buf[m++] = F[j](1, 2);
 		buf[m++] = F[j](2, 0);
 		buf[m++] = F[j](2, 1);
-		buf[m++] = F[j](2, 2); // 14 + 9 = 23
+		buf[m++] = F[j](2, 2); // 8 + 9 = 17
 
-		buf[m++] = eff_plastic_strain[j]; // 24
+		buf[m++] = eff_plastic_strain[j]; // 18
 	}
 	return m;
 }
@@ -1527,16 +1524,6 @@ void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
 		stressTensor[i](2, 0) = stressTensor[i](0, 2);
 		stressTensor[i](2, 1) = stressTensor[i](1, 2);
 
-		K[i](0, 0) = buf[m++];
-		K[i](1, 1) = buf[m++];
-		K[i](2, 2) = buf[m++];
-		K[i](0, 1) = buf[m++];
-		K[i](0, 2) = buf[m++];
-		K[i](1, 2) = buf[m++]; // 8 + 6 = 14
-		K[i](1, 0) = K[i](0, 1);
-		K[i](2, 0) = K[i](0, 2);
-		K[i](2, 1) = K[i](1, 2);
-
 		F[i](0, 0) = buf[m++];
 		F[i](0, 1) = buf[m++];
 		F[i](0, 2) = buf[m++];
@@ -1545,47 +1532,13 @@ void PairULSPH::unpack_forward_comm(int n, int first, double *buf) {
 		F[i](1, 2) = buf[m++];
 		F[i](2, 0) = buf[m++];
 		F[i](2, 1) = buf[m++];
-		F[i](2, 2) = buf[m++]; // 14 + 9 = 23
+		F[i](2, 2) = buf[m++]; // 8 + 9 = 17
 
-		eff_plastic_strain[i] = buf[m++]; // 24
+		eff_plastic_strain[i] = buf[m++]; // 18
 	}
 }
 
-/*
- * compute a normalized smoothing kernel and its derivative
- */
 
-void PairULSPH::kernel_and_derivative(const double h, const double r, double &wf, double &wfd) {
-	double hr = h - r;
-
-	/*
-	 * Spiky kernel
-	 */
-
-	if (domain->dimension == 2) {
-		double h5 = h * h * h * h * h;
-		wf = 3.183098861e0 * hr * hr * hr / h5;
-		wfd = -9.549296583 * hr * hr / h5;
-
-	} else {
-		double h6 = h * h * h * h * h * h;
-		wf = 4.774648292 * hr * hr * hr / h6;
-		wfd = -14.32394487 * hr * hr / h6;
-	}
-}
-
-/*
- * compute a normalized smoothing kernel only
- */
-void PairULSPH::Poly6Kernel(const double hsq, const double h, const double rsq, double &wf) {
-
-	double tmp = hsq - rsq;
-	if (domain->dimension == 2) {
-		wf = tmp * tmp * tmp / (0.7853981635e0 * hsq * hsq * hsq * hsq);
-	} else {
-		wf = tmp * tmp * tmp / (0.6382918409e0 * hsq * hsq * hsq * hsq * h);
-	}
-}
 
 /*
  * Pseudo-inverse via SVD

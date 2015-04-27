@@ -413,7 +413,7 @@ void FixSMDWallSurface::read_triangles(int pass) {
 		/*
 		 * if atom/molecule is in my subbox, create it
 		 * ... use x0 to hold triangle normal.
-		 * ... use tlsph_fold to hold the three vertices
+		 * ... use smd_data_9 to hold the three vertices
 		 * ... use x to hold triangle center
 		 * ... radius is the mmaximal distance from triangle center to all vertices
 		 */
@@ -439,7 +439,7 @@ void FixSMDWallSurface::read_triangles(int pass) {
 			int *type = atom->type;
 			double *radius = atom->radius;
 			double *contact_radius = atom->contact_radius;
-			double **tlsph_fold = atom->tlsph_fold;
+			double **smd_data_9 = atom->smd_data_9;
 			double **x0 = atom->x0;
 
 			radius[ilocal] = r; //ilocal;
@@ -449,15 +449,15 @@ void FixSMDWallSurface::read_triangles(int pass) {
 			x0[ilocal][0] = normal(0);
 			x0[ilocal][1] = normal(1);
 			x0[ilocal][2] = normal(2);
-			tlsph_fold[ilocal][0] = vert[0](0);
-			tlsph_fold[ilocal][1] = vert[0](1);
-			tlsph_fold[ilocal][2] = vert[0](2);
-			tlsph_fold[ilocal][3] = vert[1](0);
-			tlsph_fold[ilocal][4] = vert[1](1);
-			tlsph_fold[ilocal][5] = vert[1](2);
-			tlsph_fold[ilocal][6] = vert[2](0);
-			tlsph_fold[ilocal][7] = vert[2](1);
-			tlsph_fold[ilocal][8] = vert[2](2);
+			smd_data_9[ilocal][0] = vert[0](0);
+			smd_data_9[ilocal][1] = vert[0](1);
+			smd_data_9[ilocal][2] = vert[0](2);
+			smd_data_9[ilocal][3] = vert[1](0);
+			smd_data_9[ilocal][4] = vert[1](1);
+			smd_data_9[ilocal][5] = vert[1](2);
+			smd_data_9[ilocal][6] = vert[2](0);
+			smd_data_9[ilocal][7] = vert[2](1);
+			smd_data_9[ilocal][8] = vert[2](2);
 
 			ilocal++;
 		}

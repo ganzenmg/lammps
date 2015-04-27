@@ -41,7 +41,7 @@ ComputeSMDPlasticStrainRate::ComputeSMDPlasticStrainRate(LAMMPS *lmp, int narg, 
   Compute(lmp, narg, arg)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute smd/plastic_strain command");
-  if (atom->rho_flag != 1) error->all(FLERR,"compute smd/plastic_strain_rate command requires atom_style with plastic_strain_rate (e.g. smd)");
+  if (atom->eff_plastic_strain_rate_flag != 1) error->all(FLERR,"compute smd/plastic_strain_rate command requires atom_style with plastic_strain_rate (e.g. smd)");
 
   peratom_flag = 1;
   size_peratom_cols = 0;

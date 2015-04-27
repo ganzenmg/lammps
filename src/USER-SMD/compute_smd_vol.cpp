@@ -40,7 +40,7 @@ ComputeSMDVol::ComputeSMDVol(LAMMPS *lmp, int narg, char **arg) :
 		Compute(lmp, narg, arg) {
 	if (narg != 3)
 		error->all(FLERR, "Illegal compute smd/volume command");
-	if (atom->rho_flag != 1)
+	if (atom->vfrac_flag != 1)
 		error->all(FLERR, "compute smd/volume command requires atom_style with density (e.g. smd)");
 
 	scalar_flag = 1;
@@ -74,12 +74,12 @@ void ComputeSMDVol::init() {
 void ComputeSMDVol::compute_peratom() {
 	invoked_peratom = update->ntimestep;
 
-	// grow rhoVector array if necessary
+	// grow volVector array if necessary
 
 	if (atom->nlocal > nmax) {
 		memory->sfree(volVector);
 		nmax = atom->nmax;
-		volVector = (double *) memory->smalloc(nmax * sizeof(double), "atom:rhoVector");
+		volVector = (double *) memory->smalloc(nmax * sizeof(double), "atom:volVector");
 		vector_atom = volVector;
 	}
 

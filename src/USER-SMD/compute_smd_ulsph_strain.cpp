@@ -77,7 +77,7 @@ void ComputeSMDULSPHstrain::init() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeSMDULSPHstrain::compute_peratom() {
-	double **atom_data9 = atom->tlsph_fold;
+	double **atom_data9 = atom->smd_data_9; // ULSPH strain is stored in the first 6 entries of this data field
 
 	invoked_peratom = update->ntimestep;
 

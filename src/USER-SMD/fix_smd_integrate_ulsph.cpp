@@ -83,13 +83,29 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
 
 			iarg++;
 			if (iarg == narg) {
-				error->all(FLERR, "expected number following adjust_radius");
+				error->all(FLERR, "expected three numbers following adjust_radius: factor, min, max");
 			}
 
 			adjust_radius_factor = force->numeric(FLERR, arg[iarg]);
-			if (comm->me == 0) {
-				printf("... will adjust smoothing length dynamically with factor %g\n", adjust_radius_factor);
+
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected three numbers following adjust_radius: factor, min, max");
 			}
+
+			min_nn = force->inumeric(FLERR, arg[iarg]);
+
+			iarg++;
+			if (iarg == narg) {
+				error->all(FLERR, "expected three numbers following adjust_radius: factor, min, max");
+			}
+
+			max_nn = force->inumeric(FLERR, arg[iarg]);
+
+			if (comm->me == 0) {
+				printf("... will adjust smoothing length dynamically with factor %g to achieve %d to %d neighbors per particle.\n ", adjust_radius_factor, min_nn, max_nn);
+			}
+
 		} else if (strcmp(arg[iarg], "limit_velocity") == 0) {
 			iarg++;
 			if (iarg == narg) {
@@ -229,8 +245,8 @@ void FixSMDIntegrateUlsph::final_integrate() {
 	double **f = atom->f;
 	double *e = atom->e;
 	double *de = atom->de;
-	double *vfrac = atom->vfrac;
 	double *radius = atom->radius;
+	double *contact_radius = atom->contact_radius;
 	int *mask = atom->mask;
 	int nlocal = atom->nlocal;
 	if (igroup == atom->firstgroup)
@@ -269,18 +285,15 @@ void FixSMDIntegrateUlsph::final_integrate() {
 			e[i] += dtf * de[i];
 
 			if (adjust_radius_flag) {
-				radius[i] = adjust_radius_factor * pow(vfrac[i], 1. / domain->dimension); // Monaghan approach for setting the radius
+				if (nn[i] < min_nn) {
+					radius[i] *= adjust_radius_factor;
+				} else if (nn[i] > max_nn) {
+					radius[i] /= adjust_radius_factor;
+				}
+				radius[i] = MAX(radius[i], 1.25 * contact_radius[i]);
+				radius[i] = MIN(radius[i], 4.0 * contact_radius[i]);
+
 			}
-
-
-//			if (nn[i] < 25) {
-//				//printf("NN=%d, increasing radius from %g ", nn[i], radius[i]);
-//				radius[i] *= 1.01;
-//				//printf(" to %g\n", radius[i]);
-//			}
-
-			//radius[i] = MAX(radius[i], 1.5*contact_radius[i]);
-//			radius[i] = MIN(radius[i], 4.0*contact_radius[i]);
 
 		}
 	}

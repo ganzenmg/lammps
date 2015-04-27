@@ -381,7 +381,11 @@ void PairTlsph::PreCompute() {
 					}
 
 					// normalize average velocity field around an integration point
-					smoothVelDifference[i] /= shepardWeight[i];
+					if (shepardWeight[i] > 0.0) {
+						smoothVelDifference[i] /= shepardWeight[i];
+					} else {
+						smoothVelDifference[i].setZero();
+					}
 
 				} // end if mol[i] > 0
 
@@ -669,7 +673,7 @@ void PairTlsph::AssembleStress() {
 	int *mol = atom->molecule;
 	double *eff_plastic_strain = atom->eff_plastic_strain;
 	double *eff_plastic_strain_rate = atom->eff_plastic_strain_rate;
-	double **tlsph_stress = atom->tlsph_stress;
+	double **tlsph_stress = atom->smd_stress;
 	int *type = atom->type;
 	double *radius = atom->radius;
 	double *damage = atom->damage;
@@ -906,7 +910,7 @@ void PairTlsph::settings(int narg, char **arg) {
 
 	cut_comm = MAX(neighbor->cutneighmax, comm->cutghostuser); // cutoff radius within which ghost atoms are communicated.
 	update_threshold = cut_comm;
-	update_method = UPDATE_CONSTANT_THRESHOLD;
+	update_method = UPDATE_NONE;
 
 	int iarg = 0;
 
@@ -961,6 +965,8 @@ void PairTlsph::settings(int narg, char **arg) {
 		} else if (update_method == UPDATE_PAIRWISE_RATIO) {
 			printf("... will update reference configuration if ratio pairwise distance / smoothing length  exceeds %g\n",
 					update_threshold);
+		} else if (update_method == UPDATE_NONE) {
+			printf("... will never update reference configuration");
 		}
 		printf(
 				">>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========>>========\n");
@@ -2201,11 +2207,11 @@ void PairTlsph::spiky_kernel_and_derivative(const double h, const double r, doub
 	 * Spiky kernel
 	 */
 
-//	if (r >= h) {
-//		//printf("r=%f > h=%f in Spiky kernel\n", r, h);
-//		wf = wfd = 0.0;
-//		return;
-//	}
+	if (r >= h) {
+		//printf("r=%f > h=%f in Spiky kernel\n", r, h);
+		wf = wfd = 0.0;
+		return;
+	}
 	double hr = h - r;		// [m]
 	if (domain->dimension == 2) {
 		double n = 0.3141592654e0 * h * h * h * h * h; // [m^5]

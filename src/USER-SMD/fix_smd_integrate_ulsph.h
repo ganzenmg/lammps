@@ -56,6 +56,7 @@ class FixSMDIntegrateUlsph : public Fix {
   bool xsphFlag;
   bool adjust_radius_flag;
   double adjust_radius_factor;
+  int min_nn, max_nn; // number of SPH neighbors should lie within this interval
 
   class Pair *pair;
 };

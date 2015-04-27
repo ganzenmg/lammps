@@ -98,7 +98,7 @@ void FixSMD_TLSPH_ReferenceConfiguration::pre_exchange() {
 	//return;
 
 	//printf("in FixSMD_TLSPH_ReferenceConfiguration::pre_exchange()\n");
-	double **defgrad0 = atom->tlsph_fold;
+	double **defgrad0 = atom->smd_data_9;
 	double *radius = atom->radius;
 	//double *contact_radius = atom->contact_radius;
 	double **x = atom->x;
@@ -212,10 +212,8 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 	int i, j, ii, jj, n, inum, jnum;
 	int *ilist, *jlist, *numneigh, **firstneigh;
 	int itype, jtype;
-	double delx, dely, delz, rsq, r, h, wf, wfd;
-	Matrix3d F0i, F0j, F0ij;
-	Vector3d dx, dx_scaled;
-	double **defgrad0 = atom->tlsph_fold;
+	double r, h, wf, wfd;
+	Vector3d dx;
 
 	int nlocal = atom->nlocal;
 	nmax = atom->nmax;
@@ -246,16 +244,6 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 
-		F0i(0, 0) = defgrad0[i][0];
-		F0i(0, 1) = defgrad0[i][1];
-		F0i(0, 2) = defgrad0[i][2];
-		F0i(1, 0) = defgrad0[i][3];
-		F0i(1, 1) = defgrad0[i][4];
-		F0i(1, 2) = defgrad0[i][5];
-		F0i(2, 0) = defgrad0[i][6];
-		F0i(2, 1) = defgrad0[i][7];
-		F0i(2, 2) = defgrad0[i][8];
-
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
@@ -264,24 +252,10 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 			dx(0) = x0[i][0] - x0[j][0];
 			dx(1) = x0[i][1] - x0[j][1];
 			dx(2) = x0[i][2] - x0[j][2];
-			rsq = dx.squaredNorm();
-
-			F0j(0, 0) = defgrad0[j][0];
-			F0j(0, 1) = defgrad0[j][1];
-			F0j(0, 2) = defgrad0[j][2];
-			F0j(1, 0) = defgrad0[j][3];
-			F0j(1, 1) = defgrad0[j][4];
-			F0j(1, 2) = defgrad0[j][5];
-			F0j(2, 0) = defgrad0[j][6];
-			F0j(2, 1) = defgrad0[j][7];
-			F0j(2, 2) = defgrad0[j][8];
-
+			r = dx.norm();
 			h = radius[i] + radius[j];
-			r = sqrt(rsq);
-			dx_scaled = 0.5 * (F0i + F0j) * (dx / r);
-			h *= dx_scaled.norm();
 
-			if (rsq <= h * h) {
+			if (r <= h) {
 				npartner[i]++;
 				if (j < nlocal) {
 					npartner[j]++;
@@ -313,16 +287,6 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 		jlist = firstneigh[i];
 		jnum = numneigh[i];
 
-		F0i(0, 0) = defgrad0[i][0];
-		F0i(0, 1) = defgrad0[i][1];
-		F0i(0, 2) = defgrad0[i][2];
-		F0i(1, 0) = defgrad0[i][3];
-		F0i(1, 1) = defgrad0[i][4];
-		F0i(1, 2) = defgrad0[i][5];
-		F0i(2, 0) = defgrad0[i][6];
-		F0i(2, 1) = defgrad0[i][7];
-		F0i(2, 2) = defgrad0[i][8];
-
 		for (jj = 0; jj < jnum; jj++) {
 			j = jlist[jj];
 			j &= NEIGHMASK;
@@ -330,26 +294,12 @@ void FixSMD_TLSPH_ReferenceConfiguration::setup(int vflag) {
 			dx(0) = x0[i][0] - x0[j][0];
 			dx(1) = x0[i][1] - x0[j][1];
 			dx(2) = x0[i][2] - x0[j][2];
-			rsq = dx.squaredNorm();
+			r = dx.norm();
 			jtype = type[j];
-
-			F0j(0, 0) = defgrad0[j][0];
-			F0j(0, 1) = defgrad0[j][1];
-			F0j(0, 2) = defgrad0[j][2];
-			F0j(1, 0) = defgrad0[j][3];
-			F0j(1, 1) = defgrad0[j][4];
-			F0j(1, 2) = defgrad0[j][5];
-			F0j(2, 0) = defgrad0[j][6];
-			F0j(2, 1) = defgrad0[j][7];
-			F0j(2, 2) = defgrad0[j][8];
-
-			r = sqrt(rsq);
-			dx_scaled = 0.5 * (F0i + F0j) * (dx / r);
 			h = radius[i] + radius[j];
-			h *= dx_scaled.norm();
 
-			if (rsq <= h * h) {
-				spiky_kernel_and_derivative_3d(h, r, wf, wfd);
+			if (r < h) {
+				spiky_kernel_and_derivative(h, r, domain->dimension, wf, wfd);
 
 				partner[i][npartner[i]] = tag[j];
 				wfd_list[i][npartner[i]] = wfd;
@@ -544,7 +494,7 @@ int FixSMD_TLSPH_ReferenceConfiguration::pack_forward_comm(int n, int *list, dou
 	double *radius = atom->radius;
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
-	double **defgrad0 = atom->tlsph_fold;
+	double **defgrad0 = atom->smd_data_9;
 
 	//printf("FixSMD_TLSPH_ReferenceConfiguration:::pack_forward_comm\n");
 	m = 0;
@@ -578,7 +528,7 @@ void FixSMD_TLSPH_ReferenceConfiguration::unpack_forward_comm(int n, int first, 
 	double *radius = atom->radius;
 	double *vfrac = atom->vfrac;
 	double **x0 = atom->x0;
-	double **defgrad0 = atom->tlsph_fold;
+	double **defgrad0 = atom->smd_data_9;
 
 	m = 0;
 	last = first + n;

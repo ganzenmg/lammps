@@ -18,9 +18,11 @@ comm_style      tiled
 neigh_modify    every 10 delay 0 check yes # re-build neighbor list every 10 steps
 newton          off # required for SMD simulations!
 comm_modify     vel yes # required for SMD simulations!
+atom_modify     map array
 
 # read particle data
 read_data       washer_hex_adjusted.data
+group           tlsph union all
 replicate       2 1 1
 region          right block 12.2 EDGE EDGE EDGE EDGE EDGE units box
 group           right region right
@@ -29,14 +31,14 @@ set             group left type 1
 set             group right type 2
 set             group all contact_radius 1.0
 
-pair_style      hybrid/overlay tlsph smd/hertz 1.0 # activate Total-Lagrangian SPH
+pair_style      hybrid/overlay tlsph *UPDATE_PAIRWISE 0.1 smd/hertz 1.0 # activate Total-Lagrangian SPH
 #                                 rh0    E    nu    Q1    Q2   hg    Cp
-pair_coeff      1 1 tlsph *COMMON ${rho} ${E} ${nu} 0.56  0.0  100 1.0 &
+pair_coeff      1 1 tlsph *COMMON ${rho} ${E} ${nu} 0.56  0.0  0 1.0 &
                 *LINEAR_STRENGTH &
 		*EOS_LINEAR &
                 *END
-pair_coeff      2 2 tlsph *COMMON ${rho} ${E} ${nu} 1.06  0.0  100 1.0 &
-                *LINEAR_PLASTICITY ${sigma_yield} &
+pair_coeff      2 2 tlsph *COMMON ${rho} ${E} ${nu} 1.06  0.0  0 1.0 &
+                *LINEAR_PLASTICITY ${sigma_yield} 0.0 &
 		*EOS_LINEAR &
                 *END
 pair_coeff      1 1 smd/hertz 0.2

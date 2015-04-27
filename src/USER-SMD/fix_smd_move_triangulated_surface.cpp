@@ -55,8 +55,9 @@ using namespace std;
 FixSMDMoveTriSurf::FixSMDMoveTriSurf(LAMMPS *lmp, int narg, char **arg) :
 		Fix(lmp, narg, arg) {
 
-	if ((atom->e_flag != 1) || (atom->rho_flag != 1))
-		error->all(FLERR, "fix fix smd/move_tri_surf command requires atom_style with both energy and density");
+	if (atom->smd_flag != 1) {
+		error->all(FLERR, "fix fix smd/move_tri_surf command requires atom_style smd");
+	}
 
 	if (narg < 3)
 		error->all(FLERR, "Illegal number of arguments for fix fix smd/move_tri_surf command");
@@ -243,7 +244,7 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 	double **x0 = atom->x0;
 	double **v = atom->v;
 	double **vest = atom->vest;
-	double **tlsph_fold = atom->tlsph_fold;
+	double **smd_data_9 = atom->smd_data_9;
 	int *mol = atom->molecule;
 
 	int *mask = atom->mask;
@@ -279,17 +280,17 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 				 */
 
 				if (mol[i] >= 65535) {
-					tlsph_fold[i][0] += dtv * vx;
-					tlsph_fold[i][1] += dtv * vy;
-					tlsph_fold[i][2] += dtv * vz;
+					smd_data_9[i][0] += dtv * vx;
+					smd_data_9[i][1] += dtv * vy;
+					smd_data_9[i][2] += dtv * vz;
 
-					tlsph_fold[i][3] += dtv * vx;
-					tlsph_fold[i][4] += dtv * vy;
-					tlsph_fold[i][5] += dtv * vz;
+					smd_data_9[i][3] += dtv * vx;
+					smd_data_9[i][4] += dtv * vy;
+					smd_data_9[i][5] += dtv * vz;
 
-					tlsph_fold[i][6] += dtv * vx;
-					tlsph_fold[i][7] += dtv * vy;
-					tlsph_fold[i][8] += dtv * vz;
+					smd_data_9[i][6] += dtv * vx;
+					smd_data_9[i][7] += dtv * vy;
+					smd_data_9[i][8] += dtv * vz;
 				}
 
 			}
@@ -325,17 +326,17 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 				 */
 
 				if (mol[i] >= 65535) {
-					tlsph_fold[i][0] += dtv * wiggle_vx;
-					tlsph_fold[i][1] += dtv * wiggle_vy;
-					tlsph_fold[i][2] += dtv * wiggle_vz;
+					smd_data_9[i][0] += dtv * wiggle_vx;
+					smd_data_9[i][1] += dtv * wiggle_vy;
+					smd_data_9[i][2] += dtv * wiggle_vz;
 
-					tlsph_fold[i][3] += dtv * wiggle_vx;
-					tlsph_fold[i][4] += dtv * wiggle_vy;
-					tlsph_fold[i][5] += dtv * wiggle_vz;
+					smd_data_9[i][3] += dtv * wiggle_vx;
+					smd_data_9[i][4] += dtv * wiggle_vy;
+					smd_data_9[i][5] += dtv * wiggle_vz;
 
-					tlsph_fold[i][6] += dtv * wiggle_vx;
-					tlsph_fold[i][7] += dtv * wiggle_vy;
-					tlsph_fold[i][8] += dtv * wiggle_vz;
+					smd_data_9[i][6] += dtv * wiggle_vx;
+					smd_data_9[i][7] += dtv * wiggle_vy;
+					smd_data_9[i][8] += dtv * wiggle_vz;
 				}
 
 			}
@@ -398,31 +399,31 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 
 				if (mol[i] >= 65535) {
 
-					v1 << tlsph_fold[i][0], tlsph_fold[i][1], tlsph_fold[i][2];
+					v1 << smd_data_9[i][0], smd_data_9[i][1], smd_data_9[i][2];
 					R = v1 - origin;
 					rotated_point = Rot * R + origin;
 					vel = (rotated_point - v1) / update->dt;
-					tlsph_fold[i][0] = rotated_point(0);
-					tlsph_fold[i][1] = rotated_point(1);
-					tlsph_fold[i][2] = rotated_point(2);
+					smd_data_9[i][0] = rotated_point(0);
+					smd_data_9[i][1] = rotated_point(1);
+					smd_data_9[i][2] = rotated_point(2);
 					v1 = rotated_point;
 
-					v2 << tlsph_fold[i][3], tlsph_fold[i][4], tlsph_fold[i][5];
+					v2 << smd_data_9[i][3], smd_data_9[i][4], smd_data_9[i][5];
 					R = v2 - origin;
 					rotated_point = Rot * R + origin;
 					vel = (rotated_point - v2) / update->dt;
-					tlsph_fold[i][3] = rotated_point(0);
-					tlsph_fold[i][4] = rotated_point(1);
-					tlsph_fold[i][5] = rotated_point(2);
+					smd_data_9[i][3] = rotated_point(0);
+					smd_data_9[i][4] = rotated_point(1);
+					smd_data_9[i][5] = rotated_point(2);
 					v2 = rotated_point;
 
-					v3 << tlsph_fold[i][6], tlsph_fold[i][7], tlsph_fold[i][8];
+					v3 << smd_data_9[i][6], smd_data_9[i][7], smd_data_9[i][8];
 					R = v3 - origin;
 					rotated_point = Rot * R + origin;
 					vel = (rotated_point - v3) / update->dt;
-					tlsph_fold[i][6] = rotated_point(0);
-					tlsph_fold[i][7] = rotated_point(1);
-					tlsph_fold[i][8] = rotated_point(2);
+					smd_data_9[i][6] = rotated_point(0);
+					smd_data_9[i][7] = rotated_point(1);
+					smd_data_9[i][8] = rotated_point(2);
 					v3 = rotated_point;
 
 					// recalculate triangle normal
@@ -438,7 +439,7 @@ void FixSMDMoveTriSurf::initial_integrate(int vflag) {
 		}
 	}
 
-	// we changed tlsph_fold, x0. perform communication to ghosts
+	// we changed smd_data_9, x0. perform communication to ghosts
 	comm->forward_comm_fix(this);
 
 }
@@ -454,7 +455,7 @@ void FixSMDMoveTriSurf::reset_dt() {
 int FixSMDMoveTriSurf::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
 	int i, j, m;
 	double **x0 = atom->x0;
-	double **tlsph_fold = atom->tlsph_fold;
+	double **smd_data_9 = atom->smd_data_9;
 
 	//printf("in FixSMDIntegrateTlsph::pack_forward_comm\n");
 	m = 0;
@@ -464,15 +465,15 @@ int FixSMDMoveTriSurf::pack_forward_comm(int n, int *list, double *buf, int pbc_
 		buf[m++] = x0[j][1];
 		buf[m++] = x0[j][2];
 
-		buf[m++] = tlsph_fold[j][0];
-		buf[m++] = tlsph_fold[j][1];
-		buf[m++] = tlsph_fold[j][2];
-		buf[m++] = tlsph_fold[j][3];
-		buf[m++] = tlsph_fold[j][4];
-		buf[m++] = tlsph_fold[j][5];
-		buf[m++] = tlsph_fold[j][6];
-		buf[m++] = tlsph_fold[j][7];
-		buf[m++] = tlsph_fold[j][8];
+		buf[m++] = smd_data_9[j][0];
+		buf[m++] = smd_data_9[j][1];
+		buf[m++] = smd_data_9[j][2];
+		buf[m++] = smd_data_9[j][3];
+		buf[m++] = smd_data_9[j][4];
+		buf[m++] = smd_data_9[j][5];
+		buf[m++] = smd_data_9[j][6];
+		buf[m++] = smd_data_9[j][7];
+		buf[m++] = smd_data_9[j][8];
 
 	}
 	return m;
@@ -483,7 +484,7 @@ int FixSMDMoveTriSurf::pack_forward_comm(int n, int *list, double *buf, int pbc_
 void FixSMDMoveTriSurf::unpack_forward_comm(int n, int first, double *buf) {
 	int i, m, last;
 	double **x0 = atom->x0;
-	double **tlsph_fold = atom->tlsph_fold;
+	double **smd_data_9 = atom->smd_data_9;
 
 	//printf("in FixSMDMoveTriSurf::unpack_forward_comm\n");
 	m = 0;
@@ -493,14 +494,14 @@ void FixSMDMoveTriSurf::unpack_forward_comm(int n, int first, double *buf) {
 		x0[i][1] = buf[m++];
 		x0[i][2] = buf[m++];
 
-		tlsph_fold[i][0] = buf[m++];
-		tlsph_fold[i][1] = buf[m++];
-		tlsph_fold[i][2] = buf[m++];
-		tlsph_fold[i][3] = buf[m++];
-		tlsph_fold[i][4] = buf[m++];
-		tlsph_fold[i][5] = buf[m++];
-		tlsph_fold[i][6] = buf[m++];
-		tlsph_fold[i][7] = buf[m++];
-		tlsph_fold[i][8] = buf[m++];
+		smd_data_9[i][0] = buf[m++];
+		smd_data_9[i][1] = buf[m++];
+		smd_data_9[i][2] = buf[m++];
+		smd_data_9[i][3] = buf[m++];
+		smd_data_9[i][4] = buf[m++];
+		smd_data_9[i][5] = buf[m++];
+		smd_data_9[i][6] = buf[m++];
+		smd_data_9[i][7] = buf[m++];
+		smd_data_9[i][8] = buf[m++];
 	}
 }

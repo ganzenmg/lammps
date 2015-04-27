@@ -122,6 +122,10 @@ protected:
 	double cut_comm;
 
 	enum {
+		UPDATE_NONE = 5000
+	};
+
+	enum {
 		LINEAR_DEFGRAD = 0, LINEAR_STRENGTH = 1, LINEAR_PLASTICITY = 2, STRENGTH_JOHNSON_COOK = 3,
 		STRENGTH_NONE = 4,
 		EOS_LINEAR = 5, EOS_SHOCK = 6, EOS_POLYNOMIAL = 7,

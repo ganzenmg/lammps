@@ -78,7 +78,7 @@ void ComputeSMDTriangleVertices::init() {
 
 void ComputeSMDTriangleVertices::compute_peratom() {
 
-	double **F = atom->tlsph_fold;
+	double **smd_data_9 = atom->smd_data_9;
 	tagint *mol = atom->molecule;
 
     invoked_peratom = update->ntimestep;
@@ -93,7 +93,7 @@ void ComputeSMDTriangleVertices::compute_peratom() {
     }
 
     /*
-     * triangles are stored using the tlsph_fold array ...
+     * triangle vertices are stored using the smd_data_9 array ...
      * this is a hack but ok for now as I do not have to create additional storage space
      * all triangle particles have molecule id >= 65535
      */
@@ -103,15 +103,15 @@ void ComputeSMDTriangleVertices::compute_peratom() {
 
     for (int i = 0; i < nlocal; i++) {
         if ((mask[i] & groupbit) && (mol[i] >= 65535) ){
-            outputVector[i][0] = F[i][0];
-            outputVector[i][1] = F[i][1];
-            outputVector[i][2] = F[i][2];
-            outputVector[i][3] = F[i][3];
-            outputVector[i][4] = F[i][4];
-            outputVector[i][5] = F[i][5];
-            outputVector[i][6] = F[i][6];
-            outputVector[i][7] = F[i][7];
-            outputVector[i][8] = F[i][8];
+            outputVector[i][0] = smd_data_9[i][0];
+            outputVector[i][1] = smd_data_9[i][1];
+            outputVector[i][2] = smd_data_9[i][2];
+            outputVector[i][3] = smd_data_9[i][3];
+            outputVector[i][4] = smd_data_9[i][4];
+            outputVector[i][5] = smd_data_9[i][5];
+            outputVector[i][6] = smd_data_9[i][6];
+            outputVector[i][7] = smd_data_9[i][7];
+            outputVector[i][8] = smd_data_9[i][8];
         } else {
             for (int j = 0; j < size_peratom_cols; j++) {
                 outputVector[i][j] = 0.0;

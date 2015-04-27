@@ -63,10 +63,10 @@ AtomVecSMD::AtomVecSMD(LAMMPS *lmp) :
 	atom->vfrac_flag = 1;
 	atom->contact_radius_flag = 1;
 	atom->molecule_flag = 1;
-	atom->tlsph_fold_flag = 1;
+	atom->smd_data_9_flag = 1;
 	atom->e_flag = 1;
 	atom->vest_flag = 1;
-	atom->tlsph_stress_flag = 1;
+	atom->smd_stress_flag = 1;
 	atom->eff_plastic_strain_flag = 1;
 	atom->x0_flag = 1;
 	atom->damage_flag = 1;
@@ -118,10 +118,10 @@ void AtomVecSMD::grow(int n) {
 	radius = memory->grow(atom->radius, nmax, "atom:radius");
 	contact_radius = memory->grow(atom->contact_radius, nmax, "atom:contact_radius");
 	molecule = memory->grow(atom->molecule, nmax, "atom:molecule");
-	tlsph_fold = memory->grow(atom->tlsph_fold, nmax, NMAT_FULL, "atom:defgrad_old");
+	smd_data_9 = memory->grow(atom->smd_data_9, nmax, NMAT_FULL, "atom:defgrad_old");
 	e = memory->grow(atom->e, nmax, "atom:e");
 	vest = memory->grow(atom->vest, nmax, 3, "atom:vest");
-	tlsph_stress = memory->grow(atom->tlsph_stress, nmax, NMAT_SYMM, "atom:tlsph_stress");
+	tlsph_stress = memory->grow(atom->smd_stress, nmax, NMAT_SYMM, "atom:tlsph_stress");
 	eff_plastic_strain = memory->grow(atom->eff_plastic_strain, nmax, "atom:eff_plastic_strain");
 	eff_plastic_strain_rate = memory->grow(atom->eff_plastic_strain_rate, nmax, "atom:eff_plastic_strain_rate");
 	damage = memory->grow(atom->damage, nmax, "atom:damage");
@@ -151,10 +151,10 @@ void AtomVecSMD::grow_reset() {
 	x0 = atom->x0;
 	contact_radius = atom->contact_radius;
 	molecule = atom->molecule;
-	tlsph_fold = atom->tlsph_fold;
+	smd_data_9 = atom->smd_data_9;
 	e = atom->e;
 	de = atom->de;
-	tlsph_stress = atom->tlsph_stress;
+	tlsph_stress = atom->smd_stress;
 	eff_plastic_strain = atom->eff_plastic_strain;
 	eff_plastic_strain_rate = atom->eff_plastic_strain_rate;
 	damage = atom->damage;
@@ -193,7 +193,7 @@ void AtomVecSMD::copy(int i, int j, int delflag) {
 	vest[j][2] = vest[i][2];
 
 	for (int k = 0; k < NMAT_FULL; k++) {
-		tlsph_fold[j][k] = tlsph_fold[i][k];
+		smd_data_9[j][k] = smd_data_9[i][k];
 	}
 
 	for (int k = 0; k < NMAT_SYMM; k++) {
@@ -490,7 +490,7 @@ int AtomVecSMD::pack_border_vel(int n, int *list, double *buf, int pbc_flag, int
 			buf[m++] = eff_plastic_strain[j]; // 17
 
 			for (int k = 0; k < NMAT_FULL; k++) {
-				buf[m++] = tlsph_fold[j][k];
+				buf[m++] = smd_data_9[j][k];
 			} // 26
 
 			for (int k = 0; k < NMAT_SYMM; k++) {
@@ -535,7 +535,7 @@ int AtomVecSMD::pack_border_vel(int n, int *list, double *buf, int pbc_flag, int
 				buf[m++] = eff_plastic_strain[j]; // 17
 
 				for (int k = 0; k < NMAT_FULL; k++) {
-					buf[m++] = tlsph_fold[j][k];
+					buf[m++] = smd_data_9[j][k];
 				} // 26
 
 				for (int k = 0; k < NMAT_SYMM; k++) {
@@ -574,7 +574,7 @@ int AtomVecSMD::pack_border_vel(int n, int *list, double *buf, int pbc_flag, int
 				buf[m++] = eff_plastic_strain[j]; // 17
 
 				for (int k = 0; k < NMAT_FULL; k++) {
-					buf[m++] = tlsph_fold[j][k];
+					buf[m++] = smd_data_9[j][k];
 				} // 26
 
 				for (int k = 0; k < NMAT_SYMM; k++) {
@@ -629,7 +629,7 @@ int AtomVecSMD::pack_border_hybrid(int n, int *list, double *buf) {
 		buf[m++] = eff_plastic_strain[j]; // 11
 
 		for (int k = 0; k < NMAT_FULL; k++) {
-			buf[m++] = tlsph_fold[j][k];
+			buf[m++] = smd_data_9[j][k];
 		} // 20
 
 		for (int k = 0; k < NMAT_SYMM; k++) {
@@ -675,7 +675,7 @@ void AtomVecSMD::unpack_border_vel(int n, int first, double *buf) {
 		eff_plastic_strain[i] = buf[m++]; // 16
 
 		for (int k = 0; k < NMAT_FULL; k++) {
-			tlsph_fold[i][k] = buf[m++];
+			smd_data_9[i][k] = buf[m++];
 		} // 25
 
 		for (int k = 0; k < NMAT_SYMM; k++) {
@@ -715,7 +715,7 @@ int AtomVecSMD::unpack_border_hybrid(int n, int first, double *buf) {
 		eff_plastic_strain[i] = buf[m++]; // 11
 
 		for (int k = 0; k < NMAT_FULL; k++) {
-			tlsph_fold[i][k] = buf[m++];
+			smd_data_9[i][k] = buf[m++];
 		} // 20
 
 		for (int k = 0; k < NMAT_SYMM; k++) {
@@ -755,7 +755,7 @@ int AtomVecSMD::pack_exchange(int i, double *buf) {
 	buf[m++] = eff_plastic_strain_rate[i]; // 19
 
 	for (int k = 0; k < NMAT_FULL; k++) {
-		buf[m++] = tlsph_fold[i][k];
+		buf[m++] = smd_data_9[i][k];
 	} // 27
 
 	for (int k = 0; k < NMAT_SYMM; k++) {
@@ -809,7 +809,7 @@ int AtomVecSMD::unpack_exchange(double *buf) {
 	eff_plastic_strain_rate[nlocal] = buf[m++]; // 19
 
 	for (int k = 0; k < NMAT_FULL; k++) {
-		tlsph_fold[nlocal][k] = buf[m++];
+		smd_data_9[nlocal][k] = buf[m++];
 	} // 27
 
 	for (int k = 0; k < NMAT_SYMM; k++) {
@@ -857,31 +857,6 @@ int AtomVecSMD::size_restart() {
  xyz must be 1st 3 values, so that read_restart can test on them
  molecular types may be negative, but write as positive
  ------------------------------------------------------------------------- */
-
-// X	tag = memory->grow(atom->tag, nmax, "atom:tag");
-// X 	type = memory->grow(atom->type, nmax, "atom:type");
-// X	mask = memory->grow(atom->mask, nmax, "atom:mask");
-// X	image = memory->grow(atom->image, nmax, "atom:image");
-// X	x = memory->grow(atom->x, nmax, 3, "atom:x");
-// X	v = memory->grow(atom->v, nmax, 3, "atom:v");
-//
-// O	f = memory->grow(atom->f, nmax * comm->nthreads, 3, "atom:f");
-// O	de = memory->grow(atom->de, nmax * comm->nthreads, "atom:de");
-//
-// X	vfrac = memory->grow(atom->vfrac, nmax, "atom:vfrac");
-// X	rmass = memory->grow(atom->rmass, nmax, "atom:rmass");
-// X	x0 = memory->grow(atom->x0, nmax, 3, "atom:x0");
-// X	radius = memory->grow(atom->radius, nmax, "atom:radius");
-// X	contact_radius = memory->grow(atom->contact_radius, nmax, "atom:contact_radius");
-// X	molecule = memory->grow(atom->molecule, nmax, "atom:molecule");
-// X	tlsph_fold = memory->grow(atom->tlsph_fold, nmax, NMAT_FULL, "atom:defgrad_old");
-// X	e = memory->grow(atom->e, nmax, "atom:e");
-// X	vest = memory->grow(atom->vest, nmax, 3, "atom:vest");
-// X	tlsph_stress = memory->grow(atom->tlsph_stress, nmax, NMAT_SYMM, "atom:tlsph_stress");
-// X	eff_plastic_strain = memory->grow(atom->eff_plastic_strain, nmax, "atom:eff_plastic_strain");
-// X	eff_plastic_strain_rate = memory->grow(atom->eff_plastic_strain_rate, nmax, "atom:eff_plastic_strain_rate");
-// X	damage = memory->grow(atom->damage, nmax, "atom:damage");
-
 int AtomVecSMD::pack_restart(int i, double *buf) {
 	int m = 1; // 1
 
@@ -905,7 +880,7 @@ int AtomVecSMD::pack_restart(int i, double *buf) {
 	buf[m++] = eff_plastic_strain_rate[i]; // 19
 
 	for (int k = 0; k < NMAT_FULL; k++) {
-		buf[m++] = tlsph_fold[i][k];
+		buf[m++] = smd_data_9[i][k];
 	} // 28
 
 	for (int k = 0; k < NMAT_SYMM; k++) {
@@ -964,7 +939,7 @@ int AtomVecSMD::unpack_restart(double *buf) {
 	eff_plastic_strain_rate[nlocal] = buf[m++]; // 29
 
 	for (int k = 0; k < NMAT_FULL; k++) {
-		tlsph_fold[nlocal][k] = buf[m++];
+		smd_data_9[nlocal][k] = buf[m++];
 	} // 28
 
 	for (int k = 0; k < NMAT_SYMM; k++) {
@@ -1036,11 +1011,11 @@ void AtomVecSMD::create_atom(int itype, double *coord) {
 	eff_plastic_strain_rate[nlocal] = 0.0;
 
 	for (int k = 0; k < NMAT_FULL; k++) {
-		tlsph_fold[nlocal][k] = 0.0;
+		smd_data_9[nlocal][k] = 0.0;
 	}
-	tlsph_fold[nlocal][0] = 1.0; // xx
-	tlsph_fold[nlocal][4] = 1.0; // yy
-	tlsph_fold[nlocal][8] = 1.0; // zz
+	smd_data_9[nlocal][0] = 1.0; // xx
+	smd_data_9[nlocal][4] = 1.0; // yy
+	smd_data_9[nlocal][8] = 1.0; // zz
 
 	for (int k = 0; k < NMAT_SYMM; k++) {
 		tlsph_stress[nlocal][k] = 0.0;
@@ -1113,16 +1088,16 @@ void AtomVecSMD::data_atom(double *coord, imageint imagetmp, char **values) {
 	eff_plastic_strain_rate[nlocal] = 0.0;
 
 	for (int k = 0; k < NMAT_FULL; k++) {
-		tlsph_fold[nlocal][k] = 0.0;
+		smd_data_9[nlocal][k] = 0.0;
 	}
 
 	for (int k = 0; k < NMAT_SYMM; k++) {
 		tlsph_stress[nlocal][k] = 0.0;
 	}
 
-	tlsph_fold[nlocal][0] = 1.0; // xx
-	tlsph_fold[nlocal][4] = 1.0; // yy
-	tlsph_fold[nlocal][8] = 1.0; // zz
+	smd_data_9[nlocal][0] = 1.0; // xx
+	smd_data_9[nlocal][4] = 1.0; // yy
+	smd_data_9[nlocal][8] = 1.0; // zz
 
 	atom->nlocal++;
 }
@@ -1301,8 +1276,8 @@ bigint AtomVecSMD::memory_usage() {
 	if (atom->memcheck("de"))
 		bytes += memory->usage(de, nmax);
 
-	if (atom->memcheck("tlsph_fold"))
-		bytes += memory->usage(tlsph_fold, nmax, NMAT_FULL);
+	if (atom->memcheck("smd_data_9"))
+		bytes += memory->usage(smd_data_9, nmax, NMAT_FULL);
 	if (atom->memcheck("tlsph_stress"))
 		bytes += memory->usage(tlsph_stress, nmax, NMAT_SYMM);
 

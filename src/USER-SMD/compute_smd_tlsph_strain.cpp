@@ -77,7 +77,7 @@ void ComputeSMDTLSPHstrain::init() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeSMDTLSPHstrain::compute_peratom() {
-	double **defgrad0 = atom->tlsph_fold;
+	double **defgrad0 = atom->smd_data_9;
 
 	invoked_peratom = update->ntimestep;
 

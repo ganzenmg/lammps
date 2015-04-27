@@ -39,12 +39,11 @@ group           stationary region stationary # create group from above region
 set             group all volume ${vol_one}
 set             group all diameter ${h}
 set             group all density ${rho}
-set             group all meso_rho ${rho}
 set             group particles contact_radius ${cr0}
 pair_style      hybrid/overlay tlsph *UPDATE_PAIRWISE 0.1 smd/tri_surface 1.0
 #                                 rh0    E    nu    Q1    Q2   hg    Cp
 pair_coeff      1 1 tlsph *COMMON ${rho} ${E} ${nu} 1.0  0.0   10    1.0 &
-                *LINEAR_PLASTICITY ${sigy} &
+                *LINEAR_PLASTICITY ${sigy} 0.0 &
 		*EOS_LINEAR &
                 *END
 pair_coeff      2 2 none
@@ -67,13 +66,13 @@ compute         nn particles smd/tlsph_num_neighs
 compute         E particles smd/tlsph_strain
 compute         S particles smd/tlsph_stress
 compute         Edot particles smd/tlsph_strain_rate
-variable        Svm atom sqrt(c_S[1]^2+c_S[2]^2+c_S[3]^2-c_S[1]*c_S[2]-c_S[2]*c_S[3]-c_S[1]*c_S[3]+3*c_S[4]^2+3*c_S[5]^2+3*c_S[6]^2) # von mises stress
+#variable        Svm atom sqrt(c_S[1]^2+c_S[2]^2+c_S[3]^2-c_S[1]*c_S[2]-c_S[2]*c_S[3]-c_S[1]*c_S[3]+3*c_S[4]^2+3*c_S[5]^2+3*c_S[6]^2) # von mises stress
 compute         damage tlsph smd/damage
 
 dump            dump_custom all custom 100 dump.LAMMPS id type mol x y z vx vy vz c_rho c_nn &
                 c_E[1] c_E[2] c_E[3] c_E[4] c_E[5] c_E[6] &
                 c_Edot[1] c_Edot[2] c_Edot[3] c_Edot[4] c_Edot[5] c_Edot[6] &
-                v_Svm c_damage
+                c_damage
 dump_modify     dump_custom first yes
 
 dump            dump_tool tool custom 100 dump_tool.LAMMPS id type mol x y z &

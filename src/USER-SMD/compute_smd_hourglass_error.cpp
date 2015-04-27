@@ -42,7 +42,7 @@ ComputeSMDHourglassError::ComputeSMDHourglassError(LAMMPS *lmp, int narg, char *
 		Compute(lmp, narg, arg) {
 	if (narg != 3)
 		error->all(FLERR, "Illegal compute smd/hourglass_error command");
-	if (atom->rho_flag != 1)
+	if (atom->smd_flag != 1)
 		error->all(FLERR, "compute smd/hourglass_error command requires atom_style with hourglass_error (e.g. smd)");
 
 	peratom_flag = 1;
@@ -75,7 +75,7 @@ void ComputeSMDHourglassError::init() {
 void ComputeSMDHourglassError::compute_peratom() {
 	invoked_peratom = update->ntimestep;
 
-	// grow rhoVector array if necessary
+	// grow output Vector array if necessary
 
 	if (atom->nlocal > nmax) {
 		memory->sfree(hourglass_error_vector);

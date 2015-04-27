@@ -103,7 +103,7 @@ void PairTriSurf::compute(int eflag, int vflag) {
 
 	int *mol = atom->molecule;
 	double **f = atom->f;
-	double **tlsph_fold = atom->tlsph_fold;
+	double **smd_data_9 = atom->smd_data_9;
 	double **x = atom->x;
 	double **x0 = atom->x0;
 	double **v = atom->v;
@@ -190,15 +190,15 @@ void PairTriSurf::compute(int eflag, int vflag) {
 					/*
 					 * get other two triangle vertices
 					 */
-					x1(0) = tlsph_fold[tri][0];
-					x1(1) = tlsph_fold[tri][1];
-					x1(2) = tlsph_fold[tri][2];
-					x2(0) = tlsph_fold[tri][3];
-					x2(1) = tlsph_fold[tri][4];
-					x2(2) = tlsph_fold[tri][5];
-					x3(0) = tlsph_fold[tri][6];
-					x3(1) = tlsph_fold[tri][7];
-					x3(2) = tlsph_fold[tri][8];
+					x1(0) = smd_data_9[tri][0];
+					x1(1) = smd_data_9[tri][1];
+					x1(2) = smd_data_9[tri][2];
+					x2(0) = smd_data_9[tri][3];
+					x2(1) = smd_data_9[tri][4];
+					x2(2) = smd_data_9[tri][5];
+					x3(0) = smd_data_9[tri][6];
+					x3(1) = smd_data_9[tri][7];
+					x3(2) = smd_data_9[tri][8];
 
 					PointTriangleDistance(x4, x1, x2, x3, cp, r);
 
